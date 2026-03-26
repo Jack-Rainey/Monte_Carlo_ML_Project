@@ -1,0 +1,2 @@
+## Summary
+While an attempt was made to get GSound-SIR working on MacOS, due to increasingly complex issues with the ray_generator, eventually leading to an incompatible CPU error, this idea was shelved and Ubuntu was chosen as the sole development environment. Extensive modifications would be required to generate rays in these environments.

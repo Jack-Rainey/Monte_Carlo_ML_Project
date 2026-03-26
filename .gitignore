@@ -1,28 +1,64 @@
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
-.venv/
+*$py.class
 .ipynb_checkpoints/
 
+# =========================
 # Virtual environments
+# =========================
+.venv/
+venv/
+env/
+.conda/
 environment/setup/gsoundsir-venv/
 
+# =========================
 # OS / editor
+# =========================
 .DS_Store
+Thumbs.db
 .vscode/
 .idea/
 
-# Large generated data
-data/raw/
-data/intermediate/
-data/features/
-data/hoa/
+# =========================
+# Logs / temp files
+# =========================
+*.log
+tmp/
+temp/
 
-# Generated results
-results/figures/generated/
-results/tables/generated/
+# =========================
+# Generated data directories
+# =========================
+data/raw/**
+data/interim/**
+data/processed/**
+scenes/generated/**
+results/checkpoints/**
+results/figures/**
+results/listening_tests/**
+results/logs/**
+results/tables/**
+src/gsound_tests/outputs/**
 
-# Large artifacts
+# Keep placeholder files
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!scenes/generated/.gitkeep
+!results/checkpoints/.gitkeep
+!results/figures/.gitkeep
+!results/listening_tests/.gitkeep
+!results/logs/.gitkeep
+!results/tables/.gitkeep
+!src/gsound_tests/outputs/.gitkeep
+
+# =========================
+# Large binary artifacts
+# =========================
 *.parquet
 *.wav
 *.flac
@@ -31,3 +67,6 @@ results/tables/generated/
 *.pt
 *.pth
 *.ckpt
+*.h5
+*.onnx
+*.pkl
