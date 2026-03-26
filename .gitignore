@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ipynb_checkpoints/
+
+# Virtual environments
+environment/setup/gsoundsir-venv/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Large generated data
+data/raw/
+data/intermediate/
+data/features/
+data/hoa/
+
+# Generated results
+results/figures/generated/
+results/tables/generated/
+
+# Large artifacts
+*.parquet
+*.wav
+*.flac
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt

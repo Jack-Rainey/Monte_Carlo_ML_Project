@@ -1,0 +1,9 @@
+ M auralizer/CMakeLists.txt
+ M auralizer/setup.py
+ D auralizer/spherical_harmonics.egg-info/PKG-INFO
+ D auralizer/spherical_harmonics.egg-info/SOURCES.txt
+ D auralizer/spherical_harmonics.egg-info/dependency_links.txt
+ D auralizer/spherical_harmonics.egg-info/not-zip-safe
+ D auralizer/spherical_harmonics.egg-info/top_level.txt
+ M auralizer/src/spherical_harmonics.egg-info/top_level.txt
+?? auralizer/CMakeLists_Original.txt
