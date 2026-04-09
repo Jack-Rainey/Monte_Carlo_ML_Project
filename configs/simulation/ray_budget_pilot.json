@@ -1,0 +1,5 @@
+{
+  "low_ray_candidates": [2500, 5000, 10000, 20000],
+  "high_ray_candidates": [100000, 200000],
+  "retained_path_candidates": [1000, 5000, 10000]
+}
