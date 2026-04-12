@@ -105,7 +105,7 @@ def sample_room_geometry(family: str, cfg: GeometrySamplingConfig, rng: Random) 
         width = _uniform(rng, cfg.shoebox_width_m)
         length = max(width, _uniform(rng, cfg.shoebox_length_m))
         height = _uniform(rng, cfg.shoebox_height_m)
-        vertices = [(0.0, 0.0), (width, 0.0), (width, length), (0.0, length)]
+        vertices = [(0.0, 0.0), (length, 0.0), (length, width), (0.0, width)]
         parameters = {"width_m": width, "length_m": length}
         return RoomGeometry(family=family, height_m=height, footprint_vertices_xy=vertices, parameters=parameters)
 
@@ -113,7 +113,7 @@ def sample_room_geometry(family: str, cfg: GeometrySamplingConfig, rng: Random) 
         width = _uniform(rng, cfg.corridor_width_m)
         length = max(3.0 * width, _uniform(rng, cfg.corridor_length_m))
         height = _uniform(rng, cfg.corridor_height_m)
-        vertices = [(0.0, 0.0), (width, 0.0), (width, length), (0.0, length)]
+        vertices = [(0.0, 0.0), (length, 0.0), (length, width), (0.0, width)]
         parameters = {"width_m": width, "length_m": length}
         return RoomGeometry(family=family, height_m=height, footprint_vertices_xy=vertices, parameters=parameters)
 

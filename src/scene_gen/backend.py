@@ -1,14 +1,29 @@
 from __future__ import annotations
 
+from .gsoundsir_bridge import (
+    build_rectangular_scene,
+    make_context,
+    require_supported_family,
+    save_retained_paths,
+    synthesize_hoa_ir,
+    to_retained_paths_dataframe,
+    write_preview_wav_from_hoa,
+    box_dimensions,
+)
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 import csv
 import wave
 
+import time
 import numpy as np
 
 from .scene_spec import SceneSpec
+
+import pygsound  # noqa: F401
+import spherical_harmonics_rt  # noqa: F401
 
 
 @dataclass(frozen=True)
@@ -101,17 +116,180 @@ class DryRunBackend(SimulationBackend):
 
 class GSoundSIRBackend(SimulationBackend):
     """
-    Integration seam for the real simulator.
+    Real GSound-SIR-backed renderer for procedural dataset generation.
 
-    Replace this stub with code that either:
-      1. imports your existing GSound-SIR Python bridge, or
-      2. shells out to a dedicated script under src/gsound_tests or src/scripts.
+    Current scope:
+      * Supported room families: shoebox, corridor
+      * HOA synthesis route: scene.getPathData(...) -> spherical_harmonics_rt.generate_ambisonic_ir(...)
+      * Material handling: a global box-material approximation based on mean absorption,
+        with a fixed low scattering coefficient until per-surface materials are wired.
 
-    The pipeline around this backend is already ready for real renders.
+    Unsupported families (l_room, alcove) fail loudly rather than silently degrading to
+    incorrect geometry. Use the rectangular-only config for immediate real runs.
     """
 
+    def __init__(
+        self,
+        *,
+        max_threads: int = 8,
+        source_radius_m: float = 0.01,
+        listener_radius_m: float = 0.01,
+        source_power: float = 1.0,
+        fixed_scattering_coefficient: float = 0.10,
+        precise_early_reflections: bool = False,
+        normalize_hoa: bool = True,
+        early_reflection_threshold_s: float = 0.01,
+        preview_channel_index: int = 0,
+    ) -> None:
+        self.max_threads = max_threads
+        self.source_radius_m = source_radius_m
+        self.listener_radius_m = listener_radius_m
+        self.source_power = source_power
+        self.fixed_scattering_coefficient = fixed_scattering_coefficient
+        self.precise_early_reflections = precise_early_reflections
+        self.normalize_hoa = normalize_hoa
+        self.early_reflection_threshold_s = early_reflection_threshold_s
+        self.preview_channel_index = preview_channel_index
+
+# TODO: Seperate low and high out into seperate functions
     def render(self, scene: SceneSpec, output_dir: Path) -> RenderArtifacts:
-        raise NotImplementedError(
-            "Wire this class to your actual GSound-SIR render entry point. "
-            "Start by adapting your existing tests in src/gsound_tests."
+        from .gsoundsir_bridge import (
+            build_rectangular_scene,
+            make_context,
+            require_supported_family,
+            save_retained_paths,
+            synthesize_hoa_ir,
+            _fit_hoa_length,
+            to_retained_paths_dataframe,
+            write_preview_wav_from_hoa,
+        )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        require_supported_family(scene)
+
+        low_ctx = make_context(
+            total_ray_count=scene.simulation.low_ray_count,
+            sample_rate_hz=scene.simulation.sample_rate_hz,
+            max_threads=self.max_threads,
+        )
+
+        low_scene_obj, low_source, low_listener, low_mesh = build_rectangular_scene(
+            scene=scene,
+            source_radius_m=self.source_radius_m,
+            listener_radius_m=self.listener_radius_m,
+            source_power=self.source_power,
+            fixed_scattering_coefficient=self.fixed_scattering_coefficient,
+        )
+        
+        print({
+            "ctx": {
+                "diffuse_count": low_ctx.diffuse_count,
+                "specular_count": low_ctx.specular_count,
+                "threads_count": low_ctx.threads_count,
+                "sample_rate": low_ctx.sample_rate,
+            },
+            "source": {
+                "radius": low_source.radius,
+                "power": low_source.power,
+            },
+            "listener": {
+                "radius": low_listener.radius,
+            },
+        }, flush=True)
+
+
+        # LOW_RESULT
+        scene_t0 = time.perf_counter()
+        low_t0 = time.perf_counter()
+        low_result = low_scene_obj.getPathData([low_source], [low_listener], low_ctx)
+        low_path_s = time.perf_counter() - low_t0
+        low_t1 = time.perf_counter()
+        low_path_data = low_result["path_data"][0]
+
+        low_hoa = synthesize_hoa_ir(
+            path_data=low_path_data,
+            hoa_order=scene.simulation.hoa_order,
+            output_sample_rate_hz=scene.simulation.sample_rate_hz,
+            precise_early_reflections=self.precise_early_reflections,
+            normalize=self.normalize_hoa,
+            early_reflection_threshold_s=self.early_reflection_threshold_s,
+        ).astype(np.dtype(scene.simulation.dtype), copy=False)
+        low_hoa = _fit_hoa_length(low_hoa, scene.simulation.expected_num_samples)
+        low_hoa_s = time.perf_counter() - low_t1
+
+        low_hoa_path = output_dir / "low_hoa.npy"
+        np.save(low_hoa_path, low_hoa)
+
+        del low_scene_obj, low_source, low_listener, low_ctx
+
+
+        # HIGH RESULT
+        high_ctx = make_context(
+            total_ray_count=scene.simulation.high_ray_count,
+            sample_rate_hz=scene.simulation.sample_rate_hz,
+            max_threads=self.max_threads,
+        )
+
+        high_scene_obj, high_source, high_listener,high_mesh = build_rectangular_scene(
+            scene=scene,
+            source_radius_m=self.source_radius_m,
+            listener_radius_m=self.listener_radius_m,
+            source_power=self.source_power,
+            fixed_scattering_coefficient=self.fixed_scattering_coefficient,
+        )
+
+        high_t0 = time.perf_counter()
+        high_result = high_scene_obj.getPathData([high_source], [high_listener], high_ctx)
+        high_path_s = time.perf_counter() - high_t0
+        high_t1 = time.perf_counter()
+        high_path_data = high_result["path_data"][0]
+        high_hoa = synthesize_hoa_ir(
+            path_data=high_path_data,
+            hoa_order=scene.simulation.hoa_order,
+            output_sample_rate_hz=scene.simulation.sample_rate_hz,
+            precise_early_reflections=self.precise_early_reflections,
+            normalize=self.normalize_hoa,
+            early_reflection_threshold_s=self.early_reflection_threshold_s,
+        ).astype(np.dtype(scene.simulation.dtype), copy=False)
+        high_hoa = _fit_hoa_length(high_hoa, scene.simulation.expected_num_samples)
+        high_hoa_s = time.perf_counter() - high_t1
+        scene_total_s = time.perf_counter() - scene_t0
+
+        high_hoa_path = output_dir / "high_hoa.npy"
+        np.save(high_hoa_path, high_hoa)
+
+        retained_paths_df = to_retained_paths_dataframe(
+            path_data=high_path_data,
+            policy=scene.simulation.retained_path_policy,
+            value=scene.simulation.retained_path_value,
+        )
+        paths_path = save_retained_paths(retained_paths_df, output_dir / "paths_top.parquet")
+
+        preview_wav_path = output_dir / "preview_binaural.wav"
+        write_preview_wav_from_hoa(
+            hoa_ir=high_hoa,
+            out_path=preview_wav_path,
+            sample_rate_hz=scene.simulation.sample_rate_hz,
+            channel_index=self.preview_channel_index,
+        )
+
+        print(
+            {
+                "scene_id": scene.scene_id,
+                "timing_s": {
+                    "low_paths": round(low_path_s, 3),
+                    "low_hoa": round(low_hoa_s, 3),
+                    "high_paths": round(high_path_s, 3),
+                    "high_hoa": round(high_hoa_s, 3),
+                    "scene_total": round(scene_total_s, 3),
+                },
+            },
+            flush=True,
+        )
+        
+        return RenderArtifacts(
+            low_hoa_path=low_hoa_path,
+            high_hoa_path=high_hoa_path,
+            paths_path=paths_path,
+            preview_wav_path=preview_wav_path,
         )
