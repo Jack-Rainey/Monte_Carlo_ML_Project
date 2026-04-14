@@ -1,0 +1,44 @@
+{
+    "filename" : "birds.wav",
+    "author" : "Funzerker",
+    "source_URL" : "https://freesound.org/s/520672/",
+    "license" : "Creative Commons 0",
+    "trimming_notes" : "Trimmed down to one tweet cycle",
+    "normalization_notes" : "none"
+},
+
+{
+    "filename" : "claps.wav",
+    "author" : "Synthisse",
+    "source_URL" : "https://freesound.org/s/509526/",
+    "license" : "Creative Commons 0",
+    "trimming_notes" : "none",
+    "normalization_notes" : "none"
+}
+
+{
+    "filename" : "kick.wav",
+    "author" : "Stereo Surgeon",
+    "source_URL" : "https://freesound.org/s/261331/",
+    "license" : "Creative Commons 0",
+    "trimming_notes" : "none",
+    "normalization_notes" : "none"
+}
+
+{
+    "filename" : "lofi_piano_note",
+    "author" : "Holizna",
+    "source_URL" : "https://freesound.org/s/629167/",
+    "license" : "Creative Commons 0",
+    "trimming_notes" : "Trimmed down to one note",
+    "normalization_notes" : "none"
+}
+
+{
+    "filename" : "talking.wav",
+    "author" : "Keith Ito",
+    "source_URL" : "https://www.kaggle.com/datasets/mathurinache/the-lj-speech-dataset/data",
+    "license" : "Creative Commons 0",
+    "trimming_notes" : "Used only the LJ001-0024.wav file",
+    "normalization_notes" : "none"
+}

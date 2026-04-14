@@ -1,0 +1,5 @@
+- claps.wav by synthnisse -- https://freesound.org/s/509526/ -- License: Creative Commons 0
+- Kick 1.wav by Stereo Surgeon -- https://freesound.org/s/261331/ -- License: Creative Commons 0
+- Lofi E-Piano Loop 95 BPM.wav by holizna -- https://freesound.org/s/629167/ -- License: Creative Commons 0
+- birds.wav by funzerker -- https://freesound.org/s/520672/ -- License: Creative Commons 0
+- LJ Speech Dataset LJ001-0024.wav file -- https://keithito.com/LJ-Speech-Dataset

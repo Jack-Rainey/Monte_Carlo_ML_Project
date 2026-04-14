@@ -90,8 +90,10 @@ class DatasetBuilder:
 
     def render_subset(self, subset_name: str, strict_qc: bool = True) -> list[dict]:
         subset_dir = self.scene_specs_root / subset_name
+        spec_paths = sorted(subset_dir.glob("*.json"))
         records: list[dict] = []
-        for spec_path in sorted(subset_dir.glob("*.json")):
+
+        for scene_idx, spec_path in enumerate(spec_paths, start=1):
             scene = SceneSpec.from_json(spec_path)
             raw_out_dir = self.raw_root / subset_name / scene.scene_id
             metadata_out_dir = self.metadata_root / subset_name / scene.scene_id
@@ -115,6 +117,8 @@ class DatasetBuilder:
                     "high_hoa_path": str(artifacts.high_hoa_path.relative_to(self.project_root)),
                     "paths_path": str(artifacts.paths_path.relative_to(self.project_root)),
                     "preview_wav_path": str(artifacts.preview_wav_path.relative_to(self.project_root)),
+                    "low_hoa_wav_path": str(artifacts.low_hoa_wav_path.relative_to(self.project_root)),
+                    "high_hoa_wav_path": str(artifacts.high_hoa_wav_path.relative_to(self.project_root)),
                 },
                 "qc": {
                     "passed": qc_result.passed,
@@ -134,4 +138,7 @@ class DatasetBuilder:
                     f"QC failed for {scene.scene_id}: {'; '.join(qc_result.issues)}"
                 )
             records.append(render_record)
+
+            print(f"Scene {scene_idx} in subset rendered...")
+
         return records

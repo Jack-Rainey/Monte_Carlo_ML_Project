@@ -9,6 +9,7 @@ from .gsoundsir_bridge import (
     to_retained_paths_dataframe,
     write_preview_wav_from_hoa,
     box_dimensions,
+    write_multichannel_hoa_wav
 )
 
 from abc import ABC, abstractmethod
@@ -32,6 +33,8 @@ class RenderArtifacts:
     high_hoa_path: Path
     paths_path: Path
     preview_wav_path: Path
+    low_hoa_wav_path: Path | None = None
+    high_hoa_wav_path: Path | None = None
 
 
 class SimulationBackend(ABC):
@@ -80,6 +83,20 @@ class DryRunBackend(SimulationBackend):
         np.save(low_hoa_path, low)
         np.save(high_hoa_path, high)
 
+        low_hoa_wav_path = output_dir / "low_hoa_16ch.wav"
+        write_multichannel_hoa_wav(
+            hoa_ir=low,
+            out_path=low_hoa_wav_path,
+            sample_rate_hz=scene.simulation.sample_rate_hz,
+        )
+
+        high_hoa_wav_path = output_dir / "high_hoa_16ch.wav"
+        write_multichannel_hoa_wav(
+            hoa_ir=high,
+            out_path=high_hoa_wav_path,
+            sample_rate_hz=scene.simulation.sample_rate_hz,
+        )
+
         paths_path = output_dir / "paths_top.csv"
         with paths_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
@@ -100,6 +117,8 @@ class DryRunBackend(SimulationBackend):
             high_hoa_path=high_hoa_path,
             paths_path=paths_path,
             preview_wav_path=preview_wav_path,
+            low_hoa_wav_path=low_hoa_wav_path,
+            high_hoa_wav_path=high_hoa_wav_path,
         )
 
     @staticmethod
@@ -151,7 +170,7 @@ class GSoundSIRBackend(SimulationBackend):
         self.early_reflection_threshold_s = early_reflection_threshold_s
         self.preview_channel_index = preview_channel_index
 
-# TODO: Seperate low and high out into seperate functions
+    # TODO: Seperate low and high out into seperate functions
     def render(self, scene: SceneSpec, output_dir: Path) -> RenderArtifacts:
         from .gsoundsir_bridge import (
             build_rectangular_scene,
@@ -181,6 +200,7 @@ class GSoundSIRBackend(SimulationBackend):
             fixed_scattering_coefficient=self.fixed_scattering_coefficient,
         )
         
+        """
         print({
             "ctx": {
                 "diffuse_count": low_ctx.diffuse_count,
@@ -196,6 +216,7 @@ class GSoundSIRBackend(SimulationBackend):
                 "radius": low_listener.radius,
             },
         }, flush=True)
+        """
 
 
         # LOW_RESULT
@@ -219,6 +240,13 @@ class GSoundSIRBackend(SimulationBackend):
 
         low_hoa_path = output_dir / "low_hoa.npy"
         np.save(low_hoa_path, low_hoa)
+
+        low_hoa_wav_path = output_dir / "low_hoa_16ch.wav"
+        write_multichannel_hoa_wav(
+            hoa_ir=low_hoa,
+            out_path=low_hoa_wav_path,
+            sample_rate_hz=scene.simulation.sample_rate_hz,
+        )
 
         del low_scene_obj, low_source, low_listener, low_ctx
 
@@ -258,6 +286,14 @@ class GSoundSIRBackend(SimulationBackend):
         high_hoa_path = output_dir / "high_hoa.npy"
         np.save(high_hoa_path, high_hoa)
 
+
+        high_hoa_wav_path = output_dir / "high_hoa_16ch.wav"
+        write_multichannel_hoa_wav(
+            hoa_ir=high_hoa,
+            out_path=high_hoa_wav_path,
+            sample_rate_hz=scene.simulation.sample_rate_hz,
+        )
+
         retained_paths_df = to_retained_paths_dataframe(
             path_data=high_path_data,
             policy=scene.simulation.retained_path_policy,
@@ -273,6 +309,7 @@ class GSoundSIRBackend(SimulationBackend):
             channel_index=self.preview_channel_index,
         )
 
+        """
         print(
             {
                 "scene_id": scene.scene_id,
@@ -286,10 +323,14 @@ class GSoundSIRBackend(SimulationBackend):
             },
             flush=True,
         )
+        """
         
         return RenderArtifacts(
             low_hoa_path=low_hoa_path,
             high_hoa_path=high_hoa_path,
             paths_path=paths_path,
             preview_wav_path=preview_wav_path,
+            low_hoa_wav_path=low_hoa_wav_path,
+            high_hoa_wav_path=high_hoa_wav_path,
         )
+

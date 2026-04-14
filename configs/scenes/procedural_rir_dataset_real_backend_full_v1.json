@@ -1,0 +1,350 @@
+{
+  "dataset_name": "procedural_rir_dataset_real_backend_full_v1",
+  "base_seed": 42,
+  "paths": {
+    "scene_specs_dir": "scenes/generated/procedural_rir_dataset_real_backend_full_v1",
+    "scene_manifest_path": "scenes/manifests/procedural_rir_dataset_real_backend_full_v1_manifest.jsonl",
+    "metadata_root_dir": "data/metadata/procedural_rir_dataset_real_backend_full_v1",
+    "raw_data_root_dir": "data/raw/procedural_rir_dataset_real_backend_full_v1",
+    "split_root_dir": "data/splits/procedural_rir_dataset_real_backend_full_v1",
+    "qc_root_dir": "results/tables/procedural_rir_dataset_real_backend_full_v1",
+    "listening_test_root_dir": "results/listening_tests/procedural_rir_dataset_real_backend_full_v1"
+  },
+  "geometry_sampling": {
+    "shoebox_length_m": {
+      "min": 4.0,
+      "max": 14.0
+    },
+    "shoebox_width_m": {
+      "min": 3.0,
+      "max": 10.0
+    },
+    "shoebox_height_m": {
+      "min": 2.4,
+      "max": 4.5
+    },
+    "corridor_length_m": {
+      "min": 8.0,
+      "max": 24.0
+    },
+    "corridor_width_m": {
+      "min": 1.8,
+      "max": 4.0
+    },
+    "corridor_height_m": {
+      "min": 2.4,
+      "max": 4.0
+    },
+    "l_room_outer_width_m": {
+      "min": 5.0,
+      "max": 12.0
+    },
+    "l_room_outer_length_m": {
+      "min": 5.0,
+      "max": 12.0
+    },
+    "l_room_arm_width_m": {
+      "min": 2.5,
+      "max": 6.0
+    },
+    "l_room_arm_length_m": {
+      "min": 2.5,
+      "max": 6.0
+    },
+    "l_room_height_m": {
+      "min": 2.4,
+      "max": 4.5
+    },
+    "alcove_main_width_m": {
+      "min": 5.0,
+      "max": 14.0
+    },
+    "alcove_main_length_m": {
+      "min": 4.0,
+      "max": 10.0
+    },
+    "alcove_depth_m": {
+      "min": 1.0,
+      "max": 3.5
+    },
+    "alcove_width_m": {
+      "min": 1.5,
+      "max": 4.0
+    },
+    "alcove_height_m": {
+      "min": 2.4,
+      "max": 4.5
+    }
+  },
+  "placement_sampling": {
+    "source_height_m": {
+      "min": 1.2,
+      "max": 1.8
+    },
+    "receiver_height_m": {
+      "min": 1.2,
+      "max": 1.8
+    },
+    "minimum_wall_margin_m": 0.5,
+    "minimum_floor_margin_m": 0.5,
+    "minimum_ceiling_margin_m": 0.3,
+    "source_receiver_distance_m": {
+      "min": 1.0,
+      "max": 10.0
+    }
+  },
+  "simulation": {
+    "sample_rate_hz": 48000,
+    "ir_duration_s": 3.0,
+    "hoa_order": 3,
+    "low_ray_count": 10000,
+    "high_ray_count": 200000,
+    "retained_path_policy": "top_k_energy",
+    "retained_path_value": 5000,
+    "dtype": "float32"
+  },
+  "qc": {
+    "max_onset_error_ms": 2.0,
+    "min_total_energy": 1e-10,
+    "require_non_empty_paths": true,
+    "max_retained_paths_file_size_mb": 128.0
+  },
+  "splits": {
+    "train": {
+      "count": 500,
+      "seed": 1001,
+      "families": [
+        {
+          "name": "shoebox",
+          "weight": 1.0
+        }
+      ],
+      "placement_regimes": [
+        {
+          "name": "interior_random+mid_pair",
+          "weight": 1.0
+        }
+      ],
+      "material_regimes": [
+        {
+          "name": "live",
+          "weight": 0.12
+        },
+        {
+          "name": "balanced",
+          "weight": 0.28
+        },
+        {
+          "name": "dry",
+          "weight": 0.18
+        },
+        {
+          "name": "reflective_floor",
+          "weight": 0.18
+        },
+        {
+          "name": "ceiling_absorptive",
+          "weight": 0.14
+        },
+        {
+          "name": "asymmetric_walls",
+          "weight": 0.10
+        }
+      ]
+    },
+    "valid": {
+      "count": 60,
+      "seed": 1002,
+      "families": [
+        {
+          "name": "shoebox",
+          "weight": 1.0
+        }
+      ],
+      "placement_regimes": [
+        {
+          "name": "interior_random+mid_pair",
+          "weight": 1.0
+        }
+      ],
+      "material_regimes": [
+        {
+          "name": "live",
+          "weight": 0.12
+        },
+        {
+          "name": "balanced",
+          "weight": 0.28
+        },
+        {
+          "name": "dry",
+          "weight": 0.18
+        },
+        {
+          "name": "reflective_floor",
+          "weight": 0.18
+        },
+        {
+          "name": "ceiling_absorptive",
+          "weight": 0.14
+        },
+        {
+          "name": "asymmetric_walls",
+          "weight": 0.10
+        }
+      ]
+    },
+    "test_id": {
+      "count": 60,
+      "seed": 1003,
+      "families": [
+        {
+          "name": "shoebox",
+          "weight": 1.0
+        }
+      ],
+      "placement_regimes": [
+        {
+          "name": "interior_random+mid_pair",
+          "weight": 1.0
+        }
+      ],
+      "material_regimes": [
+        {
+          "name": "live",
+          "weight": 0.12
+        },
+        {
+          "name": "balanced",
+          "weight": 0.28
+        },
+        {
+          "name": "dry",
+          "weight": 0.18
+        },
+        {
+          "name": "reflective_floor",
+          "weight": 0.18
+        },
+        {
+          "name": "ceiling_absorptive",
+          "weight": 0.14
+        },
+        {
+          "name": "asymmetric_walls",
+          "weight": 0.10
+        }
+      ]
+    },
+    "test_material_shift": {
+      "count": 40,
+      "seed": 1004,
+      "families": [
+        {
+          "name": "shoebox",
+          "weight": 1.0
+        }
+      ],
+      "placement_regimes": [
+        {
+          "name": "interior_random+mid_pair",
+          "weight": 1.0
+        }
+      ],
+      "material_regimes": [
+        {
+          "name": "ceiling_absorptive",
+          "weight": 0.15
+        },
+        {
+          "name": "asymmetric_walls",
+          "weight": 0.85
+        }
+      ]
+    },
+    "test_placement_shift": {
+      "count": 30,
+      "seed": 1005,
+      "families": [
+        {
+          "name": "shoebox",
+          "weight": 1.0
+        }
+      ],
+      "placement_regimes": [
+        {
+          "name": "near_corner+mid_pair",
+          "weight": 1.0
+        }
+      ],
+      "material_regimes": [
+        {
+          "name": "live",
+          "weight": 0.12
+        },
+        {
+          "name": "balanced",
+          "weight": 0.28
+        },
+        {
+          "name": "dry",
+          "weight": 0.18
+        },
+        {
+          "name": "reflective_floor",
+          "weight": 0.18
+        },
+        {
+          "name": "ceiling_absorptive",
+          "weight": 0.14
+        },
+        {
+          "name": "asymmetric_walls",
+          "weight": 0.10
+        }
+      ]
+    },
+    "test_geometry_shift": {
+      "count": 30,
+      "seed": 1006,
+      "families": [
+        {
+          "name": "corridor",
+          "weight": 1.0
+        }
+      ],
+      "placement_regimes": [
+        {
+          "name": "near_wall+far_pair",
+          "weight": 1.0
+        }
+      ],
+      "material_regimes": [
+        {
+          "name": "live",
+          "weight": 0.12
+        },
+        {
+          "name": "balanced",
+          "weight": 0.28
+        },
+        {
+          "name": "dry",
+          "weight": 0.18
+        },
+        {
+          "name": "reflective_floor",
+          "weight": 0.18
+        },
+        {
+          "name": "ceiling_absorptive",
+          "weight": 0.14
+        },
+        {
+          "name": "asymmetric_walls",
+          "weight": 0.10
+        }
+      ]
+    }
+  }
+}

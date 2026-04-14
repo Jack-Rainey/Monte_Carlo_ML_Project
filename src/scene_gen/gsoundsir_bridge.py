@@ -7,6 +7,7 @@ import multiprocessing
 import wave
 
 import numpy as np
+import soundfile as sf
 
 from .scene_spec import SceneSpec
 
@@ -315,3 +316,12 @@ def write_preview_wav_from_hoa(
         wav_file.setframerate(int(sample_rate_hz))
         wav_file.writeframes(pcm16.tobytes())
     return out_path
+
+
+def write_multichannel_hoa_wav(
+    hoa_ir: np.ndarray,
+    out_path: Path,
+    sample_rate_hz: int,
+) -> None:
+    # hoa_ir shape: (channels, samples)
+    sf.write(str(out_path), hoa_ir.T, sample_rate_hz, subtype="FLOAT")
