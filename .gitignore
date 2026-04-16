@@ -38,9 +38,7 @@ assets/audio_preview_sources**
 # =========================
 # Generated data directories
 # =========================
-data/raw/**
-data/interim/**
-data/processed/**
+data/**
 scenes/generated/**
 results/checkpoints/**
 results/figures/**

@@ -65,7 +65,7 @@ def _assert_box_dimensions(name, p, length, width, height):
         raise ValueError(f"{name}.y={p.y} outside (0, {width})")
     if not (0.0 < p.z < height):
         raise ValueError(f"{name}.z={p.z} outside (0, {height})")
-    
+
 
 def box_dimensions(scene: SceneSpec) -> tuple[float, float, float]:
     params = scene.geometry.parameters
@@ -90,6 +90,7 @@ def _split_total_ray_count(total_ray_count: int) -> tuple[int, int]:
     specular_count = max(1, int(round(total_ray_count / 11.0)))
     diffuse_count = max(1, int(total_ray_count - specular_count))
     return diffuse_count, specular_count
+
 
 def make_context(*, total_ray_count: int, sample_rate_hz: int, max_threads: int = 8):
     _, ps, _ = _import_runtime_dependencies()
@@ -241,7 +242,10 @@ def paths_to_dataframe(path_data: dict):
     for band_idx in range(int(path_data["num_bands"])):
         df[f"intensity_band_{band_idx}"] = intensities[:, band_idx]
     df["energy_sum"] = intensities.sum(axis=1, dtype=np.float64)
-    df["arrival_time_s"] = np.asarray(path_data["distances"], dtype=np.float64) / np.asarray(path_data["speeds_of_sound"], dtype=np.float64)
+    df["arrival_time_s"] = (
+        np.asarray(path_data["distances"], dtype=np.float64)
+        / np.asarray(path_data["speeds_of_sound"], dtype=np.float64)
+    )
     df["original_path_index"] = np.arange(len(df), dtype=np.int64)
     return df
 
@@ -289,6 +293,47 @@ def save_retained_paths(df, target_path: str | Path) -> Path:
     raise ValueError(f"Unsupported retained-path file extension: {out_path.suffix}")
 
 
+def preview_stereo_from_hoa(
+    *,
+    hoa_ir: np.ndarray,
+    channel_index: int = 0,  # retained for compatibility, no longer the main control
+    normalize: bool = True,
+    peak_scale: float = 0.95,
+) -> np.ndarray:
+    if hoa_ir.ndim != 2:
+        raise ValueError(f"Expected rank-2 HOA IR, got shape={hoa_ir.shape}")
+
+    num_channels = hoa_ir.shape[0]
+    if num_channels < 1:
+        raise ValueError("HOA IR must have at least one channel")
+
+    # Simple multi-channel fold-down for debugging/listening.
+    # Assumes ACN-like channel ordering enough that low-order directional channels
+    # are more informative than using W alone. This is not a true binaural decode.
+    w = np.asarray(hoa_ir[0], dtype=np.float32)
+
+    if num_channels >= 4:
+        x = np.asarray(hoa_ir[3], dtype=np.float32)  # common ACN index for first-order X-ish term
+        y = np.asarray(hoa_ir[1], dtype=np.float32)  # common ACN index for first-order Y-ish term
+        z = np.asarray(hoa_ir[2], dtype=np.float32)  # common ACN index for first-order Z-ish term
+
+        left = w + 0.5 * x + 0.3 * y
+        right = w - 0.5 * x + 0.3 * y
+    else:
+        left = w.copy()
+        right = w.copy()
+
+    stereo = np.stack([left, right], axis=1).astype(np.float32, copy=False)
+
+    if normalize:
+        peak = float(np.max(np.abs(stereo)))
+        if peak > 0.0:
+            stereo = stereo / peak * float(peak_scale)
+
+    stereo = np.clip(stereo, -1.0, 1.0)
+    return stereo.astype(np.float32, copy=False)
+
+
 def write_preview_wav_from_hoa(
     *,
     hoa_ir: np.ndarray,
@@ -296,16 +341,12 @@ def write_preview_wav_from_hoa(
     sample_rate_hz: int,
     channel_index: int = 0,
 ) -> Path:
-    if hoa_ir.ndim != 2:
-        raise ValueError(f"Expected rank-2 HOA IR, got shape={hoa_ir.shape}")
-    if not (0 <= channel_index < hoa_ir.shape[0]):
-        raise ValueError(f"preview channel {channel_index} out of range for {hoa_ir.shape[0]} channels")
-    signal = np.asarray(hoa_ir[channel_index], dtype=np.float32)
-    peak = float(np.max(np.abs(signal)))
-    if peak > 0.0:
-        signal = signal / peak * 0.95
-    signal = np.clip(signal, -1.0, 1.0)
-    stereo = np.stack([signal, signal], axis=1)
+    stereo = preview_stereo_from_hoa(
+        hoa_ir=hoa_ir,
+        channel_index=channel_index,
+        normalize=True,
+        peak_scale=0.95,
+    )
     pcm16 = (stereo * 32767.0).astype(np.int16)
 
     out_path = Path(out_path)

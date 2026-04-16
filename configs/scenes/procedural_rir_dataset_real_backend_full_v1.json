@@ -97,7 +97,7 @@
     "sample_rate_hz": 48000,
     "ir_duration_s": 3.0,
     "hoa_order": 3,
-    "low_ray_count": 10000,
+    "low_ray_count": 5000,
     "high_ray_count": 200000,
     "retained_path_policy": "top_k_energy",
     "retained_path_value": 5000,

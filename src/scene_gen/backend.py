@@ -8,17 +8,19 @@ from .gsoundsir_bridge import (
     synthesize_hoa_ir,
     to_retained_paths_dataframe,
     write_preview_wav_from_hoa,
-    box_dimensions,
-    write_multichannel_hoa_wav
+    preview_stereo_from_hoa,
+    write_multichannel_hoa_wav,
 )
+
+from .preview_render import render_preview_set
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 import csv
+import time
 import wave
 
-import time
 import numpy as np
 
 from .scene_spec import SceneSpec
@@ -35,6 +37,8 @@ class RenderArtifacts:
     preview_wav_path: Path
     low_hoa_wav_path: Path | None = None
     high_hoa_wav_path: Path | None = None
+    preview_renders_dir: Path | None = None
+    preview_manifest_path: Path | None = None
 
 
 class SimulationBackend(ABC):
@@ -53,6 +57,17 @@ class DryRunBackend(SimulationBackend):
     layout can be exercised before wiring in GSound-SIR.
     """
 
+    def __init__(
+        self,
+        *,
+        preview_sources_dir: str | Path = "assets/audio_preview_sources",
+        preview_channel_index: int = 0,
+        preview_peak_normalization: float = 0.95,
+    ) -> None:
+        self.preview_sources_dir = Path(preview_sources_dir)
+        self.preview_channel_index = preview_channel_index
+        self.preview_peak_normalization = preview_peak_normalization
+
     def render(self, scene: SceneSpec, output_dir: Path) -> RenderArtifacts:
         output_dir.mkdir(parents=True, exist_ok=True)
         num_channels = scene.simulation.expected_num_channels
@@ -64,8 +79,8 @@ class DryRunBackend(SimulationBackend):
         high = np.zeros((num_channels, num_samples), dtype=np.float32)
         low = np.zeros((num_channels, num_samples), dtype=np.float32)
         tail_length = num_samples - onset
-        time = np.arange(tail_length, dtype=np.float32) / scene.simulation.sample_rate_hz
-        base_decay = np.exp(-time * (1.8 + 2.2 * scene.materials.descriptors["mean_absorption"]))
+        time_axis = np.arange(tail_length, dtype=np.float32) / scene.simulation.sample_rate_hz
+        base_decay = np.exp(-time_axis * (1.8 + 2.2 * scene.materials.descriptors["mean_absorption"]))
 
         for ch in range(num_channels):
             direct_gain = 1.0 / (1.0 + scene.placement.source_receiver_distance_m)
@@ -103,15 +118,44 @@ class DryRunBackend(SimulationBackend):
             writer.writerow(["path_rank", "time_s", "energy", "order_hint"])
             retained = min(scene.simulation.retained_path_value, 64)
             for rank in range(retained):
-                writer.writerow([
-                    rank,
-                    float((onset + rank * 37) / scene.simulation.sample_rate_hz),
-                    float(1.0 / (1.0 + rank)),
-                    int(rank % max(1, num_channels)),
-                ])
+                writer.writerow(
+                    [
+                        rank,
+                        float((onset + rank * 37) / scene.simulation.sample_rate_hz),
+                        float(1.0 / (1.0 + rank)),
+                        int(rank % max(1, num_channels)),
+                    ]
+                )
 
         preview_wav_path = output_dir / "preview_binaural.wav"
-        self._write_preview(high[0], preview_wav_path, scene.simulation.sample_rate_hz)
+        self._write_preview(high[self.preview_channel_index], preview_wav_path, scene.simulation.sample_rate_hz)
+
+        low_preview_stereo = preview_stereo_from_hoa(
+            hoa_ir=low,
+            channel_index=self.preview_channel_index,
+            normalize=True,
+            peak_scale=self.preview_peak_normalization,
+        )
+        high_preview_stereo = preview_stereo_from_hoa(
+            hoa_ir=high,
+            channel_index=self.preview_channel_index,
+            normalize=True,
+            peak_scale=self.preview_peak_normalization,
+        )
+
+        preview_renders_dir = output_dir / "preview_renders"
+        preview_manifest_path = render_preview_set(
+            preview_sources_dir=self.preview_sources_dir,
+            output_dir=preview_renders_dir,
+            stereo_ir_low=low_preview_stereo,
+            stereo_ir_high=high_preview_stereo,
+            sample_rate_hz=scene.simulation.sample_rate_hz,
+            normalize_peak=self.preview_peak_normalization,
+        )
+
+        if preview_manifest_path is None:
+            preview_renders_dir = None
+
         return RenderArtifacts(
             low_hoa_path=low_hoa_path,
             high_hoa_path=high_hoa_path,
@@ -119,6 +163,8 @@ class DryRunBackend(SimulationBackend):
             preview_wav_path=preview_wav_path,
             low_hoa_wav_path=low_hoa_wav_path,
             high_hoa_wav_path=high_hoa_wav_path,
+            preview_renders_dir=preview_renders_dir,
+            preview_manifest_path=preview_manifest_path,
         )
 
     @staticmethod
@@ -159,6 +205,8 @@ class GSoundSIRBackend(SimulationBackend):
         normalize_hoa: bool = True,
         early_reflection_threshold_s: float = 0.01,
         preview_channel_index: int = 0,
+        preview_sources_dir: str | Path = "assets/audio_preview_sources",
+        preview_peak_normalization: float = 0.95,
     ) -> None:
         self.max_threads = max_threads
         self.source_radius_m = source_radius_m
@@ -169,19 +217,11 @@ class GSoundSIRBackend(SimulationBackend):
         self.normalize_hoa = normalize_hoa
         self.early_reflection_threshold_s = early_reflection_threshold_s
         self.preview_channel_index = preview_channel_index
+        self.preview_sources_dir = Path(preview_sources_dir)
+        self.preview_peak_normalization = preview_peak_normalization
 
-    # TODO: Seperate low and high out into seperate functions
     def render(self, scene: SceneSpec, output_dir: Path) -> RenderArtifacts:
-        from .gsoundsir_bridge import (
-            build_rectangular_scene,
-            make_context,
-            require_supported_family,
-            save_retained_paths,
-            synthesize_hoa_ir,
-            _fit_hoa_length,
-            to_retained_paths_dataframe,
-            write_preview_wav_from_hoa,
-        )
+        from .gsoundsir_bridge import _fit_hoa_length
 
         output_dir.mkdir(parents=True, exist_ok=True)
         require_supported_family(scene)
@@ -192,34 +232,14 @@ class GSoundSIRBackend(SimulationBackend):
             max_threads=self.max_threads,
         )
 
-        low_scene_obj, low_source, low_listener, low_mesh = build_rectangular_scene(
+        low_scene_obj, low_source, low_listener, _low_mesh = build_rectangular_scene(
             scene=scene,
             source_radius_m=self.source_radius_m,
             listener_radius_m=self.listener_radius_m,
             source_power=self.source_power,
             fixed_scattering_coefficient=self.fixed_scattering_coefficient,
         )
-        
-        """
-        print({
-            "ctx": {
-                "diffuse_count": low_ctx.diffuse_count,
-                "specular_count": low_ctx.specular_count,
-                "threads_count": low_ctx.threads_count,
-                "sample_rate": low_ctx.sample_rate,
-            },
-            "source": {
-                "radius": low_source.radius,
-                "power": low_source.power,
-            },
-            "listener": {
-                "radius": low_listener.radius,
-            },
-        }, flush=True)
-        """
 
-
-        # LOW_RESULT
         scene_t0 = time.perf_counter()
         low_t0 = time.perf_counter()
         low_result = low_scene_obj.getPathData([low_source], [low_listener], low_ctx)
@@ -250,15 +270,13 @@ class GSoundSIRBackend(SimulationBackend):
 
         del low_scene_obj, low_source, low_listener, low_ctx
 
-
-        # HIGH RESULT
         high_ctx = make_context(
             total_ray_count=scene.simulation.high_ray_count,
             sample_rate_hz=scene.simulation.sample_rate_hz,
             max_threads=self.max_threads,
         )
 
-        high_scene_obj, high_source, high_listener,high_mesh = build_rectangular_scene(
+        high_scene_obj, high_source, high_listener, _high_mesh = build_rectangular_scene(
             scene=scene,
             source_radius_m=self.source_radius_m,
             listener_radius_m=self.listener_radius_m,
@@ -271,6 +289,7 @@ class GSoundSIRBackend(SimulationBackend):
         high_path_s = time.perf_counter() - high_t0
         high_t1 = time.perf_counter()
         high_path_data = high_result["path_data"][0]
+
         high_hoa = synthesize_hoa_ir(
             path_data=high_path_data,
             hoa_order=scene.simulation.hoa_order,
@@ -285,7 +304,6 @@ class GSoundSIRBackend(SimulationBackend):
 
         high_hoa_path = output_dir / "high_hoa.npy"
         np.save(high_hoa_path, high_hoa)
-
 
         high_hoa_wav_path = output_dir / "high_hoa_16ch.wav"
         write_multichannel_hoa_wav(
@@ -309,6 +327,32 @@ class GSoundSIRBackend(SimulationBackend):
             channel_index=self.preview_channel_index,
         )
 
+        low_preview_stereo = preview_stereo_from_hoa(
+            hoa_ir=low_hoa,
+            channel_index=self.preview_channel_index,
+            normalize=False,
+            peak_scale=self.preview_peak_normalization,
+        )
+        high_preview_stereo = preview_stereo_from_hoa(
+            hoa_ir=high_hoa,
+            channel_index=self.preview_channel_index,
+            normalize=False,
+            peak_scale=self.preview_peak_normalization,
+        )
+
+        preview_renders_dir = output_dir / "preview_renders"
+        preview_manifest_path = render_preview_set(
+            preview_sources_dir=self.preview_sources_dir,
+            output_dir=preview_renders_dir,
+            stereo_ir_low=low_preview_stereo,
+            stereo_ir_high=high_preview_stereo,
+            sample_rate_hz=scene.simulation.sample_rate_hz,
+            normalize_peak=self.preview_peak_normalization,
+        )
+
+        if preview_manifest_path is None:
+            preview_renders_dir = None
+
         """
         print(
             {
@@ -324,7 +368,7 @@ class GSoundSIRBackend(SimulationBackend):
             flush=True,
         )
         """
-        
+
         return RenderArtifacts(
             low_hoa_path=low_hoa_path,
             high_hoa_path=high_hoa_path,
@@ -332,5 +376,6 @@ class GSoundSIRBackend(SimulationBackend):
             preview_wav_path=preview_wav_path,
             low_hoa_wav_path=low_hoa_wav_path,
             high_hoa_wav_path=high_hoa_wav_path,
+            preview_renders_dir=preview_renders_dir,
+            preview_manifest_path=preview_manifest_path,
         )
-

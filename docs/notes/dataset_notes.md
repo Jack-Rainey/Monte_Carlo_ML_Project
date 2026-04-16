@@ -1,0 +1,12 @@
+## V1 Dataset 
+- Low ray count was 10000. Now it's 2.
+- High ray count is 200000.
+- ~36GB rendered in ~223.6 minutes.
+- Size of dataset:
+    - train: 500 scenes
+    - valid: 60 scenes
+    - test_id: 60 scenes
+    - test_material_shift: 60 scenes
+    - test_material_shift: 40 scenes
+    - test_placement_shift: 30 scenes
+    - test_geometry_shift: 30 scenes

@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from random import Random
 import json
+import shutil
 
 import numpy as np
 
@@ -117,8 +118,22 @@ class DatasetBuilder:
                     "high_hoa_path": str(artifacts.high_hoa_path.relative_to(self.project_root)),
                     "paths_path": str(artifacts.paths_path.relative_to(self.project_root)),
                     "preview_wav_path": str(artifacts.preview_wav_path.relative_to(self.project_root)),
-                    "low_hoa_wav_path": str(artifacts.low_hoa_wav_path.relative_to(self.project_root)),
-                    "high_hoa_wav_path": str(artifacts.high_hoa_wav_path.relative_to(self.project_root)),
+                    "low_hoa_wav_path": (
+                        str(artifacts.low_hoa_wav_path.relative_to(self.project_root))
+                        if artifacts.low_hoa_wav_path is not None else None
+                    ),
+                    "high_hoa_wav_path": (
+                        str(artifacts.high_hoa_wav_path.relative_to(self.project_root))
+                        if artifacts.high_hoa_wav_path is not None else None
+                    ),
+                    "preview_renders_dir": (
+                        str(artifacts.preview_renders_dir.relative_to(self.project_root))
+                        if artifacts.preview_renders_dir is not None else None
+                    ),
+                    "preview_manifest_path": (
+                        str(artifacts.preview_manifest_path.relative_to(self.project_root))
+                        if artifacts.preview_manifest_path is not None else None
+                    ),
                 },
                 "qc": {
                     "passed": qc_result.passed,
@@ -132,6 +147,20 @@ class DatasetBuilder:
             preview_target = listening_out_dir / f"{scene.scene_id}_preview.wav"
             if preview_target.resolve() != artifacts.preview_wav_path.resolve():
                 preview_target.write_bytes(artifacts.preview_wav_path.read_bytes())
+
+            if artifacts.preview_renders_dir is not None and artifacts.preview_renders_dir.exists():
+                scene_listening_dir = listening_out_dir / scene.scene_id
+                scene_listening_dir.mkdir(parents=True, exist_ok=True)
+
+                for wav_path in sorted(artifacts.preview_renders_dir.glob("*.wav")):
+                    target = scene_listening_dir / wav_path.name
+                    if target.resolve() != wav_path.resolve():
+                        shutil.copy2(wav_path, target)
+
+                if artifacts.preview_manifest_path is not None and artifacts.preview_manifest_path.exists():
+                    manifest_target = scene_listening_dir / artifacts.preview_manifest_path.name
+                    if manifest_target.resolve() != artifacts.preview_manifest_path.resolve():
+                        shutil.copy2(artifacts.preview_manifest_path, manifest_target)
 
             if strict_qc and not qc_result.passed:
                 raise RuntimeError(
