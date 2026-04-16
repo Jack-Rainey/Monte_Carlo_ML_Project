@@ -1,0 +1,123 @@
+I had to keep the first run for the memories...
+
+
+
+
+(tf-t7) jrainey@cse21707:/media/jrainey/T7/Monte_Carlo_ML_Project$ PYTHONPATH=src python3 src/scripts/train_hoa_cnn.py \
+  --project-root . \
+  --dataset-config configs/scenes/procedural_rir_dataset_real_backend_full_v1.json \
+  --max-train-scenes 20 \
+  --max-valid-scenes 10
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1776367432.010230  253395 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+I0000 00:00:1776367432.038870  253395 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1776367432.604488  253395 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+Computing train-only normalization statistics...
+I0000 00:00:1776367433.919294  253395 gpu_device.cc:2043] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 5891 MB memory:  -> device: 0, name: NVIDIA T1000 8GB, pci bus id: 0000:01:00.0, compute capability: 7.5
+{'train_scenes': 20, 'valid_scenes': 10, 'expected_shape_ch_t': [16, 144000], 'run_dir': '/media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353'}
+/media/jrainey/T7/venvs/tf-t7/lib/python3.12/site-packages/keras/src/trainers/data_adapters/py_dataset_adapter.py:121: UserWarning: Your `PyDataset` class should call `super().__init__(**kwargs)` in its constructor. `**kwargs` can include `workers`, `use_multiprocessing`, `max_queue_size`. Do not pass these arguments to `fit()`, as they will be ignored.
+  self._warn_if_super_not_called()
+Epoch 1/100
+I0000 00:00:1776367434.418434  253395 generator_dataset_op.cc:213] Memory patch applied: M_TRIM_THRESHOLD=128 kb was set.
+I0000 00:00:1776367437.009690  253499 service.cc:153] XLA service 0x7a5898054400 initialized for platform CUDA (this does not guarantee that XLA will be used). Devices:
+I0000 00:00:1776367437.009710  253499 service.cc:161]   StreamExecutor [0]: NVIDIA T1000 8GB, Compute Capability 7.5 (Driver: 12.4.0; Runtime: 12.9.0; Toolkit: 12.5.0; DNN: 9.21.0)
+I0000 00:00:1776367437.120835  253499 dump_mlir_util.cc:269] disabling MLIR crash reproducer, set env var `MLIR_CRASH_REPRODUCER_DIRECTORY` to enable.
+I0000 00:00:1776367437.656502  253499 cuda_dnn.cc:461] Loaded cuDNN version 92100
+I0000 00:00:1776367444.788163  253499 device_compiler.h:208] Compiled cluster using XLA!  This line is logged at most once for the lifetime of the process.
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 249ms/step - loss: 0.1031 - mae: 0.3077
+Epoch 1: val_mae improved from None to 0.09828, saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+
+Epoch 1: finished saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+20/20 ━━━━━━━━━━━━━━━━━━━━ 17s 339ms/step - loss: 0.0636 - mae: 0.2007 - val_loss: 0.0410 - val_mae: 0.0983 - learning_rate: 0.0010
+Epoch 2/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 262ms/step - loss: 0.0313 - mae: 0.0735
+Epoch 2: val_mae improved from 0.09828 to 0.06821, saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+
+Epoch 2: finished saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 297ms/step - loss: 0.0366 - mae: 0.0733 - val_loss: 0.0396 - val_mae: 0.0682 - learning_rate: 0.0010
+Epoch 3/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 261ms/step - loss: 0.0371 - mae: 0.0651
+Epoch 3: val_mae improved from 0.06821 to 0.05700, saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+
+Epoch 3: finished saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 296ms/step - loss: 0.0362 - mae: 0.0615 - val_loss: 0.0394 - val_mae: 0.0570 - learning_rate: 0.0010
+Epoch 4/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 259ms/step - loss: 0.0386 - mae: 0.0610
+Epoch 4: val_mae improved from 0.05700 to 0.05482, saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+
+Epoch 4: finished saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 294ms/step - loss: 0.0361 - mae: 0.0559 - val_loss: 0.0394 - val_mae: 0.0548 - learning_rate: 0.0010
+Epoch 5/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 257ms/step - loss: 0.0398 - mae: 0.0605
+Epoch 5: val_mae improved from 0.05482 to 0.05411, saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+
+Epoch 5: finished saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 292ms/step - loss: 0.0361 - mae: 0.0541 - val_loss: 0.0393 - val_mae: 0.0541 - learning_rate: 0.0010
+Epoch 6/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 258ms/step - loss: 0.0390 - mae: 0.0561
+Epoch 6: val_mae improved from 0.05411 to 0.05350, saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+
+Epoch 6: finished saving model to /media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353/best.weights.h5
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 293ms/step - loss: 0.0361 - mae: 0.0536 - val_loss: 0.0393 - val_mae: 0.0535 - learning_rate: 0.0010
+Epoch 7/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 258ms/step - loss: 0.0376 - mae: 0.0537
+Epoch 7: val_mae did not improve from 0.05350
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 290ms/step - loss: 0.0361 - mae: 0.0534 - val_loss: 0.0393 - val_mae: 0.0535 - learning_rate: 0.0010
+Epoch 8/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 259ms/step - loss: 0.0352 - mae: 0.0507
+Epoch 8: val_mae did not improve from 0.05350
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 291ms/step - loss: 0.0361 - mae: 0.0534 - val_loss: 0.0393 - val_mae: 0.0536 - learning_rate: 0.0010
+Epoch 9/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 259ms/step - loss: 0.0312 - mae: 0.0476
+Epoch 9: val_mae did not improve from 0.05350
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 291ms/step - loss: 0.0360 - mae: 0.0536 - val_loss: 0.0393 - val_mae: 0.0537 - learning_rate: 0.0010
+Epoch 10/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 259ms/step - loss: 0.0390 - mae: 0.0575
+Epoch 10: val_mae did not improve from 0.05350
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 291ms/step - loss: 0.0360 - mae: 0.0543 - val_loss: 0.0392 - val_mae: 0.0546 - learning_rate: 0.0010
+Epoch 11/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 259ms/step - loss: 0.0365 - mae: 0.0549
+Epoch 11: val_mae did not improve from 0.05350
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 292ms/step - loss: 0.0359 - mae: 0.0558 - val_loss: 0.0391 - val_mae: 0.0553 - learning_rate: 0.0010
+Epoch 12/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 260ms/step - loss: 0.0336 - mae: 0.0522
+Epoch 12: val_mae did not improve from 0.05350
+
+Epoch 12: ReduceLROnPlateau reducing learning rate to 0.0005000000237487257.
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 293ms/step - loss: 0.0358 - mae: 0.0563 - val_loss: 0.0391 - val_mae: 0.0561 - learning_rate: 0.0010
+Epoch 13/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 260ms/step - loss: 0.0348 - mae: 0.0548
+Epoch 13: val_mae did not improve from 0.05350
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 293ms/step - loss: 0.0357 - mae: 0.0568 - val_loss: 0.0390 - val_mae: 0.0560 - learning_rate: 5.0000e-04
+Epoch 14/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 261ms/step - loss: 0.0412 - mae: 0.0631
+Epoch 14: val_mae did not improve from 0.05350
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 293ms/step - loss: 0.0357 - mae: 0.0568 - val_loss: 0.0390 - val_mae: 0.0563 - learning_rate: 5.0000e-04
+Epoch 15/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 262ms/step - loss: 0.0407 - mae: 0.0643
+Epoch 15: val_mae did not improve from 0.05350
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 294ms/step - loss: 0.0356 - mae: 0.0565 - val_loss: 0.0389 - val_mae: 0.0560 - learning_rate: 5.0000e-04
+Epoch 16/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 264ms/step - loss: 0.0312 - mae: 0.0507
+Epoch 16: val_mae did not improve from 0.05350
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 298ms/step - loss: 0.0355 - mae: 0.0564 - val_loss: 0.0389 - val_mae: 0.0559 - learning_rate: 5.0000e-04
+Epoch 17/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 268ms/step - loss: 0.0349 - mae: 0.0581
+Epoch 17: val_mae did not improve from 0.05350
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 301ms/step - loss: 0.0355 - mae: 0.0567 - val_loss: 0.0388 - val_mae: 0.0562 - learning_rate: 5.0000e-04
+Epoch 18/100
+20/20 ━━━━━━━━━━━━━━━━━━━━ 0s 270ms/step - loss: 0.0383 - mae: 0.0619
+Epoch 18: val_mae did not improve from 0.05350
+
+Epoch 18: ReduceLROnPlateau reducing learning rate to 0.0002500000118743628.
+20/20 ━━━━━━━━━━━━━━━━━━━━ 6s 303ms/step - loss: 0.0354 - mae: 0.0575 - val_loss: 0.0388 - val_mae: 0.0579 - learning_rate: 5.0000e-04
+Epoch 18: early stopping
+Restoring model weights from the end of the best epoch: 6.
+60/60 ━━━━━━━━━━━━━━━━━━━━ 4s 64ms/step - loss: 0.0402 - mae: 0.0565
+60/60 ━━━━━━━━━━━━━━━━━━━━ 4s 64ms/step - loss: 0.0402 - mae: 0.0586
+40/40 ━━━━━━━━━━━━━━━━━━━━ 3s 65ms/step - loss: 0.0350 - mae: 0.0497
+30/30 ━━━━━━━━━━━━━━━━━━━━ 2s 64ms/step - loss: 0.0400 - mae: 0.0592
+30/30 ━━━━━━━━━━━━━━━━━━━━ 2s 65ms/step - loss: 0.0537 - mae: 0.0729
+{'evaluation': {'valid': {'loss': 0.04021157696843147, 'mae': 0.056499969214200974}, 'test_id': {'loss': 0.040177300572395325, 'mae': 0.05858919769525528}, 'test_material_shift': {'loss': 0.035042084753513336, 'mae': 0.04970937594771385}, 'test_placement_shift': {'loss': 0.039984919130802155, 'mae': 0.05920732021331787}, 'test_geometry_shift': {'loss': 0.05369441211223602, 'mae': 0.07290296256542206}}, 'run_dir': '/media/jrainey/T7/Monte_Carlo_ML_Project/results/checkpoints/hoa_cnn_v1_full_ir/20260416_152353'}
