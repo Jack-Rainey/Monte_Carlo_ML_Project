@@ -166,6 +166,26 @@ def rms(signal: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(signal), dtype=np.float64)))
 
 
+def percentile_peak(signal: np.ndarray, q: float = 0.999) -> float:
+    signal = np.asarray(signal, dtype=np.float32)
+    return float(np.quantile(np.abs(signal), q))
+
+
+def shared_comparison_gain(
+    *signals: np.ndarray,
+    peak_scale: float,
+    target_rms: float = 0.10,
+    peak_quantile: float = 0.999,
+) -> float:
+    peak_ref = max(percentile_peak(sig, q=peak_quantile) for sig in signals)
+    rms_ref = max(rms(sig) for sig in signals)
+
+    peak_gain = peak_scale / max(peak_ref, 1e-8)
+    rms_gain = target_rms / max(rms_ref, 1e-8)
+
+    return min(peak_gain, rms_gain)
+
+
 def peak(signal: np.ndarray) -> float:
     signal = np.asarray(signal, dtype=np.float32)
     return float(np.max(np.abs(signal)))
@@ -237,7 +257,14 @@ def main() -> None:
             peak_scale=1.0,
         ).astype(np.float32, copy=False)
 
-        ir_scale = shared_peak_scale(low_preview, pred_preview, high_preview, peak_scale=args.peak_scale)
+        ir_scale = shared_comparison_gain(
+            low_preview,
+            pred_preview,
+            high_preview,
+            peak_scale=args.peak_scale,
+            target_rms=0.10,
+            peak_quantile=0.999,
+        )
 
         low_ir_wav = ir_dir / "low_preview_ir.wav"
         pred_ir_wav = ir_dir / "predicted_preview_ir.wav"
@@ -275,7 +302,14 @@ def main() -> None:
             pred_render = render_mono_source_with_stereo_ir(mono_source, pred_preview)
             high_render = render_mono_source_with_stereo_ir(mono_source, high_preview)
 
-            render_scale = shared_peak_scale(low_render, pred_render, high_render, peak_scale=args.peak_scale)
+            render_scale = shared_comparison_gain(
+                low_render,
+                pred_render,
+                high_render,
+                peak_scale=args.peak_scale,
+                target_rms=0.10,
+                peak_quantile=0.999,
+            )
 
             rel_src = src_path.relative_to(preview_sources_dir)
             low_out = low_dir / rel_src
