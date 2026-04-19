@@ -6,7 +6,8 @@
     "kernel_size": 9,
     "dilation_schedule": [1, 1, 2, 2, 4, 4],
     "width_schedule": [32, 32, 64, 64, 32, 32],
-    "dropout_rate": 0.0
+    "dropout_rate": 0.0,
+    "residual_prediction": false
   },
   "training": {
     "seed": 42,

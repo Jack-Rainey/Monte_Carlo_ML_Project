@@ -59,9 +59,15 @@ def main() -> None:
     dataset_spec_path = (project_root / resolve_dataset_spec_arg(args)).resolve()
     run_dir = Path(args.run_dir).resolve()
 
-    model_path = run_dir / "final_model.keras"
-    if not model_path.exists():
-        raise FileNotFoundError(f"Could not find saved model: {model_path}")
+    best_model_path = run_dir / "best_model.keras"
+    last_model_path = run_dir / "final_model.keras"
+
+    if best_model_path.exists():
+        model_path = best_model_path
+    elif last_model_path.exists():
+        model_path = last_model_path
+    else:
+        raise FileNotFoundError(f"Could not find saved model in {run_dir}")
 
     stats_path = run_dir / "channel_stats.npz"
     if not stats_path.exists():

@@ -199,8 +199,8 @@ def main() -> None:
         dilation_schedule=tuple(model_section.get("dilation_schedule", [1, 1, 2, 2, 4, 4])),
         width_schedule=tuple(model_section.get("width_schedule", [32, 32, 64, 64, 32, 32])),
         dropout_rate=float(model_section.get("dropout_rate", 0.0)),
+        residual_prediction=bool(model_section.get("residual_prediction", True)),
     )
-
     optimizer = keras.optimizers.Adam(learning_rate=float(training_section.get("learning_rate", 1e-3)))
     model.compile(
         optimizer=optimizer,
@@ -252,6 +252,7 @@ def main() -> None:
         "train_scene_count": len(train_records),
         "valid_scene_count": len(valid_records),
         "visible_gpus": tf.config.list_physical_devices("GPU"),
+        "residual_prediction": bool(model_section.get("residual_prediction", True)),
     }
     with (run_dir / "run_metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2, default=str)
@@ -282,6 +283,8 @@ def main() -> None:
 
     if (run_dir / "best.weights.h5").exists():
         model.load_weights(run_dir / "best.weights.h5")
+    
+    model.save(run_dir / "best_model.keras")
 
     eval_results: dict[str, dict[str, float]] = {}
     for split_name in eval_splits:
