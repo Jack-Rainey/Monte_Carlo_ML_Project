@@ -41,6 +41,7 @@ assets/audio_preview_sources**
 data/**
 scenes/generated/**
 results/checkpoints/**
+results/hyperparameter_sweeps/**
 results/figures/**
 results/listening_tests/**
 results/logs/**

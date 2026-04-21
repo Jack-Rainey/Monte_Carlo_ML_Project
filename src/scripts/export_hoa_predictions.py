@@ -75,7 +75,9 @@ def main() -> None:
 
     input_stats, target_stats = load_stats(stats_path)
     dataset_spec = load_dataset_spec(project_root, dataset_spec_path)
-    model = tf.keras.models.load_model(model_path)
+
+    # compile=False avoids needing custom loss objects during plain inference/export.
+    model = tf.keras.models.load_model(model_path, compile=False)
 
     if args.output_root is None:
         experiment_name = run_dir.parent.name

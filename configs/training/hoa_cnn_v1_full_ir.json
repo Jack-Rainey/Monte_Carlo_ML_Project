@@ -20,7 +20,22 @@
     "reduce_lr_factor": 0.5,
     "reduce_lr_patience": 6,
     "reduce_lr_min_lr": 1e-06,
-    "mixed_precision": false
+    "mixed_precision": false,
+    "loss": {
+      "late_start_ms": 80.0,
+      "early_ms": 50.0,
+      "mid_ms": 200.0,
+      "early_weight": 1.0,
+      "mid_weight": 3.0,
+      "late_weight": 6.0,
+      "wave_weight": 1.0,
+      "late_wave_weight": 0.5,
+      "mrstft_weight": 0.0,
+      "late_mrstft_weight": 0.0,
+      "edc_weight": 0.05,
+      "late_edc_weight": 0.05,
+      "edc_floor_db": -60.0
+    }
   },
   "evaluation_splits": [
     "valid",

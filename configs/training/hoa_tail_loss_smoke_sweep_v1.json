@@ -1,0 +1,100 @@
+{
+  "sweep_name": "hoa_tail_loss_smoke_sweep_v1",
+  "trials": [
+    {
+      "name": "baseline_current_tailaware",
+      "updates": {
+        "training.loss.late_start_ms": 80.0,
+        "training.loss.early_ms": 50.0,
+        "training.loss.mid_ms": 200.0,
+        "training.loss.early_weight": 1.0,
+        "training.loss.mid_weight": 3.0,
+        "training.loss.late_weight": 6.0,
+        "training.loss.wave_weight": 1.0,
+        "training.loss.late_wave_weight": 0.5,
+        "training.loss.mrstft_weight": 0.0,
+        "training.loss.late_mrstft_weight": 0.0,
+        "training.loss.edc_weight": 0.05,
+        "training.loss.late_edc_weight": 0.05,
+        "training.loss.edc_floor_db": -60.0,
+        "model.residual_prediction": false
+      }
+    },
+    {
+      "name": "reduced_edc_reduced_late",
+      "updates": {
+        "training.loss.late_start_ms": 80.0,
+        "training.loss.early_ms": 50.0,
+        "training.loss.mid_ms": 200.0,
+        "training.loss.early_weight": 1.0,
+        "training.loss.mid_weight": 2.0,
+        "training.loss.late_weight": 4.0,
+        "training.loss.wave_weight": 1.0,
+        "training.loss.late_wave_weight": 0.25,
+        "training.loss.mrstft_weight": 0.0,
+        "training.loss.late_mrstft_weight": 0.0,
+        "training.loss.edc_weight": 0.01,
+        "training.loss.late_edc_weight": 0.02,
+        "training.loss.edc_floor_db": -60.0,
+        "model.residual_prediction": false
+      }
+    },
+    {
+      "name": "wave_only_tailaware",
+      "updates": {
+        "training.loss.late_start_ms": 80.0,
+        "training.loss.early_ms": 50.0,
+        "training.loss.mid_ms": 200.0,
+        "training.loss.early_weight": 1.0,
+        "training.loss.mid_weight": 2.0,
+        "training.loss.late_weight": 4.0,
+        "training.loss.wave_weight": 1.0,
+        "training.loss.late_wave_weight": 0.25,
+        "training.loss.mrstft_weight": 0.0,
+        "training.loss.late_mrstft_weight": 0.0,
+        "training.loss.edc_weight": 0.0,
+        "training.loss.late_edc_weight": 0.0,
+        "training.loss.edc_floor_db": -60.0,
+        "model.residual_prediction": false
+      }
+    },
+    {
+      "name": "reduced_edc_plus_mrstft",
+      "updates": {
+        "training.loss.late_start_ms": 80.0,
+        "training.loss.early_ms": 50.0,
+        "training.loss.mid_ms": 200.0,
+        "training.loss.early_weight": 1.0,
+        "training.loss.mid_weight": 2.0,
+        "training.loss.late_weight": 4.0,
+        "training.loss.wave_weight": 1.0,
+        "training.loss.late_wave_weight": 0.25,
+        "training.loss.mrstft_weight": 0.02,
+        "training.loss.late_mrstft_weight": 0.05,
+        "training.loss.edc_weight": 0.01,
+        "training.loss.late_edc_weight": 0.02,
+        "training.loss.edc_floor_db": -60.0,
+        "model.residual_prediction": false
+      }
+    },
+    {
+      "name": "reduced_edc_plus_mrstft_residual",
+      "updates": {
+        "training.loss.late_start_ms": 80.0,
+        "training.loss.early_ms": 50.0,
+        "training.loss.mid_ms": 200.0,
+        "training.loss.early_weight": 1.0,
+        "training.loss.mid_weight": 2.0,
+        "training.loss.late_weight": 4.0,
+        "training.loss.wave_weight": 1.0,
+        "training.loss.late_wave_weight": 0.25,
+        "training.loss.mrstft_weight": 0.02,
+        "training.loss.late_mrstft_weight": 0.05,
+        "training.loss.edc_weight": 0.01,
+        "training.loss.late_edc_weight": 0.02,
+        "training.loss.edc_floor_db": -60.0,
+        "model.residual_prediction": true
+      }
+    }
+  ]
+}

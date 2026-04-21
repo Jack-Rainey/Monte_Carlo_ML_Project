@@ -24,3 +24,8 @@ PYTHONPATH=src python3 src/scripts/export_listening_previews.py \
   --dataset-spec configs/scenes/procedural_rir_dataset_real_backend_full_v1.json \
   --prediction-root data/processed/hoa_cnn_v1_full_ir/<GENERATED_DIR> \
   --write-multichannel-hoawav
+
+deactivate 2>/dev/null || true
+hash -r
+source /media/jrainey/T7/venvs/tf-t7/bin/activate
+source /media/jrainey/T7/venvs/tf-t7/bin/activate
