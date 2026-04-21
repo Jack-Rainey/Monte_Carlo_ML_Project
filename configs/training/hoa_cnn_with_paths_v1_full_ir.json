@@ -1,0 +1,46 @@
+{
+  "experiment_name": "hoa_cnn_with_paths_v1_full_ir",
+  "stats_filename": "channel_stats.npz",
+  "model": {
+    "base_width": 32,
+    "kernel_size": 9,
+    "dilation_schedule": [1, 1, 2, 2, 4, 4],
+    "width_schedule": [32, 32, 64, 64, 32, 32],
+    "dropout_rate": 0.0,
+    "residual_prediction": true,
+    "path_branch_width": 64,
+    "path_embedding_width": 32
+  },
+  "paths": {
+    "top_k": 128
+  },
+  "training": {
+    "seed": 42,
+    "batch_size": 1,
+    "epochs": 100,
+    "learning_rate": 0.001,
+    "huber_delta": 1.0,
+    "early_stopping_patience": 12,
+    "early_stopping_min_delta": 1e-05,
+    "reduce_lr_factor": 0.5,
+    "reduce_lr_patience": 6,
+    "reduce_lr_min_lr": 1e-06,
+    "mixed_precision": false,
+    "loss": {
+      "late_start_ms": 80.0,
+      "early_ms": 50.0,
+      "mid_ms": 200.0,
+      "early_weight": 1.0,
+      "mid_weight": 2.0,
+      "late_weight": 4.0,
+      "wave_weight": 1.0,
+      "late_wave_weight": 0.25,
+      "mrstft_weight": 0.02,
+      "late_mrstft_weight": 0.05,
+      "edc_weight": 0.01,
+      "late_edc_weight": 0.02,
+      "edc_floor_db": -60.0
+    }
+  },
+  "evaluation_splits": ["valid", "test_id", "test_material_shift", "test_placement_shift", "test_geometry_shift"]
+}

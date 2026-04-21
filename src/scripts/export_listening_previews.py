@@ -50,6 +50,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Also export pred_high_16ch.wav for each scene.",
     )
+    parser.add_argument(
+        "--predicted-subdir-name",
+        default="predicted",
+        help="Subdirectory name used under listening/ for prediction renders.",
+    )
     return parser.parse_args()
 
 
@@ -231,7 +236,7 @@ def main() -> None:
 
         scene_output_dir = pred_path.parent / "listening"
         low_dir = scene_output_dir / "low"
-        pred_dir = scene_output_dir / "predicted"
+        pred_dir = scene_output_dir / args.predicted_subdir_name
         high_dir = scene_output_dir / "high"
         ir_dir = scene_output_dir / "ir_previews"
 
