@@ -313,11 +313,11 @@ class GSoundSIRBackend(SimulationBackend):
         )
 
         retained_paths_df = to_retained_paths_dataframe(
-            path_data=high_path_data,
+            path_data=low_path_data,
             policy=scene.simulation.retained_path_policy,
             value=scene.simulation.retained_path_value,
         )
-        paths_path = save_retained_paths(retained_paths_df, output_dir / "paths_top.parquet")
+        paths_path = save_retained_paths(retained_paths_df, output_dir / "paths_top.csv")
 
         preview_wav_path = output_dir / "preview_binaural.wav"
         write_preview_wav_from_hoa(
