@@ -13,14 +13,11 @@ of this file is the audit trail).
 
 ## OPEN findings
 
-From the 2026-07-06 re-review of the implemented 2026-07-05 plan (falsifier and
-acoustics-reviewer confirmed all their findings clean, zero new;
-readability-reviewer confirmed RR-09/10/11 clean and raised two new minors).
+None. The 2026-07-06 re-review pass closed every row raised against the
+2026-07-05 plan implementation (see Resume here).
 
 | ID | agent | sev | status | anchor | finding | resolution |
 |----|-------|-----|--------|--------|---------|------------|
-| RR-12 | readability-reviewer | minor | OPEN | src/amcd/stats/aggregate.py:227 | `mdes` is the only ci_table.csv column without a `pred_`/`improvement_` prefix; a CSV reader cannot tell which σ it derives from (the F-18 point is that they diverge). | Fix applied (renamed `improvement_mdes`; tables.py header stays "MDES"), awaiting re-review. |
-| RR-13 | readability-reviewer | minor | OPEN | src/amcd/reporting/tables.py:46,55 | Report "N" column prints n_scored, which reads contradictory beside a finite Pred mean for diagnostic-only metrics (N=0 with a value). | Fix applied (header "N scored"), awaiting re-review. |
 
 ## DEFERRED backlog
 
@@ -32,18 +29,20 @@ readability-reviewer confirmed RR-09/10/11 clean and raised two new minors).
 
 ### Resume here
 
-**2026-07-06 (Fable): 2026-07-05 plan implemented in full; re-review nearly
-closed.** All plan items landed as commits on branch `v3-rebuild` (S-01 → repo
-initialized, remote = github.com/Jack-Rainey/Monte_Carlo_ML_Project, branch not
-yet pushed): F-18 paired-improvement MDES/CI (+ folded F-15 substreams and F-17
-power>alpha guard, each with its own test), F-19 value_domain seam, RR-09/10/11
-docs/renames. Re-review: falsifier verified F-18/F-19/F-15/F-17 clean by
-independent recompute of every ci_table.csv cell from the raw parquet (machine
-precision); acoustics-reviewer zero new findings (probe-verified dB↔linear SNR,
-value_domain declarations, paired quantity per metric); readability-reviewer
-confirmed RR-09/10/11 clean, raised minors RR-12/RR-13 — fixes applied, awaiting
-readability re-confirmation, which is the ONLY step left before zero OPEN rows.
-Suite 76 passed; full dry run clean (experiments/all_20260706_*).
+**2026-07-06 (Fable): 2026-07-05 plan implemented in full; pass CLOSED —
+zero OPEN rows.** All plan items landed as commits on branch `v3-rebuild` (S-01
+→ repo initialized, remote = github.com/Jack-Rainey/Monte_Carlo_ML_Project;
+push is user-run): F-18 paired-improvement MDES/CI (+ folded F-15 substreams
+and F-17 power>alpha guard, each with its own test), F-19 value_domain seam,
+RR-09/10/11 docs/renames, RR-12/13 label fixes. Clean pass evidence: falsifier
+verified F-18/F-19/F-15/F-17 clean by independent recompute of every
+ci_table.csv cell from the raw parquet (machine precision), then delta-confirmed
+the RR-12/13 rename (no value change, no stale schema consumer);
+acoustics-reviewer zero new findings (probe-verified dB↔linear SNR,
+value_domain declarations, paired quantity per metric; flagged a future
+round-trip probe for any log/exp base edit); readability-reviewer confirmed
+RR-09/10/11 and then RR-12/13 clean, zero new. Suite 76 passed; full dry run
+clean (experiments/all_20260706_214339).
 
 **Next concrete build (roadmap, per RD-06):** the
 real `gsound_sir` render backend (x86) is the single hard dependency and the
