@@ -1,9 +1,12 @@
-"""Stats-stage numerics (ledger F-09): MDES must use the UNBIASED sample std.
+"""Stats-stage numerics (ledger F-09, F-13/F-14/F-16, F-15, F-18).
 
 MDES (minimum detectable effect size) is the load-bearing "could we even have seen
-an effect this small?" number at this design's small per-split n. Feeding it a
-population std (ddof=0) biases σ down by √((n−1)/n) — ≈0.82 at n=3 — which
-overstates detectability. These pin the sample-std (ddof=1) path.
+an effect this small?" number at this design's small per-split n. These pin:
+the unbiased sample std (ddof=1, F-09); the exact noncentral-t solver
+(F-13/F-14/F-16); per-group bootstrap substreams (F-15); and — F-18 — that the
+inferential σ is the std of the per-scene PAIRED improvement |low−high| − |pred−high|
+(design_spec §9), never the std of the absolute pred value, which diverges from it
+by up to ~2.4× in the dry run.
 """
 from __future__ import annotations
 
@@ -105,27 +108,93 @@ def test_mdes_converges_to_normal_form_at_large_n() -> None:
     assert d == pytest.approx(z_form, rel=0.02)
 
 
-def test_run_stats_mdes_uses_sample_std_and_noncentral_t() -> None:
-    """End-to-end: run_stats reports std = the group SAMPLE std (ddof=1, F-09) and
-    mdes_80pct = the exact noncentral-t MDES (F-13) on that std, not the z-form."""
-    cfg = tiny_config()
-    vals = [0.20, 0.35, 0.55]
-    rows = [
-        {"scene_id": f"s_{i}", "split": "test_id", "metric": "T30",
-         "low_val": 0.3, "pred_val": v, "high_ref": 0.4,
-         "baseline_rel_ratio": 1.0, "improved": True}
-        for i, v in enumerate(vals)
-    ]
+def _run_stats_on_rows(cfg, rows: list[dict]) -> pd.DataFrame:
     with tempfile.TemporaryDirectory() as d:
         run_dir = Path(d)
         (run_dir / "metrics").mkdir()
         pd.DataFrame(rows).to_parquet(run_dir / "metrics" / "metrics.parquet", index=False)
         run_stats(cfg, run_dir)
-        ci = pd.read_csv(run_dir / "stats" / "ci_table.csv")
+        return pd.read_csv(run_dir / "stats" / "ci_table.csv")
 
+
+def test_run_stats_mdes_uses_paired_improvement_sigma() -> None:
+    """F-18: MDES (and improvement_std) come from the per-scene PAIRED improvement
+    |low−high| − |pred−high| (design_spec §9), never from the absolute pred values.
+    Fixture is built so std(pred_val) ≠ std(paired) — following the wrong σ fails.
+    Also pins F-09 (ddof=1 sample std) on the paired quantity, and that the
+    descriptive pred_std column still carries the absolute-value sample std."""
+    cfg = tiny_config()
+    # (low, pred, high): paired = |low−high| − |pred−high| = [0.30, 0.05, −0.10];
+    # pred vals = [0.20, 0.35, 0.55]. std(pred)≈0.176 vs std(paired)≈0.202 — distinct.
+    triples = [(0.90, 0.20, 0.40), (0.50, 0.35, 0.40), (0.45, 0.55, 0.40)]
+    rows = [
+        {"scene_id": f"s_{i}", "split": "test_id", "metric": "T30",
+         "low_val": lo, "pred_val": pr, "high_ref": hi,
+         "baseline_rel_ratio": 1.0,
+         "improved": abs(pr - hi) < abs(lo - hi)}
+        for i, (lo, pr, hi) in enumerate(triples)
+    ]
+    ci = _run_stats_on_rows(cfg, rows)
     row = ci[ci["metric"] == "T30"].iloc[0]
-    sample_std = float(np.std(vals, ddof=1))
-    assert row["std"] == pytest.approx(sample_std)
-    assert row["mdes_80pct"] == pytest.approx(
-        mdes(sample_std, len(vals), cfg.bootstrap_power, cfg.bootstrap_alpha)
+
+    paired = [abs(lo - hi) - abs(pr - hi) for lo, pr, hi in triples]
+    paired_std = float(np.std(paired, ddof=1))
+    pred_std = float(np.std([pr for _, pr, _ in triples], ddof=1))
+    assert paired_std != pytest.approx(pred_std)  # fixture really separates the two σ
+
+    assert row["improvement_mean"] == pytest.approx(float(np.mean(paired)))
+    assert row["improvement_std"] == pytest.approx(paired_std)
+    assert row["mdes"] == pytest.approx(
+        mdes(paired_std, len(paired), cfg.bootstrap_power, cfg.bootstrap_alpha)
     )
+    assert row["mdes"] != pytest.approx(
+        mdes(pred_std, len(paired), cfg.bootstrap_power, cfg.bootstrap_alpha)
+    )
+    # Descriptive absolute-value columns remain, clearly separated.
+    assert row["pred_std"] == pytest.approx(pred_std)
+    assert row["n_pred"] == 3 and row["n_scored"] == 3
+
+
+def test_paired_improvement_sign_matches_improved_flag() -> None:
+    """F-18 consistency: paired > 0 ⟺ improved == True, row by row, against
+    metric_improvement itself — the stats-stage quantity and the eval-stage flag
+    are the same comparison in different forms."""
+    from amcd.evaluation.metric_row import MetricTriple, metric_improvement
+
+    rng = np.random.default_rng(1234)
+    for _ in range(200):
+        low, pred, high = rng.normal(0.0, 2.0, 3)
+        improved, _ = metric_improvement(MetricTriple(low, pred, high))
+        paired = abs(low - high) - abs(pred - high)
+        assert (paired > 0) == improved, f"sign mismatch at {(low, pred, high)}"
+
+
+def test_bootstrap_substream_per_group_is_order_and_set_invariant() -> None:
+    """F-15: a group's CI bounds must not depend on which OTHER groups exist —
+    each (split, metric, quantity) gets its own seeded substream. Pre-fix, one
+    shared RNG stream meant adding metric B perturbed metric A's bounds."""
+    cfg = tiny_config()
+
+    def t30_rows() -> list[dict]:
+        return [
+            {"scene_id": f"s_{i}", "split": "test_id", "metric": "T30",
+             "low_val": 0.9, "pred_val": p, "high_ref": 0.4,
+             "baseline_rel_ratio": 1.0, "improved": True}
+            for i, p in enumerate([0.20, 0.35, 0.55, 0.42, 0.61])
+        ]
+
+    extra = [
+        {"scene_id": f"s_{i}", "split": "test_id", "metric": "C50",
+         "low_val": 3.0, "pred_val": p, "high_ref": 2.0,
+         "baseline_rel_ratio": 1.0, "improved": True}
+        for i, p in enumerate([1.0, 2.5, 2.2, 1.8])
+    ]
+
+    alone = _run_stats_on_rows(cfg, t30_rows())
+    with_extra = _run_stats_on_rows(cfg, extra + t30_rows())
+
+    a = alone[alone["metric"] == "T30"].iloc[0]
+    b = with_extra[with_extra["metric"] == "T30"].iloc[0]
+    for col in ("improvement_ci_lower", "improvement_ci_upper",
+                "pred_ci_lower", "pred_ci_upper", "mdes"):
+        assert a[col] == b[col], f"{col} of T30 changed when C50 was added (F-15)"

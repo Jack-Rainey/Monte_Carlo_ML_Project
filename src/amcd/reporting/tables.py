@@ -24,22 +24,28 @@ def run_report(config: Config, run_dir: Path) -> None:
 
     df = pd.DataFrame(summary)
 
-    col_w = {"metric": 22, "n": 5, "mean": 9, "ci": 22, "mdes": 10, "improved": 14}
+    col_w = {"metric": 22, "n": 5, "pred": 10, "imp": 10, "ci": 22, "mdes": 10, "improved": 14}
 
     def _metric_row(row: dict) -> str:
-        ci_str = f"[{row['ci_lower']:.4f}, {row['ci_upper']:.4f}]"
+        # Inferential columns (imp mean / CI / MDES) are the §9 paired improvement
+        # |low−high| − |pred−high|; "Pred mean" is the descriptive absolute value.
         # n_scored == 0 → improvement undefined for this metric (e.g. a diagnostic-only
         # metric with no baseline comparison); show N/A rather than "nan%".
         if row["n_scored"] > 0:
+            imp_mean_str = f"{row['improvement_mean']:.4f}"
+            ci_str = f"[{row['improvement_ci_lower']:.4f}, {row['improvement_ci_upper']:.4f}]"
             improved_str = f"{row['pct_improved']:.1f}% ({row['n_improved']}/{row['n_scored']})"
         else:
+            imp_mean_str = "N/A"
+            ci_str = "N/A"
             improved_str = "N/A"
-        mdes_val = row["mdes_80pct"]
+        mdes_val = row["mdes"]
         mdes_str = f"{mdes_val:.4f}" if mdes_val == mdes_val else "N/A"
         return (
             f"{row['metric']:<{col_w['metric']}} "
-            f"{row['n']:>{col_w['n']}} "
-            f"{row['mean']:>{col_w['mean']}.4f} "
+            f"{row['n_scored']:>{col_w['n']}} "
+            f"{row['pred_mean']:>{col_w['pred']}.4f} "
+            f"{imp_mean_str:>{col_w['imp']}} "
             f"{ci_str:<{col_w['ci']}} "
             f"{mdes_str:>{col_w['mdes']}} "
             f"{improved_str:<{col_w['improved']}}"
@@ -48,8 +54,9 @@ def run_report(config: Config, run_dir: Path) -> None:
     hdr = (
         f"{'Metric':<{col_w['metric']}} "
         f"{'N':>{col_w['n']}} "
-        f"{'Mean':>{col_w['mean']}} "
-        f"{'95% CI':<{col_w['ci']}} "
+        f"{'Pred mean':>{col_w['pred']}} "
+        f"{'Imp mean':>{col_w['imp']}} "
+        f"{'Imp 95% CI':<{col_w['ci']}} "
         f"{'MDES':>{col_w['mdes']}} "
         f"{'% Improved':<{col_w['improved']}}"
     )
@@ -61,7 +68,7 @@ def run_report(config: Config, run_dir: Path) -> None:
         split_rows = [r for r in summary if r["split"] == split_name]
         lines += [
             "",
-            f"Metric results ({split_name}, bootstrap 95% CI):",
+            f"Metric results ({split_name}, paired improvement, bootstrap CI):",
             "",
             hdr,
             "-" * len(hdr),

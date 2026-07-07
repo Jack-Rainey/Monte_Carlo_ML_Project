@@ -78,6 +78,14 @@ class TestConfigLoad:
         with pytest.raises(Exception):
             Config.with_overrides(bootstrap_alpha=1.5)
 
+    def test_bootstrap_power_not_above_alpha_rejected(self) -> None:
+        # F-17: power ≤ alpha makes mdes() silently return ≈0 (a zero effect already
+        # "achieves" power = alpha) — reject the nonsensical config at load.
+        with pytest.raises(Exception):
+            Config.with_overrides(bootstrap_power=0.05, bootstrap_alpha=0.05)
+        with pytest.raises(Exception):
+            Config.with_overrides(bootstrap_power=0.03, bootstrap_alpha=0.05)
+
     def test_colliding_explicit_seeds_rejected(self) -> None:
         # F-04 / inv #5: two aspects sharing an explicit seed couples them.
         with pytest.raises(Exception):

@@ -1,6 +1,14 @@
-"""stats stage: bootstrap percentile CI over per-scene metrics."""
+"""stats stage: bootstrap percentile CI + MDES over per-scene metrics.
+
+The inferential quantities (CI tested against 0, MDES) are computed on the
+per-scene PAIRED improvement |low−high| − |pred−high| — the baseline-vs-denoised
+difference design_spec §9 requires — never on the absolute per-scene metric
+value, whose dispersion is a different (up to ~2.4× divergent) σ (ledger F-18).
+The absolute pred-value mean/CI are still reported, as descriptive columns.
+"""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -122,6 +130,23 @@ def mdes(std: float, n: int, power: float, alpha: float) -> float:
     return float(ncp * std / np.sqrt(n))
 
 
+def _substream_rng(bootstrap_seed: int, *key_parts: str) -> np.random.Generator:
+    """Independent bootstrap substream per (split, metric, quantity) (ledger F-15).
+
+    A single RNG stream shared across groups makes each group's CI bounds depend
+    on how much entropy preceding groups consumed — adding or removing a metric
+    or split perturbs unchanged groups' bounds by Monte-Carlo noise. Keying each
+    stream on (bootstrap seed, stable key digest) makes its resampling invariant
+    to group order and to which other groups exist; the per-quantity key part
+    likewise decouples a group's improvement CI from its pred CI. sha256, not
+    hash(): the builtin is salted per process (PYTHONHASHSEED) and would break
+    run-to-run reproducibility.
+    """
+    digest = hashlib.sha256("/".join(key_parts).encode()).digest()
+    stream_key = int.from_bytes(digest[:8], "big")
+    return np.random.default_rng(np.random.SeedSequence([bootstrap_seed, stream_key]))
+
+
 def run_stats(config: Config, run_dir: Path) -> None:
     metrics_path = run_dir / "metrics" / "metrics.parquet"
     if not metrics_path.exists():
@@ -131,25 +156,52 @@ def run_stats(config: Config, run_dir: Path) -> None:
     stats_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_parquet(metrics_path)
-    rng = np.random.default_rng(config.seed("bootstrap"))
+    bootstrap_seed = config.seed("bootstrap")
 
     # Compute per-(split, metric) stats — never pool test splits (invariant #9).
     summary: list[dict] = []
     for (split_name, metric_name), group in df.groupby(["split", "metric"]):
-        values = group["pred_val"].dropna().values.astype(float)
-        ci = bootstrap_ci(
-            values,
+        # Descriptive: distribution of the metric's absolute per-scene pred value.
+        # Reported for context only — its σ is NOT the §9 detectability σ (F-18).
+        pred_values = group["pred_val"].dropna().values.astype(float)
+        pred_ci = bootstrap_ci(
+            pred_values,
             n_resamples=config.bootstrap_n_resamples,
             alpha=config.bootstrap_alpha,
-            rng=rng,
+            rng=_substream_rng(bootstrap_seed, split_name, metric_name, "pred"),
         )
-        mdes_val = mdes(ci["std"], len(values), power=config.bootstrap_power, alpha=config.bootstrap_alpha)
+
+        # Inferential (design_spec §9): the per-scene PAIRED improvement,
+        #   paired = |low − high| − |pred − high|,
+        # positive ⟺ the prediction is closer to the high-ray reference than the
+        # baseline is — sign-consistent with `metric_improvement` row by row
+        # (paired > 0 ⟺ improved == True; pinned in tests). CI and MDES run on
+        # THIS quantity: the improvement hypothesis is about the paired difference,
+        # whose σ diverges up to ~2.4× from the absolute-value σ in the dry run.
+        legs = group[["low_val", "pred_val", "high_ref"]].astype(float)
+        finite = legs.notna().all(axis=1)
+        paired = (
+            (legs["low_val"] - legs["high_ref"]).abs()
+            - (legs["pred_val"] - legs["high_ref"]).abs()
+        )[finite].values
+        imp_ci = bootstrap_ci(
+            paired,
+            n_resamples=config.bootstrap_n_resamples,
+            alpha=config.bootstrap_alpha,
+            rng=_substream_rng(bootstrap_seed, split_name, metric_name, "improvement"),
+        )
+        mdes_val = mdes(
+            imp_ci["std"], len(paired),
+            power=config.bootstrap_power, alpha=config.bootstrap_alpha,
+        )
 
         # Improvement pct: numerator and denominator over the SAME population —
         # scenes where `improved` is defined (not None/NaN). Counting n_improved over
-        # rows dropped from the denominator produced pct > 100 (F-08). `n_scored` may
-        # differ from `n` (the CI/MDES pred_val count) when a metric's improvement is
-        # undefined but its pred value is not, so it is reported as its own column.
+        # rows dropped from the denominator produced pct > 100 (F-08). Under the
+        # metric_row contract (`improved` is None ⟺ a triple leg is NaN) this is the
+        # same population as `paired`; the paired stats above still recompute their
+        # own finite-legs mask so a hostile/inconsistent `improved` column can skew
+        # only the pct, never the CI/MDES.
         improved = group["improved"]
         scored = improved.notna()
         n_scored = int(scored.sum())
@@ -158,13 +210,21 @@ def run_stats(config: Config, run_dir: Path) -> None:
         row = {
             "split": split_name,
             "metric": metric_name,
-            "n": len(values),
-            "mean": ci["mean"],
-            "ci_lower": ci["ci_lower"],
-            "ci_upper": ci["ci_upper"],
-            "std": ci["std"],
-            "mdes_80pct": mdes_val,
+            # Descriptive absolute-value columns (context only).
+            "n_pred": len(pred_values),
+            "pred_mean": pred_ci["mean"],
+            "pred_ci_lower": pred_ci["ci_lower"],
+            "pred_ci_upper": pred_ci["ci_upper"],
+            "pred_std": pred_ci["std"],
+            # Inferential paired-improvement columns (§9). Power/alpha behind `mdes`
+            # come from config and are stamped in the run's config.yaml — the column
+            # name must not hardcode them (RR-11).
             "n_scored": n_scored,
+            "improvement_mean": imp_ci["mean"],
+            "improvement_ci_lower": imp_ci["ci_lower"],
+            "improvement_ci_upper": imp_ci["ci_upper"],
+            "improvement_std": imp_ci["std"],
+            "mdes": mdes_val,
             "n_improved": n_improved,
             "pct_improved": float(n_improved) / n_scored * 100 if n_scored > 0 else float("nan"),
         }

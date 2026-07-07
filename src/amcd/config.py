@@ -388,6 +388,13 @@ class Config(BaseModel):
         for field in ("bootstrap_alpha", "bootstrap_power"):
             if not (0.0 < getattr(self, field) < 1.0):
                 raise ValueError(f"{field} must be in (0, 1); got {getattr(self, field)}")
+        # Power ≤ alpha is nonsensical (a zero effect already "achieves" power = alpha
+        # two-sided), and mdes() would silently return ≈0 instead of erroring (F-17).
+        if self.bootstrap_power <= self.bootstrap_alpha:
+            raise ValueError(
+                f"bootstrap_power must exceed bootstrap_alpha; "
+                f"got power={self.bootstrap_power}, alpha={self.bootstrap_alpha}"
+            )
         # metric_onset_rel_db is a threshold BELOW the peak, so it must be negative.
         if self.metric_onset_rel_db >= 0:
             raise ValueError(
