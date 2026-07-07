@@ -1,0 +1,11 @@
+# Third-octave log-power spectrogram — default construction params.
+#
+# This file is the representation seam (design_spec §8): the master config selects
+# a rep by name and the concrete params live here, so swapping the output domain is
+# drop-in. Roadmap items this seam serves (CLAUDE.md forward-looking design):
+#   - E1: the `waveform` rep swap (reproduce the old null) — its own params file.
+#   - §3/D2: octave and mel band alternates register beside spectrogram.
+#   - §7: band resolution (n_fft) is a tuned-capable / sweepable axis.
+n_fft: 2048
+hop_length: 512
+min_db: -80.0

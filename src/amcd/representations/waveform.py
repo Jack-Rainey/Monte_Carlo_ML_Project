@@ -1,0 +1,41 @@
+"""Waveform representation stub — for E1 faithfulness re-run (reproduce old null result)."""
+import numpy as np
+import torch
+import torch.nn.functional as F
+from pydantic import BaseModel
+
+from ..registry import representation_registry
+
+
+@representation_registry.register("waveform")
+class WaveformRepresentation:
+    """
+    Identity representation: raw waveform samples as target.
+    Ill-posed in the diffuse tail (incoherent zero-mean noise → conditional mean ≈ 0
+    → identity collapse). Used only for E1 to reproduce the prior negative result.
+    """
+
+    class Params(BaseModel):
+        """No framing params — the waveform rep is parameter-free (built through the
+        same build_representation seam as spectrogram; sample_rate is passed in)."""
+        model_config = {"extra": "forbid"}
+
+    def __init__(self, sample_rate: int) -> None:
+        self.sample_rate = sample_rate
+
+    @property
+    def center_freqs(self) -> list[float]:
+        # Band-less: the "bands" axis is a length-1 placeholder (see encode).
+        return []
+
+    def encode(self, ir: np.ndarray) -> torch.Tensor:
+        # Returns (C, 1, T) to match (C, bands, frames) shape convention
+        return torch.from_numpy(ir).unsqueeze(1).float()
+
+    def decode(self, env: torch.Tensor, carrier: np.ndarray) -> np.ndarray:
+        # env: (C, 1, T) → (C, T)
+        return env.squeeze(1).numpy()
+
+    def loss(self, pred: torch.Tensor, target: torch.Tensor, delta: float) -> torch.Tensor:
+        # Huber with δ (config.huber_delta) in raw amplitude space: inert when |residual| ≪ δ (H2)
+        return F.huber_loss(pred, target, delta=delta, reduction="mean")

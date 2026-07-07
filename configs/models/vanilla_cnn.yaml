@@ -1,0 +1,11 @@
+# ── vanilla_cnn parameters ────────────────────────────────────────────────────
+# The Research-I baseline architecture: stacked Conv2d blocks over the energy
+# tensor with a residual skip (design_spec §8). Referenced by `model.name:
+# vanilla_cnn` in the master config; the master never bakes in CNN fields.
+#
+# Each value is tuned-capable, e.g.:
+#   hidden_channels: { tune: { space: [16, 64], scale: log }, value: 32 }
+# which the E3 search selects on the validation split. Left as scalars here.
+
+hidden_channels: 32
+n_layers: 3

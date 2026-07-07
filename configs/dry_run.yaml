@@ -1,0 +1,25 @@
+# ── Dry-run overrides: plumbing-only, no x86 render, tiny + fast ──────────────
+# Proves the pipeline end-to-end on synthetic IRs. Counts are chosen so all six
+# splits populate with n≥2 (stats/CI/MDES non-degenerate) — unrelated to the
+# base.yaml Research-I sizes.
+simulator: dry_run
+
+scenes:
+  n_id: 20            # → ~12/4/4 train/valid/test_id after hash-bucketing
+
+splits:
+  test_material_shift:  { role: test, count: 3, axes: { material: ceiling_absorptive } }
+  test_placement_shift: { role: test, count: 3, axes: { placement: near_corner } }
+  test_geometry_shift:  { role: test, count: 3, axes: { geometry: corridor } }
+
+ir_duration: 0.25
+n_epochs: 2
+batch_size: 4
+early_stopping_patience: 10
+report_format: text
+
+model:
+  name: vanilla_cnn
+  params:
+    hidden_channels: 8
+    n_layers: 2

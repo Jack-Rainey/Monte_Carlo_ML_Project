@@ -1,0 +1,5 @@
+# Waveform (identity) representation — parameter-free (E1 reproduce-the-old-null).
+# No framing params: the raw samples are the target. sample_rate is passed to the
+# rep by build_representation, not declared here. Present so the rep is selectable
+# by name (representation: {name: waveform}) for the E1 faithfulness re-run.
+{}

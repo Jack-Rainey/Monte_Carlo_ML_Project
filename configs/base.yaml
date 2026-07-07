@@ -1,0 +1,121 @@
+# ── Base config: the Research-I reference instantiation ──────────────────────
+# Every value the pipeline reads lives in a config layer; nothing is hardcoded in
+# Python. Overlay experiment overrides with additional --config files.
+#
+# Parameter roles (design_spec §7): a scalar is `fixed`; a leaf may instead be
+#   {tune: {space: [...], scale: log}, value: <current>}   # optimized on valid (E3)
+#   {sweep: [v0, v1, ...]}                                  # research axis (E4)
+# The role grammar is parsed + validated now; the search engine is stubbed (E3+).
+
+run_id: ""
+
+# ── Randomness: one master seed, independent per-aspect derivation (inv #5) ────
+# Leave an aspect unset to derive it from `master`; set it to pin that aspect.
+# The split_assignment seed is stable-for-life — changing it reshuffles the
+# dataset (a leakage/faithfulness hazard once a run exists).
+seeds:
+  master: 42
+
+# ── Simulator / representation / model selection ──────────────────────────────
+simulator: gsound_sir
+representation:
+  name: spectrogram     # framing params come from configs/representations/spectrogram.yaml
+model:
+  name: vanilla_cnn     # params come from configs/models/vanilla_cnn.yaml
+
+# ── Audio ─────────────────────────────────────────────────────────────────────
+sample_rate: 48000
+ir_duration: 3.0
+ambisonics_order: 3
+
+# ── Simulation ray budgets ────────────────────────────────────────────────────
+low_ray_budget: 5000        # swept-capable research axis (E4)
+high_ray_budget: 200000     # reference is fixed
+
+# ── Scene generation ──────────────────────────────────────────────────────────
+# The id baseline is the controlled reference; each shift split (below) perturbs
+# exactly one axis. All sampling ranges are declared here (design_spec §6.1).
+scenes:
+  # n_id × id-pool fracs (0.6/0.2/residual) → train/valid/test_id = 300/100/100.
+  # This fraction-based sizing intentionally differs from §6.1's illustrative
+  # 500/60/60 counts (which the spec marks non-durable); the discrepancy is expected.
+  n_id: 500                 # id-pool size → hash-bucketed into train/valid/test_id
+  id_regime:
+    geometry: shoebox
+    placement: interior_random
+    material: mixed
+  margin: 0.5               # source/receiver wall margin (m)
+  geometry_families:
+    # dims: per-axis (lo, hi) metre ranges. corridor's long axis is DISJOINT from
+    # shoebox's so geometry_shift is a genuine held-out region.
+    shoebox:  { dims: [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]] }
+    corridor: { dims: [[15.0, 30.0], [1.5, 3.0], [2.4, 3.5]] }
+  placement_regimes:
+    interior_random: { type: interior }
+    near_corner:     { type: corner, corner_frac: 0.2 }
+  material_regimes:
+    # absorption: (lo, hi). ceiling_absorptive is DISJOINT from mixed so
+    # material_shift is a genuine held-out region.
+    mixed:              { absorption: [0.05, 0.80] }
+    ceiling_absorptive: { absorption: [0.85, 0.98] }
+
+# ── Evaluation splits (config-declared set; design_spec §6.1, inv #9/#10) ──────
+# id-pool splits share the id baseline (empty axes) and are hash-bucketed by
+# `frac`; test_id is the residual (no frac). Each shift split declares a `count`
+# and exactly one axis override — a controlled single-axis distribution shift.
+# Add a future split (e.g. test_outdoor_shift) as one more entry — no code change.
+splits:
+  train:                { role: train, frac: 0.6 }
+  valid:                { role: valid, frac: 0.2 }
+  test_id:              { role: test }                                   # residual
+  test_material_shift:  { role: test, count: 40, axes: { material: ceiling_absorptive } }
+  test_placement_shift: { role: test, count: 30, axes: { placement: near_corner } }
+  test_geometry_shift:  { role: test, count: 30, axes: { geometry: corridor } }
+
+# ── Training ──────────────────────────────────────────────────────────────────
+n_epochs: 100
+batch_size: 8               # tuned-capable
+learning_rate: 0.001        # tuned-capable
+huber_delta: 1.0            # δ in dB. The trainer scales it into the z-scored loss
+                            # domain by 1/high_std (training/loss.py) so the Huber knee
+                            # stays O(1)-meaningful in dB (inv #7). 1 dB anchors the knee
+                            # to the ISO 3382-1 C50 JND (== d0b_c50_jnd_db). Provisional
+                            # op-point: §7 lists δ as tuned-on-valid — promotable to a
+                            # {tune: {...}, value: 1.0} range; final δ settled at E3.
+early_stopping_patience: 10 # tuned-capable
+
+# ── Reporting ─────────────────────────────────────────────────────────────────
+# Consumed by the report stage's output selector (§9). Only `text` is wired today;
+# alternate formats (e.g. latex/html supplementary export) attach here — forward-
+# looking seam, awaiting the §9 export build-out.
+report_format: text
+
+# ── QC thresholds ─────────────────────────────────────────────────────────────
+# Render-stage quality-control gates (§6 render QC record / §7): the real gsound_sir
+# backend will reject/flag an IR whose direct-sound onset exceeds max_onset_ms or
+# whose total energy falls below min_energy_db. Unused by the dry_run path (its
+# synthetic IRs are clean by construction) — awaiting the real render backend.
+max_onset_ms: 2.0
+min_energy_db: -60.0
+
+# ── D0a headroom-probe verdict thresholds (design_spec §4) ────────────────────
+d0a_gap_large_db: 3.0
+d0a_gap_small_db: 1.0
+
+# ── D0b carrier-ceiling JND tolerances (design_spec §4.2) ─────────────────────
+d0b_t30_jnd_frac: 0.05      # 5% of reference T30
+d0b_edt_jnd_frac: 0.05      # 5% of reference EDT (ISO 3382-1 Annex A: EDT limen == T limen)
+d0b_c50_jnd_db: 1.0         # 1 dB absolute
+
+# ── ISO 3382 evaluation bands (Hz) — design_spec §7 / §3 ──────────────────────
+iso_eval_freqs: [500, 1000]
+
+# Direct-arrival onset detection: integration starts at the first sample this many dB
+# below the peak (§3 metric path). -20 dB below the peak is the ISO 3382-1:2009
+# start-of-response convention (not an arbitrary gate). (RD-05/AC-08 provenance)
+metric_onset_rel_db: -20.0
+
+# ── Stats: bootstrap CI (design_spec §9) ──────────────────────────────────────
+bootstrap_n_resamples: 1000
+bootstrap_alpha: 0.05
+bootstrap_power: 0.8

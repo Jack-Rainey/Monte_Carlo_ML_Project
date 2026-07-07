@@ -1,0 +1,38 @@
+# ── Tiny test config: fast, all-six-splits-populated plumbing for the suite ───
+# Loaded by tests (conftest + invariants) instead of hardcoding values in Python.
+# Deliberately minuscule (4 channels, 8 kHz, 0.1 s) so full-pipeline tests are
+# fast; counts keep every split n≥2.
+simulator: dry_run
+
+seeds:
+  master: 0
+
+sample_rate: 8000
+ir_duration: 0.1
+ambisonics_order: 1        # (1+1)^2 = 4 channels
+
+low_ray_budget: 50
+high_ray_budget: 5000
+
+representation:
+  name: spectrogram
+  params:                   # override the tiny STFT framing (min_db inherited from the rep file)
+    n_fft: 256
+    hop_length: 64
+
+n_epochs: 1
+batch_size: 2
+
+model:
+  name: vanilla_cnn
+  params:
+    hidden_channels: 4
+    n_layers: 2
+
+scenes:
+  n_id: 20
+
+splits:
+  test_material_shift:  { role: test, count: 2, axes: { material: ceiling_absorptive } }
+  test_placement_shift: { role: test, count: 2, axes: { placement: near_corner } }
+  test_geometry_shift:  { role: test, count: 2, axes: { geometry: corridor } }

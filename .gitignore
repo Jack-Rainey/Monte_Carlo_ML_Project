@@ -1,0 +1,15 @@
+# Run outputs (per-run artifacts under experiments/<run_id>/; ~1 GB each cycle)
+experiments/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# macOS (T7 external drive spawns AppleDouble resource forks)
+._*
+.DS_Store
+
+# Claude Code user-local settings (project agents in .claude/agents/ ARE tracked)
+.claude/settings.local.json

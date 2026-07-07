@@ -1,0 +1,251 @@
+"""Config invariants: loading, validation, role grammar, seed reproducibility."""
+from pathlib import Path
+
+import pytest
+
+from amcd.config import Config
+
+
+class TestConfigLoad:
+    def test_load_base(self) -> None:
+        cfg = Config.load(Path("configs/base.yaml"))
+        assert cfg.sample_rate == 48000
+        assert cfg.seeds.master == 42
+        assert cfg.simulator == "gsound_sir"
+        assert cfg.model.name == "vanilla_cnn"
+
+    def test_load_dry_run_overrides_base(self) -> None:
+        cfg = Config.load(Path("configs/base.yaml"), Path("configs/dry_run.yaml"))
+        assert cfg.simulator == "dry_run"
+        assert cfg.scenes.n_id == 20
+        assert cfg.ir_duration == 0.25
+        # dry_run declares its own small shift counts, overriding the base R1 defaults.
+        assert cfg.splits["test_material_shift"].count == 3
+        # model params come from configs/models/vanilla_cnn.yaml + inline override.
+        assert cfg.model.params["hidden_channels"] == 8
+
+    def test_all_six_splits_declared(self) -> None:
+        cfg = Config.load(Path("configs/base.yaml"))
+        assert set(cfg.splits) == {
+            "train", "valid", "test_id",
+            "test_material_shift", "test_placement_shift", "test_geometry_shift",
+        }
+        # test splits reported separately, never pooled (inv #9).
+        assert set(cfg.test_split_names) == {
+            "test_id", "test_material_shift", "test_placement_shift", "test_geometry_shift",
+        }
+
+    def test_derived_properties(self) -> None:
+        cfg = Config.with_overrides(ambisonics_order=3, sample_rate=48000, ir_duration=3.0)
+        assert cfg.n_channels == 16   # (3+1)^2
+        assert cfg.n_samples == 144000  # 48000 * 3.0
+
+    def test_frac_validation(self) -> None:
+        with pytest.raises(Exception):
+            # train 0.8 + valid 0.3 > 1.0 (id-pool fracs must sum < 1)
+            Config.with_overrides(splits={"train": {"frac": 0.8}, "valid": {"frac": 0.3}})
+
+    def test_shift_split_needs_single_axis(self) -> None:
+        with pytest.raises(Exception):
+            Config.with_overrides(splits={
+                "test_material_shift": {
+                    "role": "test", "count": 3,
+                    "axes": {"material": "ceiling_absorptive", "geometry": "corridor"},
+                }
+            })
+
+    def test_extra_fields_forbidden(self) -> None:
+        with pytest.raises(Exception):
+            Config.with_overrides(nonexistent_param=42)
+
+    def test_nonpositive_huber_delta_rejected(self) -> None:
+        # F-07: δ ≤ 0 is a degenerate loss knee; reject at config load.
+        with pytest.raises(Exception):
+            Config.with_overrides(huber_delta=0.0)
+
+    def test_nonnegative_onset_threshold_rejected(self) -> None:
+        # metric_onset_rel_db is dB BELOW peak → must be negative.
+        with pytest.raises(Exception):
+            Config.with_overrides(metric_onset_rel_db=5.0)
+
+    def test_nonpositive_bootstrap_resamples_rejected(self) -> None:
+        # F-08: n_resamples <= 0 → degenerate CIs (the headline evidence). Fail at load.
+        with pytest.raises(Exception):
+            Config.with_overrides(bootstrap_n_resamples=0)
+
+    def test_bootstrap_alpha_out_of_range_rejected(self) -> None:
+        # F-08: alpha must be a (0,1) significance level.
+        with pytest.raises(Exception):
+            Config.with_overrides(bootstrap_alpha=1.5)
+
+    def test_colliding_explicit_seeds_rejected(self) -> None:
+        # F-04 / inv #5: two aspects sharing an explicit seed couples them.
+        with pytest.raises(Exception):
+            Config.with_overrides(
+                seeds={"master": 42, "split_assignment": 7, "weight_init": 7}
+            )
+
+    def test_missing_model_config_raises(self) -> None:
+        # An unknown plugin name has no params file and is not registered → fail loud
+        # at load (F-12: the registry, not a file, is the source of truth for names).
+        with pytest.raises(Exception):
+            Config.with_overrides(model={"name": "no_such_model"})
+
+
+class TestPluginSeam:
+    """Representation/model `{name, params}` seam: name-scoped params (F-11) and
+    registry-as-source-of-truth for name validity (F-12)."""
+
+    def test_rep_params_do_not_bleed_across_name_switch(self) -> None:
+        """F-11: switching representation.name on a layer that set the prior rep's
+        params must NOT carry those params into the new rep. test_tiny sets
+        spectrogram n_fft/hop_length; a waveform override must land with clean params
+        and build, not fail with `n_fft` extra_forbidden deep in preprocess."""
+        from tests.conftest import tiny_config
+        from amcd.representations import build_representation
+
+        cfg = tiny_config(representation={"name": "waveform"})
+        assert cfg.representation.name == "waveform"
+        assert cfg.representation.params == {}, (
+            f"spectrogram params bled into waveform: {cfg.representation.params}"
+        )
+        # And it actually builds (the drop-in claim), no TypeError/ValidationError.
+        rep = build_representation(
+            cfg.representation.name, cfg.representation.params, sample_rate=cfg.sample_rate
+        )
+        assert type(rep).__name__ == "WaveformRepresentation"
+
+    def test_registered_stub_needs_no_params_file(self) -> None:
+        """F-12: `edr` is registered but ships no configs/representations/edr.yaml.
+        Selecting it must load (empty params) and reach the stub's own
+        NotImplementedError at build/use — NOT a FileNotFoundError at load."""
+        import numpy as np
+        from tests.conftest import tiny_config
+        from amcd.representations import build_representation
+
+        cfg = tiny_config(representation={"name": "edr"})
+        assert cfg.representation.name == "edr" and cfg.representation.params == {}
+        rep = build_representation(
+            cfg.representation.name, cfg.representation.params, sample_rate=cfg.sample_rate
+        )
+        with pytest.raises(NotImplementedError):
+            rep.encode(np.zeros((cfg.n_channels, 16), dtype=np.float32))
+
+    def test_stamp_writes_files(self, tmp_path: Path) -> None:
+        cfg = Config.load()
+        cfg.stamp(tmp_path)
+        assert (tmp_path / "config.yaml").exists()
+        assert (tmp_path / "resolved.yaml").exists()
+        assert (tmp_path / "versions.json").exists()
+
+
+class TestRoleGrammar:
+    """design_spec §7: fixed/tuned/swept leaves resolve to a concrete point."""
+
+    def test_tuned_resolves_to_value(self) -> None:
+        cfg = Config.with_overrides(
+            learning_rate={"tune": {"space": [1.0e-4, 1.0e-2], "scale": "log"}, "value": 0.003}
+        )
+        assert cfg.learning_rate == 0.003
+        assert cfg.resolved_roles["learning_rate"]["role"] == "tuned"
+
+    def test_tuned_without_value_raises(self) -> None:
+        with pytest.raises(Exception):
+            Config.with_overrides(learning_rate={"tune": {"space": [1.0e-4, 1.0e-2]}})
+
+    def test_sweep_expands_to_siblings(self) -> None:
+        cfg = Config.with_overrides(low_ray_budget={"sweep": [1000, 5000, 20000]})
+        assert cfg.low_ray_budget == 1000  # single-run selects index 0
+        siblings = cfg.expand_sweeps()
+        assert [s.low_ray_budget for s in siblings] == [1000, 5000, 20000]
+
+    def test_tuned_value_outside_space_rejected(self) -> None:
+        # F-05: a tuned operating point outside its declared space must fail loudly.
+        with pytest.raises(Exception):
+            Config.with_overrides(
+                learning_rate={"tune": {"space": [1.0e-4, 1.0e-2]}, "value": 0.5}
+            )
+
+    def test_sweep_with_stray_value_rejected(self) -> None:
+        # F-05: a stray `value` on a sweep node is silently ignored otherwise.
+        with pytest.raises(Exception):
+            Config.with_overrides(
+                low_ray_budget={"sweep": [1000, 5000], "value": 1000}
+            )
+
+    def test_bool_tuned_value_rejected(self) -> None:
+        # P2-01: bool is an int subclass; reject it so `value: true` can't coerce to 1.
+        with pytest.raises(Exception):
+            Config.with_overrides(
+                learning_rate={"tune": {"space": [0, 1]}, "value": True}
+            )
+
+
+class TestSeedReproducibility:
+    """Invariant #5: same config + seed → reproducible outputs."""
+
+    def test_scene_generation_reproducible(self) -> None:
+        import json
+        from amcd.scenes.generator import run_gen_scenes
+        import tempfile, os
+
+        cfg = Config.with_overrides(
+            scenes={"n_id": 5},
+            seeds={"master": 42},
+            simulator="dry_run",
+            splits={
+                "test_material_shift": {"role": "test", "count": 1, "axes": {"material": "ceiling_absorptive"}},
+                "test_placement_shift": {"role": "test", "count": 1, "axes": {"placement": "near_corner"}},
+                "test_geometry_shift": {"role": "test", "count": 1, "axes": {"geometry": "corridor"}},
+            },
+        )
+
+        def _load_sorted(path: Path) -> list:
+            return sorted(
+                (json.loads(f.read_text()) for f in path.glob("*.json") if not f.name.startswith("._")),
+                key=lambda d: d["scene_id"],
+            )
+
+        with tempfile.TemporaryDirectory() as d1:
+            p1 = Path(d1)
+            run_gen_scenes(cfg, p1)
+            scenes1 = _load_sorted(p1 / "scenes")
+
+        with tempfile.TemporaryDirectory() as d2:
+            p2 = Path(d2)
+            run_gen_scenes(cfg, p2)
+            scenes2 = _load_sorted(p2 / "scenes")
+
+        assert scenes1 == scenes2, "Scene generation is not reproducible"
+
+    def test_simulator_deterministic(self) -> None:
+        from amcd.simulators.dry_run import DryRunSimulator
+        from amcd.simulators.base import SceneSpec
+        import numpy as np
+
+        sim = DryRunSimulator(n_channels=16, n_samples=4800, sample_rate=48000)
+        scene = SceneSpec(
+            scene_id="s0", seed=99,
+            geometry_family="shoebox",
+            dims=(5.0, 4.0, 3.0),
+            material_absorption=0.3,
+            source_pos=(1.0, 1.0, 1.5),
+            receiver_pos=(4.0, 3.0, 1.5),
+        )
+        ir1 = sim.render(scene, ray_budget=1000).ir
+        ir2 = sim.render(scene, ray_budget=1000).ir
+        assert np.array_equal(ir1, ir2), "DryRunSimulator is not deterministic"
+
+    def test_model_deterministic(self) -> None:
+        import torch
+        from amcd.models.cnn import CNNDenoisingModel
+
+        torch.manual_seed(42)
+        model = CNNDenoisingModel(n_channels=16, hidden_channels=8, n_layers=2)
+        model.eval()
+
+        x = torch.randn(1, 16, 30, 20)
+        with torch.no_grad():
+            out1 = model(x)
+            out2 = model(x)
+        assert torch.equal(out1, out2), "Model forward is not deterministic"
