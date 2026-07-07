@@ -216,15 +216,16 @@ def run_stats(config: Config, run_dir: Path) -> None:
             "pred_ci_lower": pred_ci["ci_lower"],
             "pred_ci_upper": pred_ci["ci_upper"],
             "pred_std": pred_ci["std"],
-            # Inferential paired-improvement columns (§9). Power/alpha behind `mdes`
-            # come from config and are stamped in the run's config.yaml — the column
-            # name must not hardcode them (RR-11).
+            # Inferential paired-improvement columns (§9). Power/alpha behind the
+            # MDES come from config and are stamped in the run's config.yaml — the
+            # column name must not hardcode them (RR-11); the improvement_ prefix
+            # says which σ it derives from without reading this code (RR-12).
             "n_scored": n_scored,
             "improvement_mean": imp_ci["mean"],
             "improvement_ci_lower": imp_ci["ci_lower"],
             "improvement_ci_upper": imp_ci["ci_upper"],
             "improvement_std": imp_ci["std"],
-            "mdes": mdes_val,
+            "improvement_mdes": mdes_val,
             "n_improved": n_improved,
             "pct_improved": float(n_improved) / n_scored * 100 if n_scored > 0 else float("nan"),
         }

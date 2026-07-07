@@ -24,7 +24,10 @@ def run_report(config: Config, run_dir: Path) -> None:
 
     df = pd.DataFrame(summary)
 
-    col_w = {"metric": 22, "n": 5, "pred": 10, "imp": 10, "ci": 22, "mdes": 10, "improved": 14}
+    # "N scored" (not bare "N"): the count is the paired-improvement population;
+    # Pred mean may rest on more scenes (diagnostic-only metrics have n_scored=0
+    # beside a finite Pred mean) — RR-13.
+    col_w = {"metric": 22, "n": 8, "pred": 10, "imp": 10, "ci": 22, "mdes": 10, "improved": 14}
 
     def _metric_row(row: dict) -> str:
         # Inferential columns (imp mean / CI / MDES) are the §9 paired improvement
@@ -39,7 +42,7 @@ def run_report(config: Config, run_dir: Path) -> None:
             imp_mean_str = "N/A"
             ci_str = "N/A"
             improved_str = "N/A"
-        mdes_val = row["mdes"]
+        mdes_val = row["improvement_mdes"]
         mdes_str = f"{mdes_val:.4f}" if mdes_val == mdes_val else "N/A"
         return (
             f"{row['metric']:<{col_w['metric']}} "
@@ -53,7 +56,7 @@ def run_report(config: Config, run_dir: Path) -> None:
 
     hdr = (
         f"{'Metric':<{col_w['metric']}} "
-        f"{'N':>{col_w['n']}} "
+        f"{'N scored':>{col_w['n']}} "
         f"{'Pred mean':>{col_w['pred']}} "
         f"{'Imp mean':>{col_w['imp']}} "
         f"{'Imp 95% CI':<{col_w['ci']}} "

@@ -144,10 +144,10 @@ def test_run_stats_mdes_uses_paired_improvement_sigma() -> None:
 
     assert row["improvement_mean"] == pytest.approx(float(np.mean(paired)))
     assert row["improvement_std"] == pytest.approx(paired_std)
-    assert row["mdes"] == pytest.approx(
+    assert row["improvement_mdes"] == pytest.approx(
         mdes(paired_std, len(paired), cfg.bootstrap_power, cfg.bootstrap_alpha)
     )
-    assert row["mdes"] != pytest.approx(
+    assert row["improvement_mdes"] != pytest.approx(
         mdes(pred_std, len(paired), cfg.bootstrap_power, cfg.bootstrap_alpha)
     )
     # Descriptive absolute-value columns remain, clearly separated.
@@ -196,5 +196,5 @@ def test_bootstrap_substream_per_group_is_order_and_set_invariant() -> None:
     a = alone[alone["metric"] == "T30"].iloc[0]
     b = with_extra[with_extra["metric"] == "T30"].iloc[0]
     for col in ("improvement_ci_lower", "improvement_ci_upper",
-                "pred_ci_lower", "pred_ci_upper", "mdes"):
+                "pred_ci_lower", "pred_ci_upper", "improvement_mdes"):
         assert a[col] == b[col], f"{col} of T30 changed when C50 was added (F-15)"

@@ -13,18 +13,14 @@ of this file is the audit trail).
 
 ## OPEN findings
 
-From the 2026-07-05 full re-verify pass (falsifier + acoustics-reviewer +
-readability-reviewer over the current codebase; acoustics returned zero new
-findings). Implementation plan: `docs/implementation_plan_2026-07-05.md`.
+From the 2026-07-06 re-review of the implemented 2026-07-05 plan (falsifier and
+acoustics-reviewer confirmed all their findings clean, zero new;
+readability-reviewer confirmed RR-09/10/11 clean and raised two new minors).
 
 | ID | agent | sev | status | anchor | finding | resolution |
 |----|-------|-----|--------|--------|---------|------------|
-| F-18 | falsifier | major | OPEN | src/amcd/stats/aggregate.py:146 (mdes on ci["std"]) | MDES uses std of absolute per-scene `pred_val`, not the paired baseline-vs-denoised difference std that design_spec §9 (l.261-263) requires; σ diverges up to ~2.4× in the dry run (test_id C50: 6.27 vs 2.57) and the implicit t-test is against a null of 0, not the improvement null; no CI on the paired improvement exists anywhere. tests/test_stats.py:127-130 locks in the wrong σ. | Plan §1: compute MDES/CI on the per-scene paired improvement; keep pred_val CI as descriptive only. |
-| F-19 | falsifier | minor | OPEN | src/amcd/evaluation/signal.py:31 (energy_snr_db) | `10**(x/10)` assumes dB log-energy operands, but the registered waveform rep (waveform.py:31) feeds raw amplitude → meaningless SNR on the E1 waveform path; unexercised today, diagnostic-only. | Plan §2: guard/test that compute_signal_metrics runs only on dB-domain banded reps, or make it rep-domain-aware. |
-| S-01 | session (Fable) | major | OPEN | project root (no .git) | The project is NOT a git repository, contradicting this ledger's "git history is the audit trail" premise and spec §9 (l.270), which requires a git SHA in the reporting supplementary bundle. All prior "deleted rows live in git history" claims currently have no backing store. | Plan §3: `git init` + initial commit (user-visible decision; flagged in plan). |
-| RR-09 | readability-reviewer | minor | OPEN | src/amcd/models/base.py:8 | `Model` Protocol's `aux: torch.Tensor \| None` parameter is undocumented — it is the forward-looking seam for the path-conditioned variant (research_I_paper.md §4.4 / App. C; design_spec §8) but nothing in code says so. | Plan §4: one docstring line at the seam (base.py + cnn.py:51). |
-| RR-10 | readability-reviewer | minor | OPEN | src/amcd/config.py:277 (also configs/base.yaml:10) | `run_id` is declared, defaulted to "", stamped into every run's config.yaml, but has no consumer and no purpose note — the only Config field with neither. | Plan §4: document intended role (experiment-ledger label); do not remove. |
-| RR-11 | readability-reviewer | minor | OPEN | src/amcd/stats/aggregate.py:167 (→ reporting/tables.py:37) | Summary column `mdes_80pct` hardcodes 80% power into the label while the power used is `config.bootstrap_power`; a `bootstrap_power: 0.9` run would emit a right number under a wrong name. | Plan §1 (bundled with F-18): rename to `mdes` or derive label from config. |
+| RR-12 | readability-reviewer | minor | OPEN | src/amcd/stats/aggregate.py:227 | `mdes` is the only ci_table.csv column without a `pred_`/`improvement_` prefix; a CSV reader cannot tell which σ it derives from (the F-18 point is that they diverge). | Fix applied (renamed `improvement_mdes`; tables.py header stays "MDES"), awaiting re-review. |
+| RR-13 | readability-reviewer | minor | OPEN | src/amcd/reporting/tables.py:46,55 | Report "N" column prints n_scored, which reads contradictory beside a finite Pred mean for diagnostic-only metrics (N=0 with a value). | Fix applied (header "N scored"), awaiting re-review. |
 
 ## DEFERRED backlog
 
@@ -32,32 +28,22 @@ findings). Implementation plan: `docs/implementation_plan_2026-07-05.md`.
 |----|-------|-----|--------|--------|---------|------------|
 | RD-04 | research-director | low | DEFERRED | configs/base.yaml (seeds.split_assignment) | Split seed must be pinned stable-for-life; changing it after E1 is a deliberate re-dataset event (leakage/faithfulness risk). | Belongs to the pre-E1 falsifier pass: add a guard against silent change to the split seed. |
 | F-06 | falsifier | minor | DEFERRED | src/amcd/representations/spectrogram.py (loss); src/amcd/training/loss.py | Dual loss source of truth: `rep.loss(pred,target,delta)` takes a RAW-dB δ; a future caller wiring it against z-scored operands would silently reintroduce F-01. | Belongs to the E2 loss-architecture work (unify `build_criterion` / `rep.loss`). Mitigation in place meanwhile: docstring states δ must be operand-domain; sole current caller (`build_criterion`) already scales it. |
-| F-15 | falsifier | minor | DEFERRED | src/amcd/stats/aggregate.py (run_stats bootstrap RNG) | Single bootstrap RNG stream is shared across all groupby (split,metric) groups, so a group's bootstrap CI bounds depend on preceding groups' RNG consumption; adding/removing a metric or split perturbs unchanged groups' CI bounds by MC noise. Reproducible for a fixed group set; point estimates unaffected. | Stats-hardening pass: give each group an independent substream (SeedSequence(seed("bootstrap")).spawn keyed by group, or reseed per (split,metric)). Sub-threshold for the current gate. |
-| F-17 | falsifier | minor | DEFERRED | src/amcd/config.py:388 (_check) | `_check` validates `alpha` and `bootstrap_power` in (0,1) independently but does not enforce `power > alpha`; a config with `power ≤ alpha` makes `mdes` silently return ≈0 (achieved power = alpha) rather than raising. Nonsensical config far outside any plausible bootstrap setting (base ships power=0.8 ≫ α=0.05) — flagged so it is not lost. | Stats-hardening pass (with F-15): one-line `power > alpha` guard in `_check`. Sub-threshold for the current gate. |
 | RD-08 | research-director | minor | DEFERRED | src/amcd/simulators/base.py:63 (IRResult) vs design_spec §8 l.238 | Spec §8 shows IRResult carrying `paths: PathData`; code omits it. This is the producer half of the path-conditioned-variant seam (consumer half `Model.forward` aux already exists, RR-09). No PathData schema and no populating producer exist yet. | Lands with the gsound_sir build (RD-06): path export defines PathData and populates IRResult.paths. Do NOT add a speculative empty field before the producer exists. |
 
 ### Resume here
 
-**2026-07-05 re-verify pass (Fable): reviews RUN, fixes NOT implemented — by
-explicit user instruction.** Fable ran the full reviewer set over the current
-codebase and wrote the OPEN rows above plus an implementation plan at
-`docs/implementation_plan_2026-07-05.md` for a future Opus session to execute.
-The next session should: read that plan, implement in its stated order, then
-re-run falsifier + readability-reviewer (and acoustics-reviewer if
-evaluation/signal.py changes) to confirm clean and delete resolved rows.
-
-Reviewer evidence this pass: falsifier ran `pytest tests/` (70 passed) and a
-full `amcd all` dry run, and re-confirmed clean: split routing (0 misroutes),
-normalization provenance (train-only stats), no scaffold coupling, no identity
-collapse (correction energy 17% of low→high gap), seed discipline.
-acoustics-reviewer re-verified all metric/representation physics with
-known-answer probes (T30 recovery 0.506/1.172 vs true 0.5/1.2 s; band energy
-conservation 1.0000; C50 boundary leakage 0.0) — zero new findings.
-
-The prior (2026-07-04) verification pass remains CLOSED. DEFERRED backlog
-unchanged (RD-04 split-seed guard; F-06 loss unify; F-15 bootstrap substreams;
-F-17 power>alpha guard) — none on the current gate, though F-18 will likely
-subsume/interact with F-15/F-17 in the pre-E1 stats pass.
+**2026-07-06 (Fable): 2026-07-05 plan implemented in full; re-review nearly
+closed.** All plan items landed as commits on branch `v3-rebuild` (S-01 → repo
+initialized, remote = github.com/Jack-Rainey/Monte_Carlo_ML_Project, branch not
+yet pushed): F-18 paired-improvement MDES/CI (+ folded F-15 substreams and F-17
+power>alpha guard, each with its own test), F-19 value_domain seam, RR-09/10/11
+docs/renames. Re-review: falsifier verified F-18/F-19/F-15/F-17 clean by
+independent recompute of every ci_table.csv cell from the raw parquet (machine
+precision); acoustics-reviewer zero new findings (probe-verified dB↔linear SNR,
+value_domain declarations, paired quantity per metric); readability-reviewer
+confirmed RR-09/10/11 clean, raised minors RR-12/RR-13 — fixes applied, awaiting
+readability re-confirmation, which is the ONLY step left before zero OPEN rows.
+Suite 76 passed; full dry run clean (experiments/all_20260706_*).
 
 **Next concrete build (roadmap, per RD-06):** the
 real `gsound_sir` render backend (x86) is the single hard dependency and the
