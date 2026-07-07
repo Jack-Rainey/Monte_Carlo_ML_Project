@@ -273,7 +273,10 @@ class Config(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    # Experiment identity
+    # Experiment identity: the experiment-ledger label (design_spec §11 — D0a, E1,
+    # E2, …) a real experiment run sets so its artifacts are traceable to the
+    # ledger row. Stamped into each run's config.yaml; "" for unlabeled dev runs.
+    # No pipeline consumer yet — real (gsound_sir) experiment runs will set it.
     run_id: str = ""
 
     # Randomness (per-aspect seeds)

@@ -7,6 +7,8 @@
 #   {sweep: [v0, v1, ...]}                                  # research axis (E4)
 # The role grammar is parsed + validated now; the search engine is stubbed (E3+).
 
+# Experiment-ledger label (design_spec §11: D0a/D0b/E1/…): set per experiment run
+# so stamped artifacts trace to the ledger row; "" for unlabeled dev runs.
 run_id: ""
 
 # ── Randomness: one master seed, independent per-aspect derivation (inv #5) ────

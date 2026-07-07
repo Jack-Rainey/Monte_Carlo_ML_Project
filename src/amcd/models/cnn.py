@@ -51,6 +51,7 @@ class CNNDenoisingModel(nn.Module):
     def forward(self, x: torch.Tensor, aux: torch.Tensor | None = None) -> torch.Tensor:
         # x: (B, C, n_bands, n_frames) normalized low-ray energy
         # returns residual correction of same shape
+        # aux: path-conditioning seam (Model protocol, models/base.py) — ignored here
         return self.net(x)
 
 
