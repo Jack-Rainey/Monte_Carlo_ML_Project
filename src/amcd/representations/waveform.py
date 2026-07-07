@@ -20,6 +20,10 @@ class WaveformRepresentation:
         same build_representation seam as spectrogram; sample_rate is passed in)."""
         model_config = {"extra": "forbid"}
 
+    # Raw samples, NOT dB log energy: dB-assuming consumers (energy SNR) must see
+    # this and report their metric undefined rather than 10**(amplitude/10) (F-19).
+    value_domain = "amplitude"
+
     def __init__(self, sample_rate: int) -> None:
         self.sample_rate = sample_rate
 

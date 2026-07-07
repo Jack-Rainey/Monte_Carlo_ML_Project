@@ -111,6 +111,9 @@ def run_preprocess(config: Config, run_dir: Path) -> None:
         "n_bands": n_bands,
         "n_frames": n_frames,
         "center_freqs": rep.center_freqs,
+        # Declared domain of the saved tensors ("db" | "amplitude"); dB-assuming
+        # eval consumers key on this stamp, never on the rep class (F-19).
+        "value_domain": rep.value_domain,
         "norm_stats": norm_stats,
         "split_counts": {
             sp: sum(1 for s in splits.values() if s == sp)

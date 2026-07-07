@@ -26,6 +26,13 @@ class Representation(Protocol):
     #: (e.g. `waveform`, whose "bands" axis is a length-1 placeholder).
     center_freqs: list[float]
 
+    #: Value domain of encoded tensors: "db" (log band-energy, the banded-rep
+    #: contract above) or "amplitude" (raw samples — the `waveform` identity rep).
+    #: Declared, not inferred, and stamped into the preprocess meta so dB-assuming
+    #: consumers (e.g. energy SNR's 10**(x/10) undo) key on the declared domain of
+    #: the tensors they read — never on isinstance of a concrete rep (ledger F-19).
+    value_domain: str
+
     def encode(self, ir: np.ndarray) -> torch.Tensor:
         """ir: (C, T) float32 → energy tensor (C, bands, frames), dB log energy."""
         ...

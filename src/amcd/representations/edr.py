@@ -20,6 +20,9 @@ class EDRRepresentation:
         implemented (§3/D2). Empty for now so the build_representation seam works."""
         model_config = {"extra": "forbid"}
 
+    # EDR is banded log energy in dB (Schroeder-integrated), like the spectrogram.
+    value_domain = "db"
+
     def __init__(self, sample_rate: int) -> None:
         self.sample_rate = sample_rate
 

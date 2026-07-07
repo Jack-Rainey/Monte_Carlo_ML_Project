@@ -31,6 +31,10 @@ def run_eval(config: Config, run_dir: Path) -> None:
         splits: dict[str, str] = json.load(f)
 
     norm_stats = meta["norm_stats"]
+    # Preprocess-stamped domain of the saved tensors ("db" | "amplitude"); keyed
+    # from the stamp, not the rep class, so eval stays rep-agnostic (F-19). A
+    # missing key means a pre-stamp preprocess run — fail loud, re-run preprocess.
+    value_domain = meta["value_domain"]
 
     pred_paths = sorted(p for p in predictions_dir.glob("*_pred.pt") if not p.name.startswith("._"))
     if not pred_paths:
@@ -61,8 +65,11 @@ def run_eval(config: Config, run_dir: Path) -> None:
 
         all_metrics: dict[str, MetricTriple] = {}
 
-        # Signal metrics — energy domain (unchanged)
-        all_metrics.update(compute_signal_metrics(pred_db, high_db, low_db))
+        # Signal metrics — operand domain, with dB-only diagnostics keyed on the
+        # stamped value_domain (F-19)
+        all_metrics.update(
+            compute_signal_metrics(pred_db, high_db, low_db, value_domain=value_domain)
+        )
 
         # Room-acoustic metrics — standard ISO-3382 path on decoded waveforms (§3, §6)
         decoded_ir_path = predictions_dir / f"{scene_id}_decoded_ir.npy"

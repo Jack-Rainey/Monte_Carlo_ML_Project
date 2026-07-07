@@ -65,6 +65,9 @@ class ThirdOctaveSpectrogram:
         hop_length: int
         min_db: float
 
+    # Per-channel third-octave log band-energy in dB (the banded-rep contract).
+    value_domain = "db"
+
     def __init__(self, sample_rate: int, n_fft: int, hop_length: int, min_db: float) -> None:
         self.sample_rate = sample_rate
         self.n_fft = n_fft
