@@ -24,29 +24,32 @@ def run_report(config: Config, run_dir: Path) -> None:
 
     df = pd.DataFrame(summary)
 
-    # "N scored" (not bare "N"): the count is the paired-improvement population;
-    # Pred mean may rest on more scenes (diagnostic-only metrics have n_scored=0
-    # beside a finite Pred mean) — RR-13.
+    # "N sc/att" = scored/attempted per (split, metric) (F-21): the scored count
+    # is the paired-improvement population; a gap vs attempted means legs were
+    # dropped — per-leg reasons in the run's metrics/drops.csv.
     col_w = {"metric": 22, "n": 8, "pred": 10, "imp": 10, "ci": 22, "mdes": 10, "improved": 14}
 
     def _metric_row(row: dict) -> str:
         # Inferential columns (imp mean / CI / MDES) are the §9 paired improvement
-        # |low−high| − |pred−high|; "Pred mean" is the descriptive absolute value.
-        # n_scored == 0 → improvement undefined for this metric (e.g. a diagnostic-only
-        # metric with no baseline comparison); show N/A rather than "nan%".
-        if row["n_scored"] > 0:
-            imp_mean_str = f"{row['improvement_mean']:.4f}"
-            ci_str = f"[{row['improvement_ci_lower']:.4f}, {row['improvement_ci_upper']:.4f}]"
-            improved_str = f"{row['pct_improved']:.1f}% ({row['n_improved']}/{row['n_scored']})"
-        else:
-            imp_mean_str = "N/A"
-            ci_str = "N/A"
-            improved_str = "N/A"
+        # for the metric's declared kind; "Pred mean" is the descriptive absolute
+        # value. n_scored == 0 → NOTHING here is a result: render the row as
+        # `unscored`, never a number a reader could mistake for an outcome — a
+        # descriptive mean included (RR-14).
+        n_str = f"{row['n_scored']}/{row['n_attempted']}"
+        if row["n_scored"] == 0:
+            return (
+                f"{row['metric']:<{col_w['metric']}} "
+                f"{n_str:>{col_w['n']}} "
+                f"unscored — no scene has finite legs (reasons: metrics/drops.csv)"
+            )
+        imp_mean_str = f"{row['improvement_mean']:.4f}"
+        ci_str = f"[{row['improvement_ci_lower']:.4f}, {row['improvement_ci_upper']:.4f}]"
+        improved_str = f"{row['pct_improved']:.1f}% ({row['n_improved']}/{row['n_scored']})"
         mdes_val = row["improvement_mdes"]
         mdes_str = f"{mdes_val:.4f}" if mdes_val == mdes_val else "N/A"
         return (
             f"{row['metric']:<{col_w['metric']}} "
-            f"{row['n_scored']:>{col_w['n']}} "
+            f"{n_str:>{col_w['n']}} "
             f"{row['pred_mean']:>{col_w['pred']}.4f} "
             f"{imp_mean_str:>{col_w['imp']}} "
             f"{ci_str:<{col_w['ci']}} "
@@ -54,12 +57,14 @@ def run_report(config: Config, run_dir: Path) -> None:
             f"{improved_str:<{col_w['improved']}}"
         )
 
+    # CI level from config, not hardcoded in the label (RR-17, same rule as RR-11).
+    ci_label = f"Imp {100 * (1 - config.bootstrap_alpha):g}% CI"
     hdr = (
         f"{'Metric':<{col_w['metric']}} "
-        f"{'N scored':>{col_w['n']}} "
+        f"{'N sc/att':>{col_w['n']}} "
         f"{'Pred mean':>{col_w['pred']}} "
         f"{'Imp mean':>{col_w['imp']}} "
-        f"{'Imp 95% CI':<{col_w['ci']}} "
+        f"{ci_label:<{col_w['ci']}} "
         f"{'MDES':>{col_w['mdes']}} "
         f"{'% Improved':<{col_w['improved']}}"
     )
@@ -79,7 +84,11 @@ def run_report(config: Config, run_dir: Path) -> None:
         for row in split_rows:
             lines.append(_metric_row(row))
 
-    lines += ["", "=" * 70]
+    lines += [
+        "",
+        "N sc/att = scenes scored / attempted; per-leg drop reasons: metrics/drops.csv",
+        "=" * 70,
+    ]
     summary_txt = "\n".join(lines)
 
     (report_dir / "summary.txt").write_text(summary_txt)

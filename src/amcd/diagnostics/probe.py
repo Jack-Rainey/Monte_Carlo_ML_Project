@@ -195,11 +195,11 @@ def _run_d0b(
 
             # ISO-3382 metrics for oracle and reference (W-channel, onset-aligned, all
             # eval bands) — same shared path as the eval stage (AC-02/AC-04).
-            oracle_metrics = channel_band_avg_metrics(
+            oracle_metrics, oracle_nan_reasons = channel_band_avg_metrics(
                 oracle_ir[0], sample_rate=config.sample_rate,
                 iso_eval_freqs=iso_eval_freqs, onset_rel_db=config.metric_onset_rel_db,
             )
-            ref_metrics = channel_band_avg_metrics(
+            ref_metrics, ref_nan_reasons = channel_band_avg_metrics(
                 high_ref_ir[0], sample_rate=config.sample_rate,
                 iso_eval_freqs=iso_eval_freqs, onset_rel_db=config.metric_onset_rel_db,
             )
@@ -214,6 +214,12 @@ def _run_d0b(
                 "reference": ref_metrics,
                 "residual": residuals,
             }
+            # No silent exclusion (F-21): a NaN residual (leg dropped by the shared
+            # metric unit) carries its reasons into the probe record.
+            if oracle_nan_reasons or ref_nan_reasons:
+                per_scene_residuals[sid]["nan_reasons"] = {
+                    "oracle": oracle_nan_reasons, "reference": ref_nan_reasons,
+                }
             scene_results.append(residuals)
 
         if not scene_results:

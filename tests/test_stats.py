@@ -129,7 +129,7 @@ def test_run_stats_mdes_uses_paired_improvement_sigma() -> None:
     triples = [(0.90, 0.20, 0.40), (0.50, 0.35, 0.40), (0.45, 0.55, 0.40)]
     rows = [
         {"scene_id": f"s_{i}", "split": "test_id", "metric": "T30",
-         "low_val": lo, "pred_val": pr, "high_ref": hi,
+         "kind": "match_reference", "low_val": lo, "pred_val": pr, "high_ref": hi,
          "baseline_rel_ratio": 1.0,
          "improved": abs(pr - hi) < abs(lo - hi)}
         for i, (lo, pr, hi) in enumerate(triples)
@@ -164,7 +164,7 @@ def test_paired_improvement_sign_matches_improved_flag() -> None:
     rng = np.random.default_rng(1234)
     for _ in range(200):
         low, pred, high = rng.normal(0.0, 2.0, 3)
-        improved, _ = metric_improvement(MetricTriple(low, pred, high))
+        improved, _ = metric_improvement(MetricTriple(low, pred, high, kind="match_reference"))
         paired = abs(low - high) - abs(pred - high)
         assert (paired > 0) == improved, f"sign mismatch at {(low, pred, high)}"
 
@@ -178,14 +178,14 @@ def test_bootstrap_substream_per_group_is_order_and_set_invariant() -> None:
     def t30_rows() -> list[dict]:
         return [
             {"scene_id": f"s_{i}", "split": "test_id", "metric": "T30",
-             "low_val": 0.9, "pred_val": p, "high_ref": 0.4,
+             "kind": "match_reference", "low_val": 0.9, "pred_val": p, "high_ref": 0.4,
              "baseline_rel_ratio": 1.0, "improved": True}
             for i, p in enumerate([0.20, 0.35, 0.55, 0.42, 0.61])
         ]
 
     extra = [
         {"scene_id": f"s_{i}", "split": "test_id", "metric": "C50",
-         "low_val": 3.0, "pred_val": p, "high_ref": 2.0,
+         "kind": "match_reference", "low_val": 3.0, "pred_val": p, "high_ref": 2.0,
          "baseline_rel_ratio": 1.0, "improved": True}
         for i, p in enumerate([1.0, 2.5, 2.2, 1.8])
     ]
@@ -198,3 +198,61 @@ def test_bootstrap_substream_per_group_is_order_and_set_invariant() -> None:
     for col in ("improvement_ci_lower", "improvement_ci_upper",
                 "pred_ci_lower", "pred_ci_upper", "improvement_mdes"):
         assert a[col] == b[col], f"{col} of T30 changed when C50 was added (F-15)"
+
+
+def test_run_stats_maximize_kind_uses_pred_minus_low() -> None:
+    """F-20: a `maximize` metric's inferential quantity is pred − low — computed
+    from (low, pred) alone, with the high leg structurally absent (NaN). Pre-fix,
+    the spine's hardcoded |low−high| − |pred−high| saw the NaN high leg and
+    silently unscored the whole group (energy_snr_db: n_scored 0 in every split)."""
+    cfg = tiny_config()
+    pairs = [(10.0, 14.0), (11.0, 9.5), (8.0, 12.0)]  # (low_snr, pred_snr)
+    rows = [
+        {"scene_id": f"s_{i}", "split": "test_id", "metric": "energy_snr_db",
+         "kind": "maximize", "low_val": lo, "pred_val": pr, "high_ref": np.nan,
+         "baseline_rel_ratio": np.nan, "improved": pr > lo}
+        for i, (lo, pr) in enumerate(pairs)
+    ]
+    ci = _run_stats_on_rows(cfg, rows)
+    row = ci[ci["metric"] == "energy_snr_db"].iloc[0]
+
+    paired = [pr - lo for lo, pr in pairs]
+    assert row["n_scored"] == 3 and row["n_attempted"] == 3
+    assert row["improvement_mean"] == pytest.approx(float(np.mean(paired)))
+    assert row["improvement_std"] == pytest.approx(float(np.std(paired, ddof=1)))
+    assert np.isfinite(row["improvement_mdes"])
+    assert row["pct_improved"] == pytest.approx(200.0 / 3.0)
+
+
+def test_run_stats_rejects_mixed_or_missing_kind() -> None:
+    """F-20 fail-loud contract: one metric declares exactly one kind, and a
+    pre-taxonomy parquet (no kind column) is an error, never a silent guess."""
+    cfg = tiny_config()
+    base = {"split": "test_id", "metric": "T30", "low_val": 3.0, "pred_val": 1.0,
+            "high_ref": 2.0, "baseline_rel_ratio": 1.0, "improved": True}
+    mixed = [
+        {**base, "scene_id": "s_0", "kind": "match_reference"},
+        {**base, "scene_id": "s_1", "kind": "maximize"},
+    ]
+    with pytest.raises(ValueError, match="kind"):
+        _run_stats_on_rows(cfg, mixed)
+
+    no_kind_col = [{**base, "scene_id": "s_0"}]
+    with pytest.raises(KeyError, match="kind"):
+        _run_stats_on_rows(cfg, no_kind_col)
+
+
+def test_run_stats_reports_attempted_vs_scored() -> None:
+    """F-21: n_attempted counts every per-scene row in the (split, metric) group;
+    a NaN-legged (unscored) scene shows up as the scored/attempted gap instead of
+    silently shrinking the population."""
+    cfg = tiny_config()
+    rows = [
+        {"scene_id": f"s_{i}", "split": "test_geometry_shift", "metric": "C50",
+         "kind": "match_reference", "low_val": 3.0, "pred_val": pred,
+         "high_ref": 2.0, "baseline_rel_ratio": 1.0, "improved": imp}
+        for i, (pred, imp) in enumerate([(1.0, True), (2.5, False), (np.nan, None)])
+    ]
+    ci = _run_stats_on_rows(cfg, rows)
+    row = ci[ci["metric"] == "C50"].iloc[0]
+    assert row["n_attempted"] == 3 and row["n_scored"] == 2

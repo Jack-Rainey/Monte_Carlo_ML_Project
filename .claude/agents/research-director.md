@@ -81,6 +81,10 @@ Flag as a strategic risk any design that would FORECLOSE a roadmap item:
   rewrite;
 - anything that hardcodes a single raytracer or simulator;
 - a dry-run scaffold that downstream code couples to concretely (see below).
+- an implicit assumption in a uniform framework that forecloses a roadmap element
+  type even though it works for everything present today (e.g. an eval/stats spine
+  assuming every metric is match-reference forecloses the roadmap's
+  higher-is-better perceptual metrics). Flag it, and name the roadmap item at risk.
 
 ## Scaffolding seam — you are the arbiter
 CLAUDE.md routes the "is this a needed seam or premature abstraction?" question

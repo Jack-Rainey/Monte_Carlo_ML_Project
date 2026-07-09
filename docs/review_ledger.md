@@ -13,8 +13,7 @@ of this file is the audit trail).
 
 ## OPEN findings
 
-None. The 2026-07-06 re-review pass closed every row raised against the
-2026-07-05 plan implementation (see Resume here).
+(none — 2026-07-08 pass closed with zero OPEN rows; see Resume here)
 
 | ID | agent | sev | status | anchor | finding | resolution |
 |----|-------|-----|--------|--------|---------|------------|
@@ -28,6 +27,27 @@ None. The 2026-07-06 re-review pass closed every row raised against the
 | RD-08 | research-director | minor | DEFERRED | src/amcd/simulators/base.py:63 (IRResult) vs design_spec §8 l.238 | Spec §8 shows IRResult carrying `paths: PathData`; code omits it. This is the producer half of the path-conditioned-variant seam (consumer half `Model.forward` aux already exists, RR-09). No PathData schema and no populating producer exist yet. | Lands with the gsound_sir build (RD-06): path export defines PathData and populates IRResult.paths. Do NOT add a speculative empty field before the producer exists. |
 
 ### Resume here
+
+**2026-07-08 (Fable): pass CLOSED — zero OPEN rows.** F-20 (metric-`kind`
+taxonomy: every metric declares `kind` ∈ {match_reference, maximize, minimize};
+eval/stats spine branches on it; `energy_snr_db` now maximize and scored 3/3
+everywhere), F-21 (no silent exclusion: producer NaN reasons →
+`metrics/drops.csv`, scored-vs-attempted in stats/report), RR-14 (unscored rows
+render `unscored`), RR-15..18 (readability minors), and AC-08 (ISO-3382 legs
+averaged over the cross-leg intersected band set) all fixed and
+re-review-confirmed clean by their raising reviewers; rows deleted. Clean-pass
+evidence: falsifier recomputed all 20 ci_table cells from the raw parquet at
+machine precision (twice — round 1 and the AC-08 delta, max diff 7.1e-15) and
+verified drops.csv completeness (no missing, false, or orphan rows); acoustics
+verified SNR legs bit-identical to pre-refactor and confirmed intersection
+physics + preserved probe path; readability confirmed rendering and RR-15..18;
+research-director gated the plan (maximize/minimize ruled forward-looking for
+roadmap perceptual/spatial metrics, module docstring documents this). Current
+dry run: `experiments/all_20260708_194959`; suite 86 passed. Falsifier's
+out-of-scope observation (not a finding): D0b probe averages oracle/reference
+over each IR's own surviving bands, not an intersection — pre-existing,
+diagnostic-only, gated to real renders; acoustics-reviewer's call when D0b goes
+live.
 
 **2026-07-06 (Fable): 2026-07-05 plan implemented in full; pass CLOSED —
 zero OPEN rows.** All plan items landed as commits on branch `v3-rebuild` (S-01

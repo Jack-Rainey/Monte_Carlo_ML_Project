@@ -65,6 +65,20 @@ to break it and could not.
    downstream `isinstance(..., DryRunSimulator)`, dry-run-keyed branch, or code
    that would become dead or broken when the real simulator replaces it — this
    is a latent bug, not a stylistic note.
+10. **Implicit-contract / silent degeneracy.** A metric or quantity that emits
+    output but contributes nothing to the inferential result — `n_scored == 0`
+    while a descriptive mean still prints, or a metric silently correct for most
+    elements and silently wrong for one because a uniform assumption only happens
+    to hold generally. Verify every metric declares its improvement kind
+    (`match_reference`|`maximize`|`minimize`) and that the stats spine branches on
+    it rather than assuming match-reference; any metric whose target leg is
+    unreachable under match-reference framing (SNR of the reference against itself
+    = +∞) is this bug.
+11. **Silent exclusion.** Any scene/leg/metric dropped, NaN'd, or skipped without a
+    logged `(unit, reason)` and without the drop showing in output counts. Compare
+    attempted vs scored counts per (split, metric); an unexplained gap — or an MDES
+    that silently goes N/A because a drop pushed n below the MDES floor — is a
+    finding, not acceptable attrition.
 
 ## On generality (do not mis-file it as a bug)
 Code that is more general than the current stage exercises is not wrong for that

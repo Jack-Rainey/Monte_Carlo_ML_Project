@@ -112,7 +112,7 @@ Each stage consumes/produces declared artifacts; nothing passes via globals.
 | preprocess | raw IRs | energy tensors (per-channel log third-octave), **train-only** norm stats, split assignment, carrier refs |
 | train | normalized energy tensors | checkpoint (+ resolved config stamp); valid-based selection |
 | infer | checkpoint + low-ray inputs | predicted energy envelopes **+ decoded IR (required, D3)** |
-| eval | decoded IRs + high-ray refs | **per-scene** metrics table (parquet), computed via the **standard ISO-3382 path** on the decoded waveform |
+| eval | decoded IRs + high-ray refs | **per-scene** metrics table (parquet), computed via the **standard ISO-3382 path** on the decoded waveform, + drop log (`drops.csv`: every NaN/partial metric leg as `(scene, split, metric, leg, reason)` — no silent exclusion) |
 | stats | per-scene tables | mean ± CI, MDES, failure-case groups, sweep comparisons |
 | report | stats | plots/tables + supplementary export |
 
@@ -122,15 +122,22 @@ Key schemas:
 - **IR array:** channel-first `(C, T)`, float32; 3rd-order → C=16; T = sr·dur.
 - **energy tensor:** `(channels, bands, frames)`; bands=third-octave; framing
   params recorded in the stamp.
-- **per-scene metric row:** `scene_id, split, metric, low_val, pred_val,
+- **per-scene metric row:** `scene_id, split, metric, kind, low_val, pred_val,
   high_ref, baseline_rel_ratio, improved` — one row per (scene, metric), where the
   three values are that metric's low-ray / predicted / high-ray-reference numbers.
-  `improved = |pred_val − high_ref| < |low_val − high_ref|` (prediction closer to the
-  reference than the baseline) and is **nullable**: `None` when any value is NaN or
-  the metric has no baseline comparison (a diagnostic-only metric, e.g. energy SNR),
-  so `stats` never misattributes an improvement. `baseline_rel_ratio` = the two
-  errors' ratio (> 1 ⟺ improved). Per-scene rows are never collapsed before
-  `stats`; `split` is always retained.
+  `kind` is the metric's **declared improvement kind**, set at the metric's
+  definition site (required, no default — the eval/stats spine never assumes one):
+  `match_reference` (improved ⟺ `|pred_val − high_ref| < |low_val − high_ref|`,
+  consumes all three legs), `maximize` (improved ⟺ `pred_val > low_val`; the
+  reference leg is structurally absent — e.g. energy SNR, whose
+  reference-vs-itself value is +∞), or `minimize` (mirror of maximize).
+  `maximize`/`minimize` are the seam for the roadmap's perceptual /
+  spatial-error metrics (research_I_paper §6). `improved` is **nullable**:
+  `None` when any consumed leg is NaN, so `stats` never misattributes an
+  improvement; every such NaN leg is logged to `drops.csv` with a reason.
+  `baseline_rel_ratio` = the two reference-errors' ratio (> 1 ⟺ improved;
+  match_reference only, NaN otherwise). Per-scene rows are never collapsed
+  before `stats`; `split` is always retained.
 
 ### 6.1 Evaluation splits & distribution-shift design
 
@@ -261,6 +268,13 @@ class Metric(Protocol):
 - **Minimum detectable effect size (MDES):** report, per metric/split, the
   smallest baseline-vs-denoised difference detectable at the current n. Guards
   against over-reading sub-noise differences (the professor's point).
+- **Paired improvement, keyed on the metric's declared `kind`:** the CI/MDES
+  quantity is the per-scene paired improvement — `|low−high| − |pred−high|`
+  (match_reference), `pred − low` (maximize), `low − pred` (minimize) — never
+  the absolute metric value's σ, and never an assumed match-reference form.
+- **Scored vs attempted:** every (split, metric) reports `n_scored/n_attempted`;
+  an unscored metric renders as `unscored`, never as a number (no descriptive
+  mean in a results column). Per-leg drop reasons live in eval's `drops.csv`.
 - **Failure-case grouping:** group poorly-performing scenes by geometry,
   material, placement, baseline low-ray error, reverberation, retained-path
   stats — to test whether failures correlate with identifiable conditions.

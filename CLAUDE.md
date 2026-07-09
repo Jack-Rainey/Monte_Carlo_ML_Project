@@ -122,6 +122,15 @@ to run something if it needs a privilege the allow-list deliberately withholds.
   training / validation / in-distribution-test sets; every other split is a
   special test set; the number of splits is variable.
 
+## Explicit contracts, no silent exclusion
+- When uniform logic spans heterogeneous elements (metrics, splits, models,
+  simulators), each element declares the property the logic relies on — never
+  assume one that only happens to hold for most (e.g. a metric's improvement
+  `kind`). Reviewers check this.
+- Nothing leaves a result silently: log every drop/skip/NaN as `(unit, reason)`
+  and show scored-vs-attempted counts; never render an unscored quantity as a
+  number.
+
 ## Scaffolding and the end goal
 
 Temporary components (e.g. `DryRunSimulator`) exist only behind the same

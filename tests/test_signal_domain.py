@@ -39,24 +39,32 @@ def test_energy_snr_undefined_for_amplitude_domain_rep() -> None:
     high = rep.encode(ir * 0.9)
     low = rep.encode(ir * 0.5)
 
-    out = compute_signal_metrics(pred, high, low, value_domain=rep.value_domain)
+    out, nan_reasons = compute_signal_metrics(pred, high, low, value_domain=rep.value_domain)
     snr = out["energy_snr_db"]
     assert math.isnan(snr.pred) and math.isnan(snr.low) and math.isnan(snr.high)
+    # No silent exclusion (F-21): both consumed legs carry an explicit reason.
+    assert "amplitude" in nan_reasons[("energy_snr_db", "low")]
+    assert "amplitude" in nan_reasons[("energy_snr_db", "pred")]
     # The operand-domain MSE stays defined for amplitude reps.
     assert math.isfinite(out["energy_mse"].pred) and math.isfinite(out["energy_mse"].low)
 
 
 def test_energy_snr_finite_for_db_domain_rep() -> None:
-    """The dB path (spectrogram/EDR declare "db") keeps its finite diagnostic SNR."""
+    """The dB path (spectrogram/EDR declare "db") scores SNR as a `maximize`
+    metric (F-20): finite pred AND low legs (improvement = SNR(pred) − SNR(low)),
+    high leg structurally absent — and nothing to log as dropped."""
     rep = build_representation(
         "spectrogram", {"n_fft": 64, "hop_length": 32, "min_db": -80.0}, sample_rate=8000
     )
     assert rep.value_domain == "db"
 
     pred, high, low = _fake_tensors(11)
-    out = compute_signal_metrics(pred, high, low, value_domain="db")
-    assert math.isfinite(out["energy_snr_db"].pred)
-    assert math.isnan(out["energy_snr_db"].low)  # still diagnostic-only
+    out, nan_reasons = compute_signal_metrics(pred, high, low, value_domain="db")
+    snr = out["energy_snr_db"]
+    assert snr.kind == "maximize"
+    assert math.isfinite(snr.pred) and math.isfinite(snr.low)
+    assert math.isnan(snr.high)  # structurally absent, not a drop
+    assert nan_reasons == {}
 
 
 def test_unknown_value_domain_fails_loud() -> None:

@@ -1,10 +1,12 @@
 """stats stage: bootstrap percentile CI + MDES over per-scene metrics.
 
 The inferential quantities (CI tested against 0, MDES) are computed on the
-per-scene PAIRED improvement |low−high| − |pred−high| — the baseline-vs-denoised
-difference design_spec §9 requires — never on the absolute per-scene metric
-value, whose dispersion is a different (up to ~2.4× divergent) σ (ledger F-18).
-The absolute pred-value mean/CI are still reported, as descriptive columns.
+per-scene PAIRED improvement — the baseline-vs-denoised difference design_spec
+§9 requires — never on the absolute per-scene metric value, whose dispersion is
+a different (up to ~2.4× divergent) σ (ledger F-18). The paired quantity is
+keyed on each metric's declared `kind` via `paired_improvement` (F-20): the
+spine never assumes match-reference. The absolute pred-value mean/CI are still
+reported, as descriptive columns.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import scipy.integrate
 import scipy.stats
 
 from ..config import Config
+from ..evaluation.metric_row import MetricTriple, paired_improvement
 
 
 def bootstrap_ci(
@@ -156,11 +159,25 @@ def run_stats(config: Config, run_dir: Path) -> None:
     stats_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_parquet(metrics_path)
+    if "kind" not in df.columns:
+        raise KeyError(
+            "metrics.parquet has no 'kind' column — produced by a pre-taxonomy "
+            "eval stage; re-run eval (F-20: every metric declares its improvement kind)."
+        )
     bootstrap_seed = config.seed("bootstrap")
 
     # Compute per-(split, metric) stats — never pool test splits (invariant #9).
     summary: list[dict] = []
     for (split_name, metric_name), group in df.groupby(["split", "metric"]):
+        # One metric, one declared kind (F-20): the paired improvement below is
+        # only meaningful under a single kind, so mixed declarations fail loud.
+        kinds = group["kind"].unique()
+        if len(kinds) != 1:
+            raise ValueError(
+                f"{split_name}/{metric_name}: inconsistent metric kinds {sorted(kinds)} "
+                f"across scenes — a metric declares exactly one improvement kind (F-20)."
+            )
+        kind = str(kinds[0])
         # Descriptive: distribution of the metric's absolute per-scene pred value.
         # Reported for context only — its σ is NOT the §9 detectability σ (F-18).
         pred_values = group["pred_val"].dropna().values.astype(float)
@@ -171,19 +188,17 @@ def run_stats(config: Config, run_dir: Path) -> None:
             rng=_substream_rng(bootstrap_seed, split_name, metric_name, "pred"),
         )
 
-        # Inferential (design_spec §9): the per-scene PAIRED improvement,
-        #   paired = |low − high| − |pred − high|,
-        # positive ⟺ the prediction is closer to the high-ray reference than the
-        # baseline is — sign-consistent with `metric_improvement` row by row
-        # (paired > 0 ⟺ improved == True; pinned in tests). CI and MDES run on
-        # THIS quantity: the improvement hypothesis is about the paired difference,
-        # whose σ diverges up to ~2.4× from the absolute-value σ in the dry run.
-        legs = group[["low_val", "pred_val", "high_ref"]].astype(float)
-        finite = legs.notna().all(axis=1)
-        paired = (
-            (legs["low_val"] - legs["high_ref"]).abs()
-            - (legs["pred_val"] - legs["high_ref"]).abs()
-        )[finite].values
+        # Inferential (design_spec §9): the per-scene PAIRED improvement for
+        # the group's declared kind — see `paired_improvement`. Recomputed from
+        # the legs, never read from the `improved` column, so a hostile or
+        # inconsistent column cannot skew CI/MDES (F-18).
+        paired_all = np.array([
+            paired_improvement(MetricTriple(
+                float(r.low_val), float(r.pred_val), float(r.high_ref), kind
+            ))
+            for r in group.itertuples()
+        ])
+        paired = paired_all[np.isfinite(paired_all)]
         imp_ci = bootstrap_ci(
             paired,
             n_resamples=config.bootstrap_n_resamples,
@@ -198,10 +213,10 @@ def run_stats(config: Config, run_dir: Path) -> None:
         # Improvement pct: numerator and denominator over the SAME population —
         # scenes where `improved` is defined (not None/NaN). Counting n_improved over
         # rows dropped from the denominator produced pct > 100 (F-08). Under the
-        # metric_row contract (`improved` is None ⟺ a triple leg is NaN) this is the
-        # same population as `paired`; the paired stats above still recompute their
-        # own finite-legs mask so a hostile/inconsistent `improved` column can skew
-        # only the pct, never the CI/MDES.
+        # metric_row contract (`improved` is None ⟺ a consumed leg is NaN) this is
+        # the same population as `paired`; the paired stats above still recompute
+        # their own finite-legs mask so a hostile/inconsistent `improved` column can
+        # skew only the pct, never the CI/MDES.
         improved = group["improved"]
         scored = improved.notna()
         n_scored = int(scored.sum())
@@ -210,6 +225,12 @@ def run_stats(config: Config, run_dir: Path) -> None:
         row = {
             "split": split_name,
             "metric": metric_name,
+            "kind": kind,
+            # Scored-vs-attempted (F-21): n_attempted = per-scene rows in this
+            # (split, metric) group (invariant #6 — rows are never collapsed
+            # before stats); the report shows scored/attempted so a drop is
+            # visible, never inferred. Per-leg reasons: eval's metrics/drops.csv.
+            "n_attempted": len(group),
             # Descriptive absolute-value columns (context only).
             "n_pred": len(pred_values),
             "pred_mean": pred_ci["mean"],

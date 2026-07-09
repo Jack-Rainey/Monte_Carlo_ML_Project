@@ -32,9 +32,10 @@ def _add_noise_floor(ir: np.ndarray, floor_db: float, seed: int) -> np.ndarray:
 
 
 def _metrics(ir_w: np.ndarray) -> dict:
-    return channel_band_avg_metrics(
+    values, _reasons = channel_band_avg_metrics(
         ir_w, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB
     )
+    return values
 
 
 def test_c50_invariant_to_noise_floor() -> None:
@@ -75,3 +76,76 @@ def test_metrics_invariant_to_leading_silence() -> None:
             f"{key} changed under leading silence: {m0[key]} vs {m1[key]} — onset "
             f"alignment not applied (AC-02)."
         )
+
+
+def test_c50_nan_carries_lundeby_truncation_reason() -> None:
+    """F-21: when Lundeby truncation lands before the 50 ms split, C50 is NaN — a
+    physics-legitimate absence (a sub-50 ms IR has no honest C50) — but the drop
+    must carry a reason, not vanish silently. This is the exact
+    test_geometry_shift N=2-not-3 pathology from the first full dry run."""
+    # Very fast decay (RT60 = 30 ms) over a -25 dB noise floor: band energy falls
+    # below the Lundeby threshold (~floor + 10 dB) around 0.25·RT60 ≈ 7.5 ms, so
+    # the truncation index sits far before the 50 ms split.
+    ir = _add_noise_floor(_decaying_noise_ir(rt60=0.03, duration_s=0.5, seed=5),
+                          floor_db=-25.0, seed=6)
+    values, reasons = channel_band_avg_metrics(
+        ir, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB
+    )
+    assert np.isnan(values["C50"]), "fixture must actually produce an unscored C50"
+    assert "C50" in reasons
+    assert "50 ms split" in reasons["C50"], (
+        f"C50 drop reason missing/wrong: {reasons.get('C50')!r}"
+    )
+
+
+def test_paired_metrics_share_a_band_set_across_legs() -> None:
+    """AC-08 kill test: a pred-only degenerate band must never produce a scored
+    cross-band-set comparison. compute_room_acoustic_metrics intersects the
+    surviving-band set across all three legs, so every leg is averaged over the
+    SAME bands (ISO-3382 band averages are only comparable over a common set).
+    Pre-fix, each leg averaged its own surviving bands and the scene scored."""
+    import pytest
+    from scipy.signal import butter, sosfiltfilt
+
+    from amcd.evaluation.room_acoustic import (
+        channel_per_band_metrics,
+        compute_room_acoustic_metrics,
+    )
+
+    high = _add_noise_floor(_decaying_noise_ir(rt60=0.5, duration_s=1.5, seed=7),
+                            floor_db=-50.0, seed=8)
+    low = _add_noise_floor(_decaying_noise_ir(rt60=0.6, duration_s=1.5, seed=9),
+                           floor_db=-45.0, seed=10)
+    # pred: healthy decaying content ONLY in the 500 Hz octave; its 1000 Hz eval
+    # band sees just a stationary floor → Lundeby-degenerate there (C50 NaN),
+    # while high/low stay finite in both bands.
+    sos = butter(8, [500.0 / 2**0.5, 500.0 * 2**0.5], btype="bandpass",
+                 fs=_SR, output="sos")
+    rng = np.random.default_rng(11)
+    stationary = rng.standard_normal(high.shape) * (np.abs(high).max() * 10.0 ** (-35.0 / 20.0))
+    pred = sosfiltfilt(sos, high) + stationary
+
+    # Fixture must bite: pred's 1000 Hz band C50 is NaN, its 500 Hz band finite.
+    pred_bands = channel_per_band_metrics(
+        pred, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB)
+    assert np.isfinite(pred_bands[0][0]["C50"]) and np.isnan(pred_bands[1][0]["C50"])
+
+    triples, reasons = compute_room_acoustic_metrics(
+        pred[None, :], high[None, :], low[None, :],
+        sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
+    )
+    c50 = triples["C50"]
+    # The drop is attributed to the causing leg and marked as affecting all legs.
+    assert ("C50", "pred") in reasons
+    assert "EVERY leg" in reasons[("C50", "pred")]
+
+    # Every leg is averaged over the intersected set ({500 Hz} only): the high
+    # leg must equal its own single-band 500 Hz value, and that must genuinely
+    # differ from its own-two-band average (else the fixture proves nothing).
+    high_500 = channel_band_avg_metrics(
+        high, sample_rate=_SR, iso_eval_freqs=[500.0], onset_rel_db=_ONSET_DB)[0]["C50"]
+    high_both = channel_band_avg_metrics(
+        high, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB)[0]["C50"]
+    assert c50.high == pytest.approx(high_500)
+    assert high_500 != pytest.approx(high_both)
+    assert np.isfinite(c50.pred) and np.isfinite(c50.low)  # still scored, same band set

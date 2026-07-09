@@ -58,6 +58,17 @@ be reading, or to have read, that paper. So:
    undifferentiated mega-file where three unrelated responsibilities hide; consistent
    structure so an LLM can find things by convention.
 
+## Other checklist items
+
+- Unscored ≠ a result. A result table must not present an unscored or degenerate
+  quantity so it reads as a real result — e.g. a descriptive mean in a results
+  column when `n_scored == 0`. Mark unscored quantities visibly (`unscored`), never
+  as a number a reader could mistake for an outcome.
+- Implicit contracts must be legible. When consuming code branches on a property an
+  element is assumed to have (metric kind, value domain, ...), that property is
+  declared at the element's definition, where a reader first meets it — not left
+  implicit in the consumer.
+
 ## What to actively push back on — clutter
 
 Do not let documentation become noise. Flag and ask for removal of:
@@ -86,6 +97,15 @@ docstring or config note naming the roadmap item it serves and why it exists now
 next reader is not left guessing. "Why is this here?" is a documentation finding, never a
 deletion finding. (Whether a forward-looking abstraction is *warranted* is research-director's
 call, not yours; whether it is *correct* is falsifier's or acoustics-reviewer's.)
+
+## CLAUDE.md stays compressed
+
+CLAUDE.md is read on every session, so it is the one file where length is a
+running cost. It is in-scope for clutter: flag any line carrying a file path, a
+specific value, or a one-bug war story — those belong in an agent, the ledger, or
+a code comment, and CLAUDE.md should keep only the compressed rule that points to
+them. This compression test applies to CLAUDE.md ALONE; the agents, the ledger,
+and the code are meant to be detailed — do not strip necessary specifics from them.
 
 ## Output format
 
