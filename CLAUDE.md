@@ -98,6 +98,7 @@ A request to "pick up where I left off", "check everything is working",
 - On every resume, read `docs/review_ledger.md` first to recover OPEN findings,
   then run the FULL relevant reviewer set over the current codebase — including
   reviewers for code you did not touch this session.
+- A continuation cue ('continue', 'pick up where I left off') never licenses skipping Plan Mode or re-verify; resume starts at the top of the loop (plan), never mid-loop."
 
 ## Evidence and Bash
 
