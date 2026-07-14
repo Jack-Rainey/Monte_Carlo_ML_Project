@@ -8,10 +8,11 @@ import numpy as np
 
 from ..config import Config
 from ..registry import simulator_registry
+from ..runtime import Verbosity, emit
 from .base import SceneSpec
 
 
-def run_render(config: Config, run_dir: Path) -> None:
+def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     scenes_dir = run_dir / "scenes"
     renders_dir = run_dir / "renders"
     renders_dir.mkdir(parents=True, exist_ok=True)
@@ -46,11 +47,14 @@ def run_render(config: Config, run_dir: Path) -> None:
         np.save(out_dir / "low.npy", low_result.ir)
         np.save(out_dir / "high.npy", high_result.ir)
 
-        meta = {
-            "scene_id": scene.scene_id,
-            "low": low_result.meta,
-            "high": high_result.meta,
-        }
-        (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+        # Per-render QC record (design_spec §6): diagnostic only — nothing
+        # downstream reads it, so it may sit behind the save gate (F-23).
+        if verbosity.saves("diagnostics"):
+            meta = {
+                "scene_id": scene.scene_id,
+                "low": low_result.meta,
+                "high": high_result.meta,
+            }
+            (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
 
-    print(f"  Rendered {len(scene_paths)} scenes → {renders_dir}")
+    emit(verbosity, "progress", f"  Rendered {len(scene_paths)} scenes → {renders_dir}")

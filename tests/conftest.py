@@ -12,10 +12,19 @@ import numpy as np
 import yaml
 
 from amcd.config import Config, _BASE_YAML, _merge_layer
+from amcd.runtime import Verbosity
 from amcd.simulators.base import SceneSpec
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 TEST_TINY = _REPO_ROOT / "configs" / "test_tiny.yaml"
+
+# Stage functions require an explicit Verbosity (no default outside the CLI
+# layer — RD-09). Verbosity is a runtime output level, never an
+# experiment-governing value (CLAUDE.md), so a shared constant here does not
+# violate the no-values-in-conftest rule. save=0 doubles as a standing check
+# of the F-23 guarantee: every canonical artifact tests rely on must exist at
+# the lowest save level.
+QUIET = Verbosity(save=0, show=0)
 
 
 def tiny_config(**overrides) -> Config:

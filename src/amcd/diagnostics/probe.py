@@ -29,12 +29,13 @@ from ..config import Config
 from ..data.normalization import denormalize
 from ..evaluation.room_acoustic import channel_band_avg_metrics
 from ..representations import build_representation
+from ..runtime import Verbosity, emit
 
 # Per-metric JND tolerances (ISO 3382 difference limens) are config-declared —
 # see config.d0b_t30_jnd_frac / d0b_edt_jnd_frac / d0b_c50_jnd_db.
 
 
-def run_diagnostics(config: Config, run_dir: Path) -> None:
+def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     preprocessed_dir = run_dir / "preprocessed"
     renders_dir = run_dir / "renders"
     diag_dir = run_dir / "diagnostics"
@@ -111,13 +112,14 @@ def run_diagnostics(config: Config, run_dir: Path) -> None:
     }
     (diag_dir / "d0a_gap.json").write_text(json.dumps(result_d0a, indent=2))
 
-    print("\n  D0a — Headroom probe (low-ray vs high-ray energy gap per split)")
-    print(f"  {'Split':<28} {'n':>4}  {'mean gap':>9}  {'std':>6}  Verdict")
-    print("  " + "-" * 80)
+    emit(verbosity, "metrics", "\n  D0a — Headroom probe (low-ray vs high-ray energy gap per split)")
+    emit(verbosity, "metrics", f"  {'Split':<28} {'n':>4}  {'mean gap':>9}  {'std':>6}  Verdict")
+    emit(verbosity, "metrics", "  " + "-" * 80)
     for sp, info in per_split.items():
-        print(
+        emit(
+            verbosity, "metrics",
             f"  {sp:<28} {info['n_scenes']:>4}  {info['mean_gap_db']:>8.2f} dB"
-            f"  {info['std_gap_db']:>5.2f}  {info['verdict']}"
+            f"  {info['std_gap_db']:>5.2f}  {info['verdict']}",
         )
 
     # ─── D0b ─────────────────────────────────────────────────────────────────
@@ -128,6 +130,7 @@ def run_diagnostics(config: Config, run_dir: Path) -> None:
         diag_dir=diag_dir,
         splits=splits,
         norm_stats=norm_stats,
+        verbosity=verbosity,
     )
 
 
@@ -142,6 +145,7 @@ def _run_d0b(
     diag_dir: Path,
     splits: dict[str, str],
     norm_stats: dict[str, float],
+    verbosity: Verbosity,
 ) -> None:
     """
     Carrier ceiling test (design_spec §4.2):
@@ -242,9 +246,9 @@ def _run_d0b(
     (diag_dir / "d0b_oracle.json").write_text(json.dumps(result_d0b, indent=2))
 
     # ─── Gate verdict ────────────────────────────────────────────────────────
-    print("\n  D0b — Carrier ceiling test (oracle IR vs high-ray reference, ISO-3382 path)")
-    print(f"  {'Split':<28} {'T30 resid':>12}  {'EDT resid':>12}  {'C50 resid':>12}  Verdict")
-    print("  " + "-" * 90)
+    emit(verbosity, "metrics", "\n  D0b — Carrier ceiling test (oracle IR vs high-ray reference, ISO-3382 path)")
+    emit(verbosity, "metrics", f"  {'Split':<28} {'T30 resid':>12}  {'EDT resid':>12}  {'C50 resid':>12}  Verdict")
+    emit(verbosity, "metrics", "  " + "-" * 90)
 
     all_clear = True
     any_indeterminate = False
@@ -291,25 +295,26 @@ def _run_d0b(
         edt_s = f"{edt_r:.4f}s" if not np.isnan(edt_r) else "   N/A"
         c50_s = f"{c50_r:.4f}dB" if not np.isnan(c50_r) else "   N/A"
 
-        print(
+        emit(
+            verbosity, "metrics",
             f"  {split_name:<28} "
             f"{t30_s:>12}({t30_v})  "
             f"{edt_s:>12}({edt_v})  "
-            f"{c50_s:>12}({c50_v})"
+            f"{c50_s:>12}({c50_v})",
         )
 
-    print()
+    emit(verbosity, "metrics", "")
     if any_indeterminate:
-        print("  D0b verdict: INDETERMINATE — one or more ISO-3382 metrics unavailable in at least one split")
-        print("  Re-run on real GSound-SIR renders (ir_duration ≥ 1 s) before treating this gate as informative")
+        emit(verbosity, "metrics", "  D0b verdict: INDETERMINATE — one or more ISO-3382 metrics unavailable in at least one split")
+        emit(verbosity, "metrics", "  Re-run on real GSound-SIR renders (ir_duration ≥ 1 s) before treating this gate as informative")
     elif all_clear:
-        print("  D0b verdict: CARRIER CEILING CLEARS — oracle IR recovers reference metrics within JND")
-        print("  Upper bound: carrier fine structure is not the bottleneck given perfect energy envelope.")
-        print("  This does not guarantee a trained model reaches the same ceiling (oracle uses ground-truth energy).")
-        print("  Proceed to E1.")
+        emit(verbosity, "metrics", "  D0b verdict: CARRIER CEILING CLEARS — oracle IR recovers reference metrics within JND")
+        emit(verbosity, "metrics", "  Upper bound: carrier fine structure is not the bottleneck given perfect energy envelope.")
+        emit(verbosity, "metrics", "  This does not guarantee a trained model reaches the same ceiling (oracle uses ground-truth energy).")
+        emit(verbosity, "metrics", "  Proceed to E1.")
     else:
-        print("  D0b verdict: CARRIER BOTTLENECK — oracle misses reference metrics beyond JND")
-        print("  Early-reflection sparsity in the low-ray carrier limits metric recovery")
-        print("  Investigate carrier quality before training")
+        emit(verbosity, "metrics", "  D0b verdict: CARRIER BOTTLENECK — oracle misses reference metrics beyond JND")
+        emit(verbosity, "metrics", "  Early-reflection sparsity in the low-ray carrier limits metric recovery")
+        emit(verbosity, "metrics", "  Investigate carrier quality before training")
 
-    print(f"  → d0b_oracle.json written to {diag_dir}")
+    emit(verbosity, "metrics", f"  → d0b_oracle.json written to {diag_dir}")

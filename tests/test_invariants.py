@@ -23,6 +23,8 @@ from amcd.data.splits import assign_split
 from amcd.simulators.dry_run import DryRunSimulator
 from amcd.simulators.base import SceneSpec
 
+from tests.conftest import QUIET
+
 _TEST_TINY = Path(__file__).resolve().parent.parent / "configs" / "test_tiny.yaml"
 
 
@@ -37,9 +39,9 @@ def _run_through_preprocess(tmp_path: Path, cfg: Config) -> dict:
     from amcd.simulators.render import run_render
     from amcd.data.preprocess import run_preprocess
 
-    run_gen_scenes(cfg, tmp_path)
-    run_render(cfg, tmp_path)
-    run_preprocess(cfg, tmp_path)
+    run_gen_scenes(cfg, tmp_path, QUIET)
+    run_render(cfg, tmp_path, QUIET)
+    run_preprocess(cfg, tmp_path, QUIET)
 
     with open(tmp_path / "preprocessed" / "meta.json") as f:
         return json.load(f)
@@ -135,9 +137,9 @@ class TestPerScenePreservation:
             if n_test == 0:
                 pytest.skip("No test scenes in any test split — increase scenes.n_id")
 
-            run_train(cfg, tmp)
-            run_infer(cfg, tmp)
-            run_eval(cfg, tmp)
+            run_train(cfg, tmp, QUIET)
+            run_infer(cfg, tmp, QUIET)
+            run_eval(cfg, tmp, QUIET)
 
             import pandas as pd
             df = pd.read_parquet(tmp / "metrics" / "metrics.parquet")
@@ -264,9 +266,9 @@ class TestDistributionShiftSplits:
             from amcd.training.infer import run_infer
             from amcd.evaluation.evaluator import run_eval
 
-            run_train(cfg, tmp)
-            run_infer(cfg, tmp)
-            run_eval(cfg, tmp)
+            run_train(cfg, tmp, QUIET)
+            run_infer(cfg, tmp, QUIET)
+            run_eval(cfg, tmp, QUIET)
 
             import pandas as pd
             df = pd.read_parquet(tmp / "metrics" / "metrics.parquet")
@@ -347,7 +349,7 @@ class TestDistributionShiftSplits:
 
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
-            run_gen_scenes(cfg, tmp)
+            run_gen_scenes(cfg, tmp, QUIET)
 
             id_axes = dict(sc.id_regime)
             scenes = [SceneSpec.from_json(p) for p in (tmp / "scenes").glob("scene_*.json")]

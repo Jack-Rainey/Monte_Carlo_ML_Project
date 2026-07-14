@@ -8,9 +8,10 @@ from pathlib import Path
 import pandas as pd
 
 from ..config import Config
+from ..runtime import Verbosity, emit
 
 
-def run_report(config: Config, run_dir: Path) -> None:
+def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     stats_dir = run_dir / "stats"
     report_dir = run_dir / "report"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -94,11 +95,15 @@ def run_report(config: Config, run_dir: Path) -> None:
     (report_dir / "summary.txt").write_text(summary_txt)
     df.to_csv(report_dir / "metrics_table.csv", index=False)
 
-    # Supplementary bundle: copy config stamp + versions
-    for fname in ["config.yaml", "versions.json"]:
-        src = run_dir / fname
-        if src.exists():
-            shutil.copy(src, report_dir / fname)
+    # Supplementary bundle: copy config stamp + versions. Provenance, same gate
+    # as its source (`Config.stamp` runs at save ≥ 1), so a save=0 run — the
+    # sanctioned provenance-free level (RD-09) — is self-consistent rather than
+    # silently missing a copy.
+    if verbosity.saves("provenance"):
+        for fname in ["config.yaml", "versions.json"]:
+            src = run_dir / fname
+            if src.exists():
+                shutil.copy(src, report_dir / fname)
 
-    print(summary_txt)
-    print(f"\n  Report written → {report_dir}")
+    emit(verbosity, "metrics", summary_txt)
+    emit(verbosity, "metrics", f"\n  Report written → {report_dir}")

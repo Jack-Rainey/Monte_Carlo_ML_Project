@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from ..config import Config
+from ..runtime import Verbosity, emit
 from ..simulators.base import SceneSpec
 
 
@@ -64,7 +65,7 @@ def _sample_material(
     return float(rng.uniform(lo, hi))
 
 
-def run_gen_scenes(config: Config, run_dir: Path) -> None:
+def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     out_dir = run_dir / "scenes"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -112,7 +113,8 @@ def run_gen_scenes(config: Config, run_dir: Path) -> None:
             scene_idx += 1
 
     n_shift = scene_idx - scenes_cfg.n_id
-    print(
+    emit(
+        verbosity, "progress",
         f"  Generated {scene_idx} scene specs "
-        f"({scenes_cfg.n_id} id + {n_shift} shift) → {out_dir}"
+        f"({scenes_cfg.n_id} id + {n_shift} shift) → {out_dir}",
     )

@@ -114,6 +114,15 @@ to run something if it needs a privilege the allow-list deliberately withholds.
   strategy — is set by a CLI argument or a config file, or the code raises an
   error. There is no fourth option. Do not bury experiment-governing values as
   literals in .py files, test fixtures (`conftest.py`), or comments.
+- **Output verbosity is not an experiment value.** `--save-verbosity` and
+  `--show-verbosity` set only how much a run writes to disk and prints live —
+  runtime output levels, never experiment-governing values — so they carry CLI
+  defaults (the one sanctioned exception here; a bare invocation must work).
+  This does not weaken the rule above: they live in the CLI layer, never the
+  config. `--save-verbosity` gates observability artifacts only — canonical
+  results, inter-stage data, and stage sentinels are written at every level, and
+  no verbosity level may alter what a run produces (ladder + per-stage wiring:
+  `docs/verbosity.md`).
 - **Per-aspect seeds.** Each stochastic stage (scene generation, per-split
   sampling, model init, shuffling, augmentation) draws from its own named seed.
   Splits in particular must not share a seed.

@@ -11,6 +11,7 @@ import torch
 
 from ..config import Config
 from ..data.normalization import denormalize
+from ..runtime import Verbosity, emit
 from .metric_row import KIND_LEGS, MetricDrop, MetricTriple, metric_improvement
 from .signal import compute_signal_metrics
 from .room_acoustic import compute_room_acoustic_metrics
@@ -18,7 +19,7 @@ from .spatial import compute_spatial_metrics
 from .perceptual import compute_perceptual_metrics
 
 
-def run_eval(config: Config, run_dir: Path) -> None:
+def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     preprocessed_dir = run_dir / "preprocessed"
     predictions_dir = run_dir / "predictions"
     renders_dir = run_dir / "renders"
@@ -167,10 +168,12 @@ def run_eval(config: Config, run_dir: Path) -> None:
     # Headline count: scenes whose energy MSE improved over the low-ray baseline.
     energy_rows = df[df["metric"] == "energy_mse"]
     n_improved = int((energy_rows["improved"] == True).sum())  # noqa: E712
-    print(
+    emit(
+        verbosity, "metrics",
         f"  Evaluated {n_scenes} scenes, "
-        f"{n_improved}/{n_scenes} improved (energy MSE) over baseline → {metrics_dir / 'metrics.parquet'}"
+        f"{n_improved}/{n_scenes} improved (energy MSE) over baseline → {metrics_dir / 'metrics.parquet'}",
     )
-    print(
-        f"  {len(drop_rows)} dropped/partial metric legs logged → {metrics_dir / 'drops.csv'}"
+    emit(
+        verbosity, "metrics",
+        f"  {len(drop_rows)} dropped/partial metric legs logged → {metrics_dir / 'drops.csv'}",
     )

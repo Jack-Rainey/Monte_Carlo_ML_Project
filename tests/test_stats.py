@@ -21,7 +21,7 @@ import scipy.stats
 
 from amcd.stats.aggregate import bootstrap_ci, mdes, run_stats
 
-from tests.conftest import tiny_config
+from tests.conftest import QUIET, tiny_config
 
 
 def _achieved_power(ncp: float, df: int, t_crit: float) -> float:
@@ -113,7 +113,7 @@ def _run_stats_on_rows(cfg, rows: list[dict]) -> pd.DataFrame:
         run_dir = Path(d)
         (run_dir / "metrics").mkdir()
         pd.DataFrame(rows).to_parquet(run_dir / "metrics" / "metrics.parquet", index=False)
-        run_stats(cfg, run_dir)
+        run_stats(cfg, run_dir, QUIET)
         return pd.read_csv(run_dir / "stats" / "ci_table.csv")
 
 

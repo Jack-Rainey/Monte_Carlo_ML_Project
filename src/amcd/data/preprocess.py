@@ -12,12 +12,13 @@ import torch
 
 from ..config import Config
 from ..representations import build_representation
+from ..runtime import Verbosity, emit
 from ..simulators.base import SceneSpec
 from .normalization import compute_stats, normalize
 from .splits import assign_split
 
 
-def run_preprocess(config: Config, run_dir: Path) -> None:
+def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     scenes_dir = run_dir / "scenes"
     renders_dir = run_dir / "renders"
     out_dir = run_dir / "preprocessed"
@@ -125,9 +126,15 @@ def run_preprocess(config: Config, run_dir: Path) -> None:
 
     counts = meta["split_counts"]
     counts_str = ", ".join(f"{sp}={n}" for sp, n in counts.items())
-    print(f"  Preprocessed {len(scenes)} scenes ({counts_str}) → {out_dir}")
-    print(f"  Energy tensors: (C={config.n_channels}, bands={n_bands}, frames={n_frames})")
+    emit(verbosity, "progress", f"  Preprocessed {len(scenes)} scenes ({counts_str}) → {out_dir}")
+    emit(
+        verbosity, "metrics",
+        f"  Energy tensors: (C={config.n_channels}, bands={n_bands}, frames={n_frames})",
+    )
 
     for sp, count in counts.items():
         if count == 0:
-            print(f"  WARNING: {sp} split is empty. Increase scenes.n_id or adjust fracs.")
+            emit(
+                verbosity, "warning",
+                f"  WARNING: {sp} split is empty. Increase scenes.n_id or adjust fracs.",
+            )

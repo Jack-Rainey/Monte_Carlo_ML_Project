@@ -5,6 +5,8 @@ import pytest
 
 from amcd.config import Config
 
+from tests.conftest import QUIET
+
 
 class TestConfigLoad:
     def test_load_base(self) -> None:
@@ -216,12 +218,12 @@ class TestSeedReproducibility:
 
         with tempfile.TemporaryDirectory() as d1:
             p1 = Path(d1)
-            run_gen_scenes(cfg, p1)
+            run_gen_scenes(cfg, p1, QUIET)
             scenes1 = _load_sorted(p1 / "scenes")
 
         with tempfile.TemporaryDirectory() as d2:
             p2 = Path(d2)
-            run_gen_scenes(cfg, p2)
+            run_gen_scenes(cfg, p2, QUIET)
             scenes2 = _load_sorted(p2 / "scenes")
 
         assert scenes1 == scenes2, "Scene generation is not reproducible"

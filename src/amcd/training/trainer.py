@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from ..config import Config
 from ..data.dataset import EnergyDataset
 from ..models.cnn import build_model  # noqa: F401 — import also triggers registration
+from ..runtime import Verbosity, emit
 from .loss import build_criterion
 
 
@@ -22,7 +23,7 @@ def _select_device() -> torch.device:
     return torch.device("cpu")
 
 
-def run_train(config: Config, run_dir: Path) -> None:
+def run_train(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     preprocessed_dir = run_dir / "preprocessed"
     checkpoint_dir = run_dir / "checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -51,7 +52,7 @@ def run_train(config: Config, run_dir: Path) -> None:
     torch.manual_seed(config.seed("weight_init"))
 
     device = _select_device()
-    print(f"  Device: {device}")
+    emit(verbosity, "metrics", f"  Device: {device}")
 
     # Datasets + loaders (num_workers=0 for MPS compatibility)
     train_ds = EnergyDataset(preprocessed_dir, train_split)
@@ -111,20 +112,23 @@ def run_train(config: Config, run_dir: Path) -> None:
         else:
             patience_counter += 1
             if patience_counter >= config.early_stopping_patience:
-                print(f"  Early stopping at epoch {epoch}")
+                emit(verbosity, "progress", f"  Early stopping at epoch {epoch}")
                 break
 
         if (epoch + 1) % max(1, config.n_epochs // 10) == 0:
-            print(
+            emit(
+                verbosity, "progress",
                 f"  Epoch {epoch+1}/{config.n_epochs} | "
-                f"train={train_loss:.4f}  valid={valid_loss:.4f}"
+                f"train={train_loss:.4f}  valid={valid_loss:.4f}",
             )
 
-    # Save train log
-    log_path = checkpoint_dir / "train_log.csv"
-    with open(log_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["epoch", "train_loss", "valid_loss"])
-        writer.writeheader()
-        writer.writerows(log_rows)
+    # Per-epoch loss curve: observability only (nothing downstream reads it,
+    # F-23) — checkpoint selection above already consumed the losses live.
+    if verbosity.saves("metrics"):
+        log_path = checkpoint_dir / "train_log.csv"
+        with open(log_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["epoch", "train_loss", "valid_loss"])
+            writer.writeheader()
+            writer.writerows(log_rows)
 
-    print(f"  Best valid loss: {best_valid_loss:.4f} → {checkpoint_dir / 'best.pt'}")
+    emit(verbosity, "metrics", f"  Best valid loss: {best_valid_loss:.4f} → {checkpoint_dir / 'best.pt'}")

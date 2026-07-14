@@ -48,9 +48,12 @@ gen-scenes → render → preprocess → diagnostics → train → infer → eva
   is skipped. Pass `--force` to rerun.
 - Config layers merge left-to-right on top of `configs/base.yaml`; later `--config`
   files override earlier ones.
-- Every run stamps `config.yaml` (resolved concrete config), `resolved.yaml`
+- Runs stamp `config.yaml` (resolved concrete config), `resolved.yaml`
   (concrete per-aspect seeds + role metadata + derived shapes), and `versions.json`
-  into its run directory for provenance.
+  into the run directory for provenance from the default save level; see
+  `docs/verbosity.md` for the `--save-verbosity`/`--show-verbosity` output ladder
+  (only an explicit `--save-verbosity 0` omits provenance, and no level alters
+  what a run produces).
 
 ## Configuration is the source of truth
 
@@ -106,7 +109,7 @@ src/amcd/
   diagnostics/      # D0a headroom + D0b oracle probes
   reporting/        # result tables
 configs/            # base / dry_run / test_tiny / models/*
-docs/               # research_I_paper.md, design_spec.md, review_ledger.md
+docs/               # research_I_paper.md, design_spec.md, review_ledger.md, verbosity.md
 tests/              # invariant / config / shape tests
 experiments/        # run outputs (git-ignored)
 ```

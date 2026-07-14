@@ -12,7 +12,7 @@ from pathlib import Path
 
 from amcd.reporting.tables import run_report
 
-from tests.conftest import tiny_config
+from tests.conftest import QUIET, tiny_config
 
 
 def _summary_row(metric: str, **overrides) -> dict:
@@ -36,7 +36,7 @@ def _render(rows: list[dict]) -> str:
         run_dir = Path(d)
         (run_dir / "stats").mkdir()
         (run_dir / "stats" / "summary.json").write_text(json.dumps(rows))
-        run_report(cfg, run_dir)
+        run_report(cfg, run_dir, QUIET)
         return (run_dir / "report" / "summary.txt").read_text()
 
 

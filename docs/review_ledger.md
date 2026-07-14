@@ -13,7 +13,7 @@ of this file is the audit trail).
 
 ## OPEN findings
 
-(none — 2026-07-08 pass closed with zero OPEN rows; see Resume here)
+(none — 2026-07-13 verbosity-gate pass closed with zero OPEN rows; see Resume here)
 
 | ID | agent | sev | status | anchor | finding | resolution |
 |----|-------|-----|--------|--------|---------|------------|
@@ -28,41 +28,23 @@ of this file is the audit trail).
 
 ### Resume here
 
-**2026-07-08 (Fable): pass CLOSED — zero OPEN rows.** F-20 (metric-`kind`
-taxonomy: every metric declares `kind` ∈ {match_reference, maximize, minimize};
-eval/stats spine branches on it; `energy_snr_db` now maximize and scored 3/3
-everywhere), F-21 (no silent exclusion: producer NaN reasons →
-`metrics/drops.csv`, scored-vs-attempted in stats/report), RR-14 (unscored rows
-render `unscored`), RR-15..18 (readability minors), and AC-08 (ISO-3382 legs
-averaged over the cross-leg intersected band set) all fixed and
-re-review-confirmed clean by their raising reviewers; rows deleted. Clean-pass
-evidence: falsifier recomputed all 20 ci_table cells from the raw parquet at
-machine precision (twice — round 1 and the AC-08 delta, max diff 7.1e-15) and
-verified drops.csv completeness (no missing, false, or orphan rows); acoustics
-verified SNR legs bit-identical to pre-refactor and confirmed intersection
-physics + preserved probe path; readability confirmed rendering and RR-15..18;
-research-director gated the plan (maximize/minimize ruled forward-looking for
-roadmap perceptual/spatial metrics, module docstring documents this). Current
-dry run: `experiments/all_20260708_194959`; suite 86 passed. Falsifier's
-out-of-scope observation (not a finding): D0b probe averages oracle/reference
-over each IR's own surviving bands, not an intersection — pre-existing,
-diagnostic-only, gated to real renders; acoustics-reviewer's call when D0b goes
-live.
-
-**2026-07-06 (Fable): 2026-07-05 plan implemented in full; pass CLOSED —
-zero OPEN rows.** All plan items landed as commits on branch `v3-rebuild` (S-01
-→ repo initialized, remote = github.com/Jack-Rainey/Monte_Carlo_ML_Project;
-push is user-run): F-18 paired-improvement MDES/CI (+ folded F-15 substreams
-and F-17 power>alpha guard, each with its own test), F-19 value_domain seam,
-RR-09/10/11 docs/renames, RR-12/13 label fixes. Clean pass evidence: falsifier
-verified F-18/F-19/F-15/F-17 clean by independent recompute of every
-ci_table.csv cell from the raw parquet (machine precision), then delta-confirmed
-the RR-12/13 rename (no value change, no stale schema consumer);
-acoustics-reviewer zero new findings (probe-verified dB↔linear SNR,
-value_domain declarations, paired quantity per metric; flagged a future
-round-trip probe for any log/exp base edit); readability-reviewer confirmed
-RR-09/10/11 and then RR-12/13 clean, zero new. Suite 76 passed; full dry run
-clean (experiments/all_20260706_214339).
+**2026-07-13 (Fable): verbosity gate CLOSED — zero OPEN rows.** F-22 (threading:
+frozen `Verbosity(save, show)` cli → Pipeline → all nine stages via the widened
+dispatch signature; zero bare `print` outside `runtime.emit`), F-23 (save axis
+gates only observability artifacts; falsifier independently verified save=0 vs
+save=5 full runs bit-identical across metrics.parquet, stats, diagnostics JSONs,
+and best.pt weights), F-24 (IntRange(0,5), always-stderr warnings/errors, visual
+TTY guard), RD-09 (defaults 1/1 quarantined to the CLI layer, provenance rung),
+RD-10 (level-5 §6 Blender seam reserved, recorded in research-director.md's
+forward-looking list), RR-19 (ladder + total per-stage wiring table in
+docs/verbosity.md, single `emit` helper, shared `common_options` decorator) all
+implemented and confirmed clean; the pass's own findings (RD-11, RR-20..23 —
+doc wording, all minor) fixed and re-review-confirmed; rows deleted. Clean-pass
+evidence: falsifier zero findings, acoustics zero findings (print→emit faithful,
+no physics change), research-director + readability re-confirmed their fixes.
+Suite 99 passed; dry run `experiments/all_20260713_194209` (default save=1/show=1
+writes provenance quartet incl. git SHA, omits train_log.csv and renders/meta.json
+as specced). The dry_run plumbing gate is complete.
 
 **Next concrete build (roadmap, per RD-06):** the
 real `gsound_sir` render backend (x86) is the single hard dependency and the

@@ -13,6 +13,7 @@ from ..data.dataset import EnergyDataset
 from ..data.normalization import denormalize
 from ..representations import build_representation
 from ..models.cnn import build_model  # noqa: F401 — import also triggers registration
+from ..runtime import Verbosity, emit
 
 
 def _select_device() -> torch.device:
@@ -23,7 +24,7 @@ def _select_device() -> torch.device:
     return torch.device("cpu")
 
 
-def run_infer(config: Config, run_dir: Path) -> None:
+def run_infer(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     preprocessed_dir = run_dir / "preprocessed"
     checkpoint_dir = run_dir / "checkpoints"
     predictions_dir = run_dir / "predictions"
@@ -85,4 +86,4 @@ def run_infer(config: Config, run_dir: Path) -> None:
 
                 total += 1
 
-    print(f"  Saved {total} predictions → {predictions_dir}")
+    emit(verbosity, "progress", f"  Saved {total} predictions → {predictions_dir}")

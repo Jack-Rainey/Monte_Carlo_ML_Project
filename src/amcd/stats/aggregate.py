@@ -21,6 +21,7 @@ import scipy.stats
 
 from ..config import Config
 from ..evaluation.metric_row import MetricTriple, paired_improvement
+from ..runtime import Verbosity, emit
 
 
 def bootstrap_ci(
@@ -150,7 +151,7 @@ def _substream_rng(bootstrap_seed: int, *key_parts: str) -> np.random.Generator:
     return np.random.default_rng(np.random.SeedSequence([bootstrap_seed, stream_key]))
 
 
-def run_stats(config: Config, run_dir: Path) -> None:
+def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     metrics_path = run_dir / "metrics" / "metrics.parquet"
     if not metrics_path.exists():
         raise FileNotFoundError(f"No metrics found at {metrics_path}. Run eval first.")
@@ -262,4 +263,4 @@ def run_stats(config: Config, run_dir: Path) -> None:
 
     n_splits = summary_df["split"].nunique() if not summary_df.empty else 0
     n_metrics = summary_df["metric"].nunique() if not summary_df.empty else 0
-    print(f"  Stats for {n_metrics} metrics × {n_splits} splits → {stats_dir}")
+    emit(verbosity, "metrics", f"  Stats for {n_metrics} metrics × {n_splits} splits → {stats_dir}")

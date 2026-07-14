@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from .pipeline import STAGES, Pipeline
+from .runtime import Verbosity, emit
 
 
 def _make_run_dir(label: str) -> Path:
@@ -19,36 +20,97 @@ def main() -> None:
     """Acoustic Monte Carlo Denoising pipeline."""
 
 
-def _add_stage_command(stage: str) -> None:
-    fn_name = stage.replace("-", "_")
+def common_options(fn):
+    """The option set shared by every stage command and `all` (RR-19).
 
-    @main.command(name=stage)
-    @click.option(
-        "--config", "-c",
-        multiple=True,
-        type=click.Path(exists=True, path_type=Path),
-        required=True,
-        help="Config YAML file(s). Multiple files are merged left-to-right.",
-    )
-    @click.option(
-        "--run-dir", "-r",
-        type=click.Path(path_type=Path),
-        default=None,
-        help="Run directory (default: experiments/<stage>_<timestamp>).",
-    )
-    @click.option("--force", is_flag=True, default=False, help="Re-run even if cached.")
-    def _cmd(config: tuple[Path, ...], run_dir: Path | None, force: bool) -> None:
-        from .config import Config
-        cfg = Config.load(*config)
-        if run_dir is None:
-            run_dir = _make_run_dir(stage)
-        run_dir = Path(run_dir)
+    The two verbosity defaults are the sanctioned exception to
+    no-hidden-defaults (CLAUDE.md "Output verbosity is not an experiment
+    value"): runtime output levels only, quarantined to this CLI layer —
+    `Config` never carries them (RD-09). Default 1 on both axes is the
+    provenance/timing rung, so a bare invocation is non-blocking yet never
+    lacks reproducibility metadata (config snapshot, seeds, git SHA,
+    timings); save=0 deliberately omits provenance and is never a default.
+    Ladder and per-stage wiring table: docs/verbosity.md.
+    """
+    options = [
+        click.option(
+            "--config", "-c",
+            multiple=True,
+            type=click.Path(exists=True, path_type=Path),
+            required=True,
+            help="Config YAML file(s). Multiple files are merged left-to-right.",
+        ),
+        click.option(
+            "--run-dir", "-r",
+            type=click.Path(path_type=Path),
+            default=None,
+            help="Run directory (default: experiments/<stage>_<timestamp>).",
+        ),
+        click.option("--force", is_flag=True, default=False, help="Re-run even if cached."),
+        click.option(
+            "--save-verbosity",
+            type=click.IntRange(0, 5),
+            default=1,
+            show_default=True,
+            help="How much a run writes to disk: 0=canonical results only, "
+                 "1=+provenance, 2=+progress, 3=+intermediate metrics, "
+                 "4=+full diagnostics, 5=+visual. Results are identical at "
+                 "every level (docs/verbosity.md).",
+        ),
+        click.option(
+            "--show-verbosity",
+            type=click.IntRange(0, 5),
+            default=1,
+            show_default=True,
+            help="How much a run prints live: 0=warnings/errors only, "
+                 "1=+run id and timings, 2=+progress, 3=+intermediate metrics, "
+                 "4=+full diagnostics, 5=+visual preview (TTY only; "
+                 "docs/verbosity.md).",
+        ),
+    ]
+    for opt in reversed(options):
+        fn = opt(fn)
+    return fn
+
+
+def _invoke(
+    stage: str | None,
+    config: tuple[Path, ...],
+    run_dir: Path | None,
+    force: bool,
+    save_verbosity: int,
+    show_verbosity: int,
+) -> None:
+    """Shared command body; `stage=None` runs all stages."""
+    from .config import Config
+    cfg = Config.load(*config)
+    verbosity = Verbosity(save=save_verbosity, show=show_verbosity)
+    if run_dir is None:
+        run_dir = _make_run_dir(stage if stage is not None else "all")
+    run_dir = Path(run_dir)
+    if verbosity.saves("provenance"):
         cfg.stamp(run_dir)
-        print(f"Run dir: {run_dir}")
-        pipeline = Pipeline(cfg, run_dir, force=force)
+    emit(verbosity, "timing", f"Run dir: {run_dir.resolve()}")
+    pipeline = Pipeline(cfg, run_dir, verbosity, force=force)
+    if stage is None:
+        pipeline.run_all()
+    else:
         pipeline.run_stage(stage)
 
-    _cmd.__name__ = fn_name
+
+def _add_stage_command(stage: str) -> None:
+    @main.command(name=stage)
+    @common_options
+    def _cmd(
+        config: tuple[Path, ...],
+        run_dir: Path | None,
+        force: bool,
+        save_verbosity: int,
+        show_verbosity: int,
+    ) -> None:
+        _invoke(stage, config, run_dir, force, save_verbosity, show_verbosity)
+
+    _cmd.__name__ = stage.replace("-", "_")
 
 
 for _s in STAGES:
@@ -56,28 +118,13 @@ for _s in STAGES:
 
 
 @main.command("all")
-@click.option(
-    "--config", "-c",
-    multiple=True,
-    type=click.Path(exists=True, path_type=Path),
-    required=True,
-    help="Config YAML file(s). Multiple files are merged left-to-right.",
-)
-@click.option(
-    "--run-dir", "-r",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Run directory (default: experiments/all_<timestamp>).",
-)
-@click.option("--force", is_flag=True, default=False, help="Re-run all stages.")
-def run_all(config: tuple[Path, ...], run_dir: Path | None, force: bool) -> None:
+@common_options
+def run_all(
+    config: tuple[Path, ...],
+    run_dir: Path | None,
+    force: bool,
+    save_verbosity: int,
+    show_verbosity: int,
+) -> None:
     """Run all stages: gen-scenes → render → preprocess → diagnostics → train → infer → eval → stats → report."""
-    from .config import Config
-    cfg = Config.load(*config)
-    if run_dir is None:
-        run_dir = _make_run_dir("all")
-    run_dir = Path(run_dir)
-    cfg.stamp(run_dir)
-    print(f"Run dir: {run_dir.resolve()}")
-    pipeline = Pipeline(cfg, run_dir, force=force)
-    pipeline.run_all()
+    _invoke(None, config, run_dir, force, save_verbosity, show_verbosity)

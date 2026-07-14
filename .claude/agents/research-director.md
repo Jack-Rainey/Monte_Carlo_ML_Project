@@ -70,7 +70,10 @@ Concretely, treat these as forward-looking (provision now, do not strip):
 model-agnostic config that does not assume a CNN; config that expresses tunable
 ranges plus a declared search strategy (grid / full-factorial / evolutionary);
 a variable number of splits; anything that avoids hardcoding GSound-SIR as the
-only raytracer; a stable simulator interface behind the dry-run scaffold.
+only raytracer; a stable simulator interface behind the dry-run scaffold; a
+run-output verbosity ladder whose top level reserves a slot for the roadmap's
+Blender preview / authoring front-end (§6) — unbuilt today, but a deliberate
+seam, not scope creep.
 
 ## Roadmap-reachability checks (apply to any config or interface plan)
 Flag as a strategic risk any design that would FORECLOSE a roadmap item:

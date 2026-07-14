@@ -17,7 +17,7 @@ import pytest
 from amcd.evaluation.metric_row import MetricTriple, metric_improvement, paired_improvement
 from amcd.stats.aggregate import run_stats
 
-from tests.conftest import tiny_config
+from tests.conftest import QUIET, tiny_config
 
 
 def test_improvement_is_per_metric_not_borrowed() -> None:
@@ -122,7 +122,7 @@ def test_pct_improved_bounded_with_nan_group() -> None:
         run_dir = Path(d)
         (run_dir / "metrics").mkdir()
         pd.DataFrame(rows).to_parquet(run_dir / "metrics" / "metrics.parquet", index=False)
-        run_stats(cfg, run_dir)
+        run_stats(cfg, run_dir, QUIET)
 
         ci = pd.read_csv(run_dir / "stats" / "ci_table.csv")
 
@@ -153,7 +153,7 @@ def test_pct_bounded_when_improved_column_is_pure_bool() -> None:
         run_dir = Path(d)
         (run_dir / "metrics").mkdir()
         df.to_parquet(run_dir / "metrics" / "metrics.parquet", index=False)
-        run_stats(cfg, run_dir)
+        run_stats(cfg, run_dir, QUIET)
         ci = pd.read_csv(run_dir / "stats" / "ci_table.csv")
 
     row = ci[ci["metric"] == "T30"].iloc[0]
