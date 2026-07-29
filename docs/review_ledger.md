@@ -75,13 +75,24 @@ introspection, not docs):**
   speeds, frequency_points, sample_rate, precise_early_reflections=False,
   normalize=True, early_reflection_threshold=0.01)` — **there is no
   `path_types` argument** (plan Step 3 and upstream `test.py` both pass one).
-- `frequency_points` must be **`n_bands - 1` CROSSOVER points, not band
-  centres** (hard runtime check: "Number of frequency points must be number of
-  bands - 1"). 8 intensity bands → 7 crossovers. Plan Step 1's "band centers …
-  must match ray_generator's 8 intensity bands" is wrong. **The actual crossover
-  values are still UNVERIFIED** — `[125,250,500,1000,2000,4000,8000]` is
-  upstream `test.py`'s choice, not confirmed against GSound's internal band
-  edges. Confirm against GSound source and route to acoustics-reviewer.
+- `frequency_points` must be **`n_bands - 1` CROSSOVER points (filterbank band
+  EDGES), not band centres** — hard runtime check ("Number of frequency points
+  must be number of bands - 1") and they are consumed as
+  `CrossoverFilter crossover(sample_rate, freq_points)`
+  (auralizer/src/cpp/binding.cpp:304,334). Plan Step 1's "band centers … must
+  match ray_generator's 8 intensity bands" is wrong.
+  **Correct values, traced end-to-end:** `pygsound::Context()`
+  (ray_generator/src/pygsound/src/Context.cpp:8) overrides GSound's log-spaced
+  defaults with octave band CENTRES `{63,125,250,500,1000,2000,4000,8000}` Hz;
+  `gs::FrequencyBands` derives crossovers as the geometric mean of adjacent
+  centres (gsFrequencyBands.cpp:83-88). So `frequency_points` must be
+  **`[88.4, 176.8, 353.6, 707.1, 1414.2, 2828.4, 5656.9]` Hz**.
+  ⚠️ **Upstream `auralizer/test.py` is WRONG here** — it passes
+  `[125,250,500,1000,2000,4000,8000]`, i.e. the band centres used as if they
+  were edges, shifting every band edge ~½ octave high and misassigning the
+  simulated per-band energies in the SH synthesis. Do not copy it. (The Step 0
+  smoke test copied it; harmless there, it only had to prove plumbing.)
+  Route to acoustics-reviewer at Step 6 for confirmation.
 - Path retention is **native upstream**: `scene.getPathData(..., 
   energy_percentage=100.0, max_rays=0, use_gpu=False)`. The plan's
   `path_retention {mode: all|top_percent|top_k, value}` maps directly onto
