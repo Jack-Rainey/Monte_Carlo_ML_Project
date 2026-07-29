@@ -70,7 +70,11 @@ Concretely, treat these as forward-looking (provision now, do not strip):
 model-agnostic config that does not assume a CNN; config that expresses tunable
 ranges plus a declared search strategy (grid / full-factorial / evolutionary);
 a variable number of splits; anything that avoids hardcoding GSound-SIR as the
-only raytracer; a stable simulator interface behind the dry-run scaffold; a
+only raytracer; a stable simulator interface behind the dry-run scaffold;
+cross-platform portability (a standing PROJECT REQUIREMENT, not creep: the
+pipeline runs on this Mac with the x86 render step under Rosetta emulation AND
+natively on x86_64 Linux/Windows — platform-agnostic package code, GSound-SIR
+pulled from upstream GitHub at a config-pinned commit, never vendored-modified); a
 run-output verbosity ladder whose top level reserves a slot for the roadmap's
 Blender preview / authoring front-end (§6) — unbuilt today, but a deliberate
 seam, not scope creep.

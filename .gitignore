@@ -1,6 +1,11 @@
 # Run outputs (per-run artifacts under experiments/<run_id>/; ~1 GB each cycle)
 experiments/
 
+# Upstream GSound-SIR clone: a live build artifact, NOT vendored source.
+# Pulled at a config-pinned commit SHA; reproducibility rests on that pin +
+# the backend's installed==pinned check, never on a committed copy.
+external/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -107,6 +107,16 @@ allow-list (`.claude/settings.json`) pre-approves the safe, repeated commands
 (running the pipeline, inspecting rows, tests, read-only git). Only ask the user
 to run something if it needs a privilege the allow-list deliberately withholds.
 
+- **Prefer uncompounded commands.** A compound command (`;`, `&&`, `|` chaining
+  multiple tools) forces a permission prompt whenever ANY sub-command is not
+  pre-approved, even if every piece would be allowed on its own. Before running a
+  compound line that would prompt, split it into separate single-tool calls that
+  each match an existing allow-list entry (e.g. run `ls`, then `grep`, then
+  `cat` as three calls rather than `ls … | grep …; cat …`). Batch the independent
+  calls in one message. Only compound when the pipe is essential to the result
+  (e.g. `grep` filtering another command's live output) or the whole line is
+  already pre-approved. This dramatically reduces approval friction.
+
 ## Parameters and configuration
 
 - **No hidden defaults.** Every value that governs an experiment — counts, seeds,
@@ -140,6 +150,33 @@ to run something if it needs a privilege the allow-list deliberately withholds.
 - Nothing leaves a result silently: log every drop/skip/NaN as `(unit, reason)`
   and show scored-vs-attempted counts; never render an unscored quantity as a
   number.
+
+## Cross-platform portability (project requirement)
+
+The pipeline — including the real `gsound_sir` render backend — must run in two
+host configurations, and code is written for both from day one:
+
+- **This machine (macOS / Apple Silicon):** the x86-only render step runs under
+  emulation (Rosetta 2 via an `osx-64` conda env); every other stage runs native
+  arm64 + MPS.
+- **A native x86_64 machine (Ubuntu or Windows desktop):** the same code runs
+  with no emulation and no edits.
+
+Rules that follow:
+
+- **Emulation is a host detail, never a code assumption.** No `platform`/arch/
+  Rosetta checks, no Darwin-only paths, and no macOS-specific logic inside
+  `src/amcd/`. Anything platform-specific (env creation, `arch -x86_64`,
+  interpreter paths) lives in documentation and environment setup — behind the
+  simulator seam, outside the Python package.
+- **Portable path/device handling.** Use `pathlib` (no hardcoded `/Volumes/...`
+  or POSIX-only strings in package code); torch device selection must fall back
+  cleanly (MPS → CUDA → CPU) rather than assume MPS exists.
+- **GSound-SIR is pulled from upstream GitHub at a config-pinned version**
+  (https://github.com/yongyizang/GSound-SIR, pinned by commit SHA in config for
+  reproducibility) — never vendored with local modifications.
+- Reviewers treat a platform-coupled branch or hardcoded host path in package
+  code as a defect (same class as scaffold coupling).
 
 ## Scaffolding and the end goal
 

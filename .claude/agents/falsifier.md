@@ -65,6 +65,11 @@ to break it and could not.
    downstream `isinstance(..., DryRunSimulator)`, dry-run-keyed branch, or code
    that would become dead or broken when the real simulator replaces it — this
    is a latent bug, not a stylistic note.
+   Same class of defect: **platform coupling.** The pipeline must run both on
+   this Mac (x86 render step under Rosetta emulation) and natively on x86_64
+   Linux/Windows. Flag any `platform`/arch/OS-keyed branch, hardcoded host path
+   (e.g. `/Volumes/...`, a specific conda env path), or torch code that assumes
+   MPS exists (must fall back MPS → CUDA → CPU) inside `src/amcd/`.
 10. **Implicit-contract / silent degeneracy.** A metric or quantity that emits
     output but contributes nothing to the inferential result — `n_scored == 0`
     while a descriptive mean still prints, or a metric silently correct for most

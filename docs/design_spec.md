@@ -320,12 +320,22 @@ split separately** — D0a characterizes per-split headroom (it will differ, mos
 notably for `test_geometry_shift`), and E2+ must show generalization vs
 robustness as a per-shift breakdown, not a pooled test number.
 
-## 12. Environment
+## 12. Environment (cross-platform is a project requirement)
 
-- **`render` (GSound-SIR) is x86-only** — invalid-processor on Apple Silicon.
-  Run under Rosetta in a dedicated `osx-64` env (or `arch -x86_64`); the x86
-  boundary lives entirely behind the simulator seam.
-- **All other stages native arm64 + MPS.** Never emulate training.
+The pipeline must run in two host configurations with identical code — no
+platform-keyed branches, no host-specific paths in `src/amcd/`:
+
+- **macOS / Apple Silicon (this machine):** `render` (GSound-SIR) is x86-only —
+  invalid-processor on Apple Silicon — so it runs under Rosetta 2 emulation in a
+  dedicated `osx-64` conda env (or `arch -x86_64`). The x86/emulation boundary
+  lives entirely behind the simulator seam and in environment setup, never in
+  package code. **All other stages native arm64 + MPS.** Never emulate training.
+- **Native x86_64 (Ubuntu or Windows desktop):** the whole pipeline, including
+  `render`, runs natively with no emulation and no code edits. Torch device
+  selection falls back MPS → CUDA → CPU; it never assumes MPS.
+- **GSound-SIR provenance:** pulled from upstream GitHub
+  (https://github.com/yongyizang/GSound-SIR) at a **config-pinned commit SHA**
+  for reproducibility — never vendored with local modifications.
 - Framework: **PyTorch** (custom losses, energy-domain targets, mature MPS).
 
 ## 13. Open calls remaining

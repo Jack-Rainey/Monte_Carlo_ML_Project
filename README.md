@@ -20,11 +20,14 @@ pip install -e .           # editable install of the amcd package
 pytest tests/ -q           # 40+ invariant/config/shape tests should pass
 ```
 
-> **Simulator note (arch-sensitive):** the `dry_run` simulator is pure Python and
-> runs anywhere. The real `gsound_sir` render backend is **x86-only** (GSound-SIR);
-> on Apple silicon the `render` stage raises `NotImplementedError` with setup
-> instructions until that backend is integrated. Everything else (preprocess →
-> train → eval → stats) is architecture-independent.
+> **Simulator note (cross-platform):** the `dry_run` simulator is pure Python and
+> runs anywhere. The real `gsound_sir` render backend wraps GSound-SIR, whose
+> C++ core is **x86-only**: on an x86_64 machine (Ubuntu or Windows desktop) it
+> builds and runs natively; on Apple Silicon it runs under Rosetta 2 emulation in
+> a dedicated `osx-64` conda env. Cross-platform operation is a project
+> requirement — the emulation boundary lives in environment setup, never in
+> package code, and every other stage (preprocess → train → eval → stats) is
+> architecture-independent.
 
 ## Run
 
