@@ -41,15 +41,15 @@ of this file is the audit trail).
 
 ### Resume here
 
-**2026-07-28 (Opus): gsound_sir real-render build — Step 0 CLOSED, Steps 0b–7
-NOT started. START HERE:** the authoritative step list is now
+**2026-08-01 (Opus): gsound_sir real-render build — Steps 0 and 0b CLOSED,
+Steps 1–7 NOT started. START HERE:** the authoritative step list is
 **`~/.claude/plans/peaceful-enchanting-clock.md`** (approved 2026-07-28). It
 supersedes `~/.claude/plans/synthetic-jumping-pancake.md`, whose Steps 1 and 3
-are WRONG against the real upstream API. Read the new plan first; the API facts
-below are its evidence base.
+are WRONG against the real upstream API. Read it first; the API facts below are
+its evidence base. **Resume at Step 1** (config seam: `simulator` → `{name, params}`).
 
-The new plan already folds in the research-director plan review (rows RD-16..RD-26
-above, RD-23 DEFERRED) and adds a hard constraint: **Research I's render config is
+The plan folds in the research-director plan review (rows RD-16..RD-26 above,
+RD-23 DEFERRED) and adds a hard constraint: **Research I's render config is
 frozen for E1** (ray pair 5,000/200,000 must not be changed; see RD-26).
 
 - **Pinned upstream SHA:** `608ea30f6dc4cda149c18947f9cae48bd379fa27`
@@ -63,27 +63,31 @@ frozen for E1** (ray pair 5,000/200,000 must not be changed; see RD-26).
   (diffuse 5000, specular 2000); IR shape **(16, 92859)** float32 = order 3 →
   16 channels; onset 6.50 ms vs 6.52 ms predicted from the 2.236 m direct path
   (sim uses **344 m/s**, not 343); nonzero energy 1.89e-02.
+- **Step 0b PASSED (2026-08-01).** `scripts/setup_gsound_sir.py` +
+  `docs/gsound_sir_setup.md` + `tests/test_setup_gsound_sir.py` (36 tests, no
+  network/build; suite 135 green). Proven by building a **fresh** env
+  `amcd-render-x86-verify` from nothing: resolved SHA == pinned, `x86_64`, both
+  imports, `otool -L` clean of libpython, receipt written; smoke test
+  1,000,950 paths, IR **(16, 96970)**, onset **4.35 ms observed vs 4.36 ms
+  predicted** at 344 m/s. `amcd-render-x86` untouched and still passes
+  `--verify-only` (it has no receipt — hand-built in Step 0 — so it reports
+  "installed SHA unknown"; rebuild it with the installer before it is used for
+  a real dataset, since Step 3 compares installed vs pinned SHA).
 
-**Two build defects had to be fixed to get there (both belong in Step 0b's
-installer + `docs/gsound_sir_setup.md`; neither modifies upstream source):**
-
-1. **`import pygsound` segfaulted (SIGSEGV in `PyGILState_Ensure`).** Cause:
-   `pybind11_add_module(pygsound SHARED …)` (ray_generator/src/pygsound/
-   CMakeLists.txt:25) under pybind11 v3.0.2's *new* FindPython mode
-   (`PYBIND11_FINDPYTHON=COMPAT`) links `Python::Python`, i.e. the full
-   `libpython3.10.dylib`. conda's macOS python is **statically linked**
-   (`Py_ENABLE_SHARED=0`, both defaults and conda-forge — verified), so that
-   dylib is a *second, uninitialised* CPython in the process. **Fix:** configure
-   with **`-DPYBIND11_FINDPYTHON=OFF`** (classic mode → `pybind11::module` →
-   `-undefined dynamic_lookup`, no libpython on the link line). Verified via
-   `otool -L`. Not macOS-only in principle, but only bites where python is
-   static.
-2. **`import spherical_harmonics` failed** (`PyInit_spherical_harmonics` not
-   defined). Upstream's auralizer CMake target is `spherical_harmonics` but
-   `binding.cpp:486` declares `PYBIND11_MODULE(spherical_harmonics_rt, …)`, and
-   its `__init__.py` is empty — so upstream's own `test.py` cannot work as
-   written. **Fix:** install/import the extension under its true name,
-   **`spherical_harmonics_rt`**.
+**Build defects the installer encodes** (none modifies upstream source; full
+narrative in the `setup_gsound_sir.py` module docstring + the setup doc's
+troubleshooting section). Steps 1–7 need only know they are handled:
+`PYBIND11_FINDPYTHON=OFF` (segfault from a second libpython against a statically
+linked conda python); auralizer exposed as **`spherical_harmonics_rt`** (its
+CMake target name disagrees with its `PYBIND11_MODULE` name, so upstream's own
+`test.py` cannot work); explicit FFTW include/lib paths (upstream links FFTW by
+bare name with no working search path — the Step 0 build only linked because
+`conda activate` had exported `LDFLAGS`); AppleDouble sidecar removal plus
+building from a local staging copy (T7 is **exFAT**, so macOS sidecars poison
+upstream's `file(GLOB om/*/*.cpp)` and setuptools' wheel step); and pinning
+`Python_EXECUTABLE` for the auralizer, whose `find_package(Python …)` otherwise
+takes the newest interpreter on the system (observed: a `cpython-313` extension
+installed into a 3.10 env).
 
 **Upstream API corrections (plan Steps 1/3 assumed otherwise — verified by
 introspection, not docs):**
@@ -114,6 +118,11 @@ introspection, not docs):**
   energy_percentage=100.0, max_rays=0, use_gpu=False)`. The plan's
   `path_retention {mode: all|top_percent|top_k, value}` maps directly onto
   `energy_percentage` / `max_rays` — no custom trimming needed.
+- ⚠️ **`getPathData` returns a DICT WRAPPER, not a list:**
+  `{"path_data": [<per-source-listener-pair dict>, …]}`. The per-pair dict is
+  `result["path_data"][i]` — the `path_data[i]` shorthand below means that, not
+  subscripting the return value directly (`result[0]` raises `KeyError: 0`).
+  Verified 2026-08-01.
 - `ps.Context` exposes `diffuse_count`, `specular_count`, `diffuse_depth`,
   `specular_depth`, `threads_count`, `channel_type`, `sample_rate`, `normalize`
   — confirms the RD-12 diffuse/specular split.
@@ -126,17 +135,21 @@ introspection, not docs):**
 - `createbox(width, length, height, absorp, scatter)` accepts absorption as a
   scalar **or a per-band sequence** — relevant to SceneSpec.material_absorption.
 
-**No `src/amcd/` code changed yet.** Resume at **Step 0b** of
-`peaceful-enchanting-clock.md` (the `scripts/setup_gsound_sir.py` installer),
-then Steps 1–7 in order — noting the plan moves the Step 6 probe to run right
-after Step 3 (RD-17). OPEN findings to clear before done: RD-12, RD-13, RD-14,
-RD-16..RD-22, RD-24, RD-25, RD-26 (+ delete RD-08 when Step 2 is
-re-review-confirmed).
+**No `src/amcd/` code changed yet.** Resume at **Step 1** of
+`peaceful-enchanting-clock.md`, then Steps 2–7 in order — noting the plan moves
+the Step 6 probe to run right after Step 3 (RD-17). OPEN findings to clear
+before done: RD-12, RD-13, RD-14, RD-16..RD-22, RD-24, RD-25, RD-26 (+ delete
+RD-08 when Step 2 is re-review-confirmed).
 
-**Render env state (working, verified 2026-07-28):** `amcd-render-x86` has a
-correctly-built `pygsound` (rebuilt with `-DPYBIND11_FINDPYTHON=OFF`; `otool -L`
-shows no libpython) and the auralizer importable as `spherical_harmonics_rt`.
-Step 0b's job is to make that reproducible from scratch, not to fix it again.
+**Reviewers have NOT run on the Step 0b code.** The gate plan puts the review
+loop at Step 7; `scripts/` and `docs/` are in its scope (falsifier: no platform
+coupling / config discipline; readability-reviewer: the installer's docstrings).
+
+**Render envs (both verified 2026-08-01):** `amcd-render-x86` (Step 0, hand-built,
+no receipt) and `amcd-render-x86-verify` (built from scratch by the installer,
+receipt pinned to the SHA). Either works for Steps 1–7; prefer the latter, and
+note `external/GSound-SIR-verify/` is a disposable second clone (~235 MB,
+gitignored) that can be deleted at any time.
 
 ---
 
