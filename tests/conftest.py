@@ -40,6 +40,26 @@ def tiny_config(**overrides) -> Config:
     return Config._from_merged(merged, None)
 
 
+def dry_run_simulator(*, n_channels: int, n_samples: int, sample_rate: int):
+    """Build the dry_run simulator through the registry seam.
+
+    Tensor shape is test scaffolding and stays explicit here, but the backend's
+    PARAMETERS (e.g. speed_of_sound_m_s) come from configs/simulators/dry_run.yaml
+    — never hardcoded in a fixture, and never constructed around the seam, so
+    these tests keep exercising the same `build_simulator` path the render stage
+    uses.
+    """
+    from amcd.simulators.base import build_simulator
+
+    return build_simulator(
+        "dry_run",
+        tiny_config().simulator.params,
+        n_channels=n_channels,
+        n_samples=n_samples,
+        sample_rate=sample_rate,
+    )
+
+
 @pytest.fixture
 def dry_run_config() -> Config:
     return tiny_config()

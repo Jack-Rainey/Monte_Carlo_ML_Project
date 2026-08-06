@@ -6,8 +6,9 @@ import torch
 from amcd.config import Config
 from amcd.representations import build_representation
 from amcd.representations.spectrogram import ThirdOctaveSpectrogram
-from amcd.simulators.dry_run import DryRunSimulator
 from amcd.simulators.base import SceneSpec
+
+from tests.conftest import dry_run_simulator
 
 
 def make_scene(seed: int = 42) -> SceneSpec:
@@ -26,7 +27,7 @@ class TestIRShape:
     """IR storage is channel-first (C, T)."""
 
     def test_dry_run_output_shape(self, dry_run_config: Config) -> None:
-        sim = DryRunSimulator(
+        sim = dry_run_simulator(
             n_channels=dry_run_config.n_channels,
             n_samples=dry_run_config.n_samples,
             sample_rate=dry_run_config.sample_rate,
@@ -37,7 +38,7 @@ class TestIRShape:
 
     def test_channel_first_storage(self, dry_run_config: Config) -> None:
         """IR shape must be (C, T), not (T, C)."""
-        sim = DryRunSimulator(
+        sim = dry_run_simulator(
             n_channels=dry_run_config.n_channels,
             n_samples=dry_run_config.n_samples,
             sample_rate=dry_run_config.sample_rate,
@@ -50,7 +51,7 @@ class TestIRShape:
 
     def test_ir_numpy_roundtrip(self, tmp_path, dry_run_config: Config) -> None:
         """(C, T) ↔ numpy save/load is lossless."""
-        sim = DryRunSimulator(
+        sim = dry_run_simulator(
             n_channels=dry_run_config.n_channels,
             n_samples=dry_run_config.n_samples,
             sample_rate=dry_run_config.sample_rate,
@@ -63,7 +64,7 @@ class TestIRShape:
 
     def test_channel_time_transpose_recoverable(self, dry_run_config: Config) -> None:
         """Transposing to (T, C) and back to (C, T) is lossless."""
-        sim = DryRunSimulator(
+        sim = dry_run_simulator(
             n_channels=dry_run_config.n_channels,
             n_samples=dry_run_config.n_samples,
             sample_rate=dry_run_config.sample_rate,
@@ -114,7 +115,7 @@ class TestEnergyTensorShape:
     def test_consistent_frames_across_scenes(self, dry_run_config: Config) -> None:
         """All scenes with same config produce energy tensors of the same shape."""
         rep = self._make_rep(dry_run_config)
-        sim = DryRunSimulator(
+        sim = dry_run_simulator(
             n_channels=dry_run_config.n_channels,
             n_samples=dry_run_config.n_samples,
             sample_rate=dry_run_config.sample_rate,

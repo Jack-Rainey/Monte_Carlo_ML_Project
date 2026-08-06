@@ -53,22 +53,38 @@ def _gen_scenes_fingerprint(config: Config) -> dict:
 def _render_fingerprint(config: Config) -> dict:
     """Config inputs that determine the rendered IR pair for a given scene.
 
-    Chains the upstream gen-scenes fingerprint (RD-30): renders are per-scene, so
-    a render is stale if the SCENES changed, not only if a simulator parameter
-    did. Without the chain, editing a room dimension and re-running would keep
-    renders of the old geometry against the new scene specs.
-
     `simulator.params` carries the pinned upstream `commit_sha`, so a GSound-SIR
     version change invalidates the cache with no extra wiring.
     """
     return {
-        "upstream_gen_scenes": _fingerprint_sha(_gen_scenes_fingerprint(config)),
         "simulator": {"name": config.simulator.name, "params": config.simulator.params},
         "sample_rate": config.sample_rate,
         "n_samples": config.n_samples,
         "ambisonics_order": config.ambisonics_order,
         "low_ray_budget": config.low_ray_budget,
         "high_ray_budget": config.high_ray_budget,
+    }
+
+
+def _preprocess_fingerprint(config: Config) -> dict:
+    """Config inputs that determine the split assignment and the encoded tensors.
+
+    `split_assignment` belongs here specifically (F-29): it is the most
+    leakage-critical value in the project, it is consumed HERE rather than at
+    gen-scenes, and without it in a fingerprint, repinning the split seed on an
+    existing run_dir was a complete no-op — splits.json kept the old assignment
+    while config.yaml stamped the new seed, a provenance lie.
+    """
+    return {
+        "splits": {name: sp.model_dump() for name, sp in config.splits.items()},
+        "seed_split_assignment": config.seed("split_assignment"),
+        "representation": {
+            "name": config.representation.name,
+            "params": config.representation.params,
+        },
+        "sample_rate": config.sample_rate,
+        "n_samples": config.n_samples,
+        "ambisonics_order": config.ambisonics_order,
     }
 
 
@@ -79,13 +95,34 @@ def _render_fingerprint(config: Config) -> dict:
 #: `None`s, so an unwired stage is DECLARED rather than silently absent (the same
 #: rule docs/verbosity.md applies to verbosity wiring).
 #:
-#: The `None`s are a live gap, not a design: preprocess/train/eval reuse is the
-#: same hazard one stage further down. Tracked in docs/review_ledger.md so they
-#: cannot quietly become permanent.
+#: The remaining `None`s are a live gap, not a design (ledger RD-41): train/eval
+#: reuse is the same hazard further down the chain.
 STAGE_FINGERPRINT: dict[str, Callable[[Config], dict] | None] = {
     "gen-scenes": _gen_scenes_fingerprint,
     "render": _render_fingerprint,
-    "preprocess": None,
+    "preprocess": _preprocess_fingerprint,
+    "diagnostics": None,
+    "train": None,
+    "infer": None,
+    "eval": None,
+    "stats": None,
+    "report": None,
+}
+
+#: Which stage's artifacts each stage consumes. The chain is what makes a
+#: fingerprint transitive: renders are renders OF scenes, so a render is stale
+#: when the SCENES changed even if every simulator parameter is untouched.
+#:
+#: Chaining reads the upstream SENTINEL's recorded fingerprint, never a
+#: recomputation from the current config (F-26). Recomputing made `--force` a
+#: laundering step: forcing a downstream stage stamped the CURRENT config's chain
+#: value even though the stage had consumed the OLD upstream artifacts, leaving a
+#: run_dir whose chain validated while the artifacts disagreed — precisely the
+#: silent mixed dataset this machinery exists to prevent.
+STAGE_UPSTREAM: dict[str, str | None] = {
+    "gen-scenes": None,
+    "render": "gen-scenes",
+    "preprocess": "render",
     "diagnostics": None,
     "train": None,
     "infer": None,
@@ -165,6 +202,56 @@ class Pipeline:
         self.verbosity = verbosity
         self.force = force
 
+    def _recorded_fingerprint(self, stage: str) -> dict | None:
+        """The fingerprint stored in `stage`'s sentinel, or None if it has not run."""
+        sentinel = _sentinel(self.run_dir, stage)
+        if not sentinel.exists():
+            return None
+        try:
+            return json.loads(sentinel.read_text()).get("fingerprint")
+        except (json.JSONDecodeError, AttributeError):
+            return None
+
+    def _effective_fingerprint(self, stage: str) -> dict:
+        """This stage's own config inputs, plus the upstream sentinel's RECORDED
+        fingerprint (F-26).
+
+        Taking the upstream value from disk rather than recomputing it from the
+        current config is the whole point: it describes the artifacts this stage
+        actually consumed, so a `--force` cannot launder a stale upstream into a
+        chain that validates.
+        """
+        own = _normalize(STAGE_FINGERPRINT[stage](self.config))
+        upstream = STAGE_UPSTREAM.get(stage)
+        if upstream is None:
+            return own
+        recorded = self._recorded_fingerprint(upstream)
+        if recorded is None:
+            raise RuntimeError(
+                f"Stage {stage!r} depends on {upstream!r}, which has not completed "
+                f"in {self.run_dir} (no fingerprinted sentinel). Run {upstream!r} "
+                f"first — running {stage!r} now would record a provenance chain for "
+                f"artifacts that do not exist."
+            )
+        # The upstream artifacts must ALSO be current for this config. Recursing
+        # here (rather than only comparing our own inputs) is what catches a stale
+        # ancestor when a downstream stage is run on its own: `amcd render` after
+        # editing a room dimension would otherwise reuse renders that match the
+        # OLD scene specs still sitting on disk.
+        upstream_expected = self._effective_fingerprint(upstream)
+        if recorded != upstream_expected:
+            diff = _diff_fingerprints(recorded, upstream_expected) or [
+                "    (nested value changed)"
+            ]
+            raise RuntimeError(
+                f"Stage {stage!r} cannot run: its upstream stage {upstream!r} holds "
+                f"artifacts built under a DIFFERENT config.\n"
+                f"  Changed inputs to {upstream!r}:\n" + "\n".join(diff) + "\n"
+                f"  Re-run {upstream!r} (with --force) before {stage!r}, or use a "
+                f"fresh --run-dir."
+            )
+        return {"upstream": {upstream: _fingerprint_sha(recorded)}, **own}
+
     def _is_done(self, stage: str) -> bool:
         """Whether `stage`'s cached artifacts are valid for the CURRENT config.
 
@@ -177,11 +264,10 @@ class Pipeline:
         if self.force or not sentinel.exists():
             return False
 
-        fingerprint_fn = STAGE_FINGERPRINT[stage]
-        if fingerprint_fn is None:
+        if STAGE_FINGERPRINT[stage] is None:
             return True  # stage declares no config dependency; bare sentinel
 
-        expected = _normalize(fingerprint_fn(self.config))
+        expected = self._effective_fingerprint(stage)
         try:
             recorded = json.loads(sentinel.read_text())
             found = recorded["fingerprint"]
@@ -206,12 +292,16 @@ class Pipeline:
 
     def _mark_done(self, stage: str) -> None:
         # Sentinels are functional (caching input), never verbosity-gated (F-23).
-        fingerprint_fn = STAGE_FINGERPRINT[stage]
+        # The recorded fingerprint chains the UPSTREAM SENTINEL, so it describes the
+        # artifacts this run actually consumed — including under --force (F-26).
         payload = {
             "completed_at": time.time(),
             # Full payload, not just the sha: the mismatch error must be able to
             # name the field that changed (RD-35).
-            "fingerprint": fingerprint_fn(self.config) if fingerprint_fn else None,
+            "fingerprint": (
+                self._effective_fingerprint(stage)
+                if STAGE_FINGERPRINT[stage] else None
+            ),
         }
         s = _sentinel(self.run_dir, stage)
         s.parent.mkdir(parents=True, exist_ok=True)
@@ -230,13 +320,20 @@ class Pipeline:
         if stage not in STAGES:
             raise ValueError(f"Unknown stage {stage!r}. Valid: {STAGES}")
 
-        if self._is_done(stage):
-            emit(self.verbosity, "progress", f"[skip] {stage} (cached)")
-            return
-
-        emit(self.verbosity, "progress", f"\n[run ] {stage}")
         t0 = time.time()
         try:
+            # Validate the provenance chain BEFORE doing any work, so a stale
+            # upstream is refused up front rather than after an expensive render,
+            # and so --force cannot run the stage and only then fail to record its
+            # chain. Inside the try so the failure still reaches stderr (F-24).
+            if STAGE_FINGERPRINT[stage] is not None:
+                self._effective_fingerprint(stage)
+
+            if self._is_done(stage):
+                emit(self.verbosity, "progress", f"[skip] {stage} (cached)")
+                return
+
+            emit(self.verbosity, "progress", f"\n[run ] {stage}")
             fn = _dispatch(stage)
             fn(self.config, self.run_dir, self.verbosity)
         except Exception as exc:

@@ -5,7 +5,7 @@ import pytest
 
 from amcd.config import Config
 
-from tests.conftest import QUIET
+from tests.conftest import QUIET, dry_run_simulator
 
 
 class TestConfigLoad:
@@ -22,8 +22,9 @@ class TestConfigLoad:
         cfg = Config.load(Path("configs/base.yaml"), Path("configs/dry_run.yaml"))
         assert cfg.simulator.name == "dry_run"
         # F-11 scoping: switching the simulator name must not leave gsound_sir's
-        # params (commit_sha, frequency_points, …) attached to dry_run.
-        assert cfg.simulator.params == {}
+        # params attached to dry_run — dry_run gets ITS OWN params file, and none
+        # of gsound's keys (which its schema would reject) come along.
+        assert set(cfg.simulator.params) == {"speed_of_sound_m_s"}
         assert cfg.scenes.n_id == 20
         assert cfg.ir_duration == 0.25
         # dry_run declares its own small shift counts, overriding the base R1 defaults.
@@ -235,11 +236,10 @@ class TestSeedReproducibility:
         assert scenes1 == scenes2, "Scene generation is not reproducible"
 
     def test_simulator_deterministic(self) -> None:
-        from amcd.simulators.dry_run import DryRunSimulator
-        from amcd.simulators.base import SceneSpec
         import numpy as np
+        from amcd.simulators.base import SceneSpec
 
-        sim = DryRunSimulator(n_channels=16, n_samples=4800, sample_rate=48000)
+        sim = dry_run_simulator(n_channels=16, n_samples=4800, sample_rate=48000)
         scene = SceneSpec(
             scene_id="s0", seed=99,
             geometry_family="shoebox",

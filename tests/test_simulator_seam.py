@@ -62,7 +62,9 @@ class TestSimulatorBlock:
         would reject every one of them."""
         cfg = Config.load(Path("configs/base.yaml"), Path("configs/dry_run.yaml"))
         assert cfg.simulator.name == "dry_run"
-        assert cfg.simulator.params == {}
+        # dry_run gets its OWN params file; none of gsound's keys survive the switch
+        # (its schema forbids extras, so any that did would fail loudly here).
+        assert set(cfg.simulator.params) == {"speed_of_sound_m_s"}
 
     def test_unknown_simulator_fails_loud(self) -> None:
         with pytest.raises(ValueError, match="Unknown simulator"):
@@ -113,7 +115,7 @@ class TestSimulatorSweep:
 class TestBuildSimulator:
     def test_builds_dry_run(self, dry_run_config: Config) -> None:
         sim = build_simulator(
-            "dry_run", {},
+            "dry_run", dry_run_config.simulator.params,
             n_channels=dry_run_config.n_channels,
             n_samples=dry_run_config.n_samples,
             sample_rate=dry_run_config.sample_rate,
@@ -122,7 +124,7 @@ class TestBuildSimulator:
 
     def test_rejects_unknown_param(self) -> None:
         with pytest.raises(Exception, match="extra_forbidden|Extra inputs"):
-            build_simulator("dry_run", {"bogus": 1},
+            build_simulator("dry_run", {"speed_of_sound_m_s": 343.0, "bogus": 1},
                             n_channels=4, n_samples=800, sample_rate=8000)
 
     def test_gsound_rejects_normalization(self) -> None:
@@ -148,7 +150,7 @@ class TestProvenanceContract:
     def test_dry_run_declares_every_required_key(self, dry_run_config: Config,
                                                  sample_scene) -> None:
         sim = build_simulator(
-            "dry_run", {},
+            "dry_run", dry_run_config.simulator.params,
             n_channels=dry_run_config.n_channels,
             n_samples=dry_run_config.n_samples,
             sample_rate=dry_run_config.sample_rate,
@@ -240,7 +242,9 @@ class TestStageFingerprint:
         self._pipeline(cfg, tmp_path).run_stage("render")
 
         moved = tiny_config(scenes={"n_id": 4, "margins": {"wall": 0.75}})
-        with pytest.raises(RuntimeError, match="cached under a DIFFERENT config"):
+        # Caught via the UPSTREAM sentinel: render's own inputs are unchanged, so
+        # only the chain can reveal that the scenes it rendered are now stale.
+        with pytest.raises(RuntimeError, match="upstream stage 'gen-scenes'"):
             self._pipeline(moved, tmp_path).run_stage("render")
 
     def test_force_bypasses_the_check(self, tmp_path: Path) -> None:
@@ -262,8 +266,8 @@ class TestStageFingerprint:
         keep working exactly as before until they are wired."""
         # Every stage is listed, so an unwired one is declared rather than absent.
         assert set(STAGE_FINGERPRINT) == set(STAGES)
-        assert STAGE_FINGERPRINT["preprocess"] is None
+        assert STAGE_FINGERPRINT["stats"] is None
         cfg = tiny_config(scenes={"n_id": 4})
         pipe = self._pipeline(cfg, tmp_path)
-        pipe._mark_done("preprocess")
-        assert pipe._is_done("preprocess")
+        pipe._mark_done("stats")
+        assert pipe._is_done("stats")

@@ -61,6 +61,14 @@ SEED_NAMES = (
 # Marker keys that turn a YAML leaf into a role node rather than a scalar value.
 _ROLE_KEYS = ("tune", "sweep")
 
+#: Tag the generator puts on frac-mode id-pool scenes, meaning "not yet assigned —
+#: hash-bucket me". It lives in the same namespace as split names in
+#: `SceneSpec.split_regime`, so a split actually NAMED "id" collides with it and
+#: silently re-routes scenes (a held-out shift split named `id` was observed
+#: landing 18 scenes in TRAIN). Reserved in `Config._check` rather than renamed,
+#: because the tag also appears in existing on-disk scene specs.
+ID_POOL_TAG = "id"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Role grammar (fixed / tuned / swept)
@@ -260,6 +268,64 @@ class Margins(BaseModel):
     floor: float     # clearance above z = 0
     ceiling: float   # clearance below z = height
 
+    @model_validator(mode="after")
+    def _non_negative(self) -> "Margins":
+        # A negative margin inverts the admissible box outward: `_placement_bounds`
+        # would compute lo < 0 and hi > room extent, its emptiness check would pass,
+        # and sources would be placed OUTSIDE the room with no error at all.
+        for name in ("wall", "floor", "ceiling"):
+            if getattr(self, name) < 0:
+                raise ValueError(
+                    f"margins.{name} must be >= 0; got {getattr(self, name)} "
+                    f"(a negative margin places sources outside the room)"
+                )
+        return self
+
+
+class GeometryFamily(BaseModel):
+    """One named room-shape family: per-axis (lo, hi) metre sampling ranges.
+
+    Typed (rather than a bare dict) for the same reason as PlacementRegime: an
+    unrecognised key here is a HIDDEN GEOMETRY PARAMETER. Untyped, `dims` typo'd
+    to `dimz` loaded fine and failed later as a bare KeyError inside the
+    generator, and a stray `shape:` was accepted and silently ignored.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    dims: list[list[float]]   # [[x_lo, x_hi], [y_lo, y_hi], [z_lo, z_hi]]
+
+    @model_validator(mode="after")
+    def _check(self) -> "GeometryFamily":
+        if len(self.dims) != 3:
+            raise ValueError(f"dims must have 3 axis ranges; got {len(self.dims)}")
+        for axis, rng in enumerate(self.dims):
+            if len(rng) != 2 or rng[0] > rng[1]:
+                raise ValueError(f"dims[{axis}] must be [lo, hi] with lo <= hi; got {rng}")
+            if rng[0] <= 0:
+                raise ValueError(f"dims[{axis}] must be positive; got {rng}")
+        return self
+
+
+class MaterialRegime(BaseModel):
+    """One named material distribution: an absorption coefficient (lo, hi) range."""
+
+    model_config = {"extra": "forbid"}
+
+    absorption: list[float]   # [lo, hi], each in (0, 1)
+
+    @model_validator(mode="after")
+    def _check(self) -> "MaterialRegime":
+        if len(self.absorption) != 2 or self.absorption[0] > self.absorption[1]:
+            raise ValueError(
+                f"absorption must be [lo, hi] with lo <= hi; got {self.absorption}"
+            )
+        if not (0.0 < self.absorption[0] and self.absorption[1] < 1.0):
+            raise ValueError(
+                f"absorption coefficients must lie in (0, 1); got {self.absorption}"
+            )
+        return self
+
 
 class PlacementRegime(BaseModel):
     """One named source/receiver placement policy (design_spec §6.1).
@@ -320,9 +386,9 @@ class Scenes(BaseModel):
     #: count mode, where each id-pool split declares its own `count` instead.
     n_id: int | None
     id_regime: dict[str, str]                       # baseline {geometry, placement, material}
-    geometry_families: dict[str, dict]              # name → {dims: [[lo,hi]×3]}
+    geometry_families: dict[str, GeometryFamily]
     placement_regimes: dict[str, PlacementRegime]
-    material_regimes: dict[str, dict]               # name → {absorption: [lo, hi]}
+    material_regimes: dict[str, MaterialRegime]
     margins: Margins
     #: Rejection-sampling bound for `distance_range`. Consumed only when a regime
     #: declares one; exceeding it raises rather than silently emitting a scene
@@ -498,6 +564,14 @@ class Config(BaseModel):
         for field in positive_fields:
             if getattr(self, field) <= 0:
                 raise ValueError(f"{field} must be > 0; got {getattr(self, field)}")
+        # 0 attempts makes every scene raise "could not satisfy distance_range None
+        # in 0 attempts" — loud, but misdiagnosed as a constraint problem for a
+        # config that declares no constraint at all (F-32).
+        if self.scenes.max_placement_attempts <= 0:
+            raise ValueError(
+                f"scenes.max_placement_attempts must be > 0; "
+                f"got {self.scenes.max_placement_attempts}"
+            )
         # Fractions in (0, 1).
         for field in ("bootstrap_alpha", "bootstrap_power"):
             if not (0.0 < getattr(self, field) < 1.0):
@@ -515,8 +589,16 @@ class Config(BaseModel):
                 f"metric_onset_rel_db must be < 0 (dB below peak); got {self.metric_onset_rel_db}"
             )
 
+        # `id` is the generator's reserved "hash-bucket me" tag, not a split name.
+        if ID_POOL_TAG in self.splits:
+            raise ValueError(
+                f"{ID_POOL_TAG!r} is reserved: it is the tag the generator puts on "
+                f"unassigned id-pool scenes, so a split of that name silently "
+                f"captures or loses scenes instead of being routed. Rename the split."
+            )
         self._check_id_pool_sizing()
         self._check_split_seeds()
+        self._check_inert_split_fields()
 
         # Shift splits: each needs a count and exactly one axis, over a known regime
         # value that differs from the id baseline (controlled single-axis shift).
@@ -634,6 +716,46 @@ class Config(BaseModel):
                 )
             if frac_sum >= 1.0:
                 raise ValueError(f"id-pool fracs sum to {frac_sum} (must be < 1.0)")
+
+    def _check_inert_split_fields(self) -> None:
+        """Reject split fields that would be silently ignored.
+
+        Same principle as the `seeds.split_assignment` guard: a config value that
+        does nothing is worse than an error, because it reads as controlling
+        something it does not. `seed` in frac mode is the dangerous one — the
+        researcher believes the split is independently seeded, and it is not.
+        """
+        for name, sp in self.splits.items():
+            if not sp.is_id_pool and sp.frac is not None:
+                raise ValueError(
+                    f"split {name!r} is a shift split (it declares `axes`), which is "
+                    f"sized by `count`; its `frac` would be ignored. Remove it."
+                )
+        if not self.id_pool_is_counted:
+            seeded = sorted(
+                n for n, sp in self.id_pool_splits.items() if sp.seed is not None
+            )
+            if seeded:
+                raise ValueError(
+                    f"id-pool split(s) {seeded} declare a `seed`, but in frac mode "
+                    f"id-pool scenes are generated as ONE pool from the shared "
+                    f"`scene_generation` stream and then hash-bucketed — the seed "
+                    f"would be ignored, so the split is not independently seeded. "
+                    f"Switch to count-mode sizing, or remove the seed."
+                )
+        else:
+            # F-35: count mode's contract is that every split is generated
+            # independently, so a shift split without its own seed silently falls
+            # back to the shared stream and breaks that promise asymmetrically.
+            unseeded = sorted(
+                n for n, sp in self.shift_splits.items() if sp.seed is None
+            )
+            if unseeded:
+                raise ValueError(
+                    f"count mode requires an explicit `seed` on EVERY split; missing "
+                    f"on shift split(s) {unseeded}. Count mode exists so each split "
+                    f"is generated independently and reproducibly (inv #5)."
+                )
 
     def _check_split_seeds(self) -> None:
         """Per-split seeds must be pairwise distinct and distinct from the named

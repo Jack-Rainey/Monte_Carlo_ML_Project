@@ -5,6 +5,7 @@ preprocess stage:
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,18 @@ def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     renders_dir = run_dir / "renders"
     out_dir = run_dir / "preprocessed"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Clear any previous split assignment before writing this one (F-25). Split
+    # membership can change between runs (a different split_assignment seed, a
+    # different sizing mode), and a scene that MOVES leaves its tensor behind in
+    # the old directory. That residue was then trained on while being scored as
+    # held-out — with splits.json still reporting the correct assignment, so
+    # nothing in the artifacts revealed it. Rewriting the directory set is the
+    # producer half of the fix; EnergyDataset refusing unlisted tensors is the
+    # consumer half, and neither is sufficient alone.
+    for stale in out_dir.iterdir():
+        if stale.is_dir() and stale.name != "carrier":
+            shutil.rmtree(stale)
 
     # Load scene specs
     scene_paths = sorted(scenes_dir.glob("scene_*.json"))
@@ -105,8 +118,12 @@ def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         carrier_dir.mkdir(parents=True, exist_ok=True)
         np.save(carrier_dir / f"{scene.scene_id}.npy", low_ir)
 
-    # Save metadata
-    all_split_names = sorted(set(splits.values()))
+    # Save metadata. Counts are keyed on the CONFIG-DECLARED split set, defaulting
+    # to 0, not on the splits that happen to have received a scene (F-30): keying
+    # on observed values made the empty-split warning below unreachable, so a
+    # declared split that received nothing simply vanished from the record instead
+    # of being reported as 0.
+    all_split_names = list(config.splits)
     meta = {
         "n_channels": config.n_channels,
         "n_bands": n_bands,

@@ -1,9 +1,16 @@
-# ── dry_run simulator params: intentionally empty ─────────────────────────────
-# The synthetic IR is a pure function of the scene spec (dims, absorption,
-# source/receiver positions, seed) and the ray budget, so this scaffold has no
-# backend parameters to declare.
+# ── dry_run simulator params ──────────────────────────────────────────────────
+# The synthetic IR is otherwise a pure function of the scene spec (dims,
+# absorption, source/receiver positions, seed) and the ray budget.
+# `DryRunSimulator.Params` forbids extras, so a stray key here fails at load.
+
+# Propagation speed the scaffold uses to place the direct arrival at d/c, and
+# declares into canonical render provenance. Config-governed BECAUSE the scaffold
+# genuinely obeys it — unlike gsound, whose 344 m/s is compiled into C++ and can
+# therefore only be DECLARED, never configured (ledger RD-19).
 #
-# The file exists rather than being omitted so the seam is visible: every
-# registered simulator has a params file beside it, and `DryRunSimulator.Params`
-# forbids extras, so a stray key added here fails loudly at config load.
-{}
+# 343.0 is the textbook value at 20 °C. The ~1 m/s difference from gsound is
+# immaterial to every current consumer: at the largest source-receiver separation
+# the generator produces (~10 m) it is 0.086 ms, against a 2.0 ms onset tolerance,
+# and the onset QC is a paired low-vs-high check within ONE backend, so a constant
+# speed offset cancels exactly.
+speed_of_sound_m_s: 343.0

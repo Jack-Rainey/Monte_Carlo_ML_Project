@@ -85,9 +85,14 @@ class IRResult:
 #:   ray_budget           the budget this leg was rendered at
 #:   speed_of_sound_m_s   the speed the backend actually used (RD-19: gsound's
 #:                        344 m/s lives in C++, so it is DECLARED, not configured)
-#:   ambisonic_convention channel ordering + normalization, e.g. "acn_sn3d"
-#:                        (RD-25: a dataset rendered under an unrecorded convention
-#:                        becomes load-bearing when spatial metrics land)
+#:   ambisonic_convention channel ordering + normalization. For GSound-SIR this is
+#:                        **"acn_n3d"**, not SN3D — verified in the auralizer
+#:                        binding (binding.cpp:18 "normalization constant K(l,m)
+#:                        for N3D", :43 "N3D/ACN ordering"). Getting this wrong is
+#:                        a per-degree sqrt(2l+1) error; it is invisible today
+#:                        because every live scalar metric uses channel 0, where
+#:                        N3D and SN3D agree exactly, and becomes load-bearing the
+#:                        moment evaluation/spatial.py is filled in (AC-15/RD-25).
 #:   rng_seeded           whether the render is reproducible from a seed (RD-23:
 #:                        pygsound exposes none, so reproducibility rests on the
 #:                        cached artifacts, not on re-render bit-identity)

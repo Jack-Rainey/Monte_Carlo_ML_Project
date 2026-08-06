@@ -20,10 +20,9 @@ import torch
 from amcd.config import Config
 from amcd.data.normalization import compute_stats
 from amcd.data.splits import assign_split
-from amcd.simulators.dry_run import DryRunSimulator
 from amcd.simulators.base import SceneSpec
 
-from tests.conftest import QUIET
+from tests.conftest import QUIET, dry_run_simulator
 
 _TEST_TINY = Path(__file__).resolve().parent.parent / "configs" / "test_tiny.yaml"
 
@@ -295,12 +294,12 @@ class TestDistributionShiftSplits:
         for name, sp in cfg.shift_splits.items():
             (axis, value), = sp.axes.items()
             if axis == "geometry":
-                shift_lo = sc.geometry_families[value]["dims"][0][0]   # long-axis lo
-                id_hi = sc.geometry_families[id_geo]["dims"][0][1]     # long-axis hi
+                shift_lo = sc.geometry_families[value].dims[0][0]   # long-axis lo
+                id_hi = sc.geometry_families[id_geo].dims[0][1]     # long-axis hi
                 assert shift_lo > id_hi, f"{name}: geometry long-axis overlaps id"
             elif axis == "material":
-                shift_lo = sc.material_regimes[value]["absorption"][0]
-                id_hi = sc.material_regimes[id_mat]["absorption"][1]
+                shift_lo = sc.material_regimes[value].absorption[0]
+                id_hi = sc.material_regimes[id_mat].absorption[1]
                 assert shift_lo > id_hi, f"{name}: material absorption overlaps id"
             elif axis == "placement":
                 assert sc.placement_regimes[value].type == "corner"
@@ -315,10 +314,10 @@ class TestDistributionShiftSplits:
 
         cfg = _make_minimal_config()
         sc = cfg.scenes
-        shoebox_long_hi = sc.geometry_families["shoebox"]["dims"][0][1]
-        corridor_long_lo = sc.geometry_families["corridor"]["dims"][0][0]
-        mixed_hi = sc.material_regimes["mixed"]["absorption"][1]
-        ceiling_lo = sc.material_regimes["ceiling_absorptive"]["absorption"][0]
+        shoebox_long_hi = sc.geometry_families["shoebox"].dims[0][1]
+        corridor_long_lo = sc.geometry_families["corridor"].dims[0][0]
+        mixed_hi = sc.material_regimes["mixed"].absorption[1]
+        ceiling_lo = sc.material_regimes["ceiling_absorptive"].absorption[0]
         corner_frac = sc.placement_regimes["near_corner"].corner_frac
         margin = sc.margins.wall
 
@@ -340,7 +339,10 @@ class TestDistributionShiftSplits:
                     f"{s.scene_id} mixed label but α={s.material_absorption}"
                 )
             if axes["placement"] == "near_corner":
-                for i in range(3):
+                # HORIZONTAL axes only (AC-10): the corner bias is about proximity
+                # to a wall junction, and z is bounded by floor/ceiling margins or
+                # an explicit ergonomic height_range — there is no corner in z.
+                for i in (0, 1):
                     hi = s.dims[i] - margin
                     corner_hi = margin + corner_frac * (hi - margin)
                     assert s.receiver_pos[i] <= corner_hi + 1e-6, (
@@ -389,7 +391,7 @@ class TestDryRunSimulatorSceneDependence:
     blocker at the tensor level."""
 
     def _sim(self) -> DryRunSimulator:
-        return DryRunSimulator(n_channels=4, n_samples=2000, sample_rate=8000)
+        return dry_run_simulator(n_channels=4, n_samples=2000, sample_rate=8000)
 
     def _spec(self, seed: int, dims, absorption: float, rcv) -> SceneSpec:
         return SceneSpec(

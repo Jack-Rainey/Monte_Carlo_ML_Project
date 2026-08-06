@@ -1,6 +1,7 @@
 """PyTorch Dataset over pre-normalized energy tensors from the preprocess stage."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import torch
@@ -19,21 +20,54 @@ class EnergyDataset(Dataset):
         if not split_dir.exists():
             raise FileNotFoundError(f"Split directory not found: {split_dir}")
 
-        # Exclude macOS resource-fork files (._*) that appear on external volumes
-        low_paths = sorted(p for p in split_dir.glob("*_low.pt") if not p.name.startswith("._"))
-        high_paths = sorted(p for p in split_dir.glob("*_high.pt") if not p.name.startswith("._"))
-
-        if len(low_paths) != len(high_paths):
-            raise RuntimeError(
-                f"Mismatched tensors in {split_dir}: "
-                f"{len(low_paths)} low vs {len(high_paths)} high"
+        # Membership comes from the MANIFEST, never from whatever files happen to
+        # be on disk (F-25). Globbing made the loader trust directory contents over
+        # `splits.json`, so a scene that changed splits between preprocess runs was
+        # left behind in its old directory and silently trained on while being
+        # scored as held-out — with splits.json still reporting it correctly, so no
+        # artifact revealed the leak.
+        manifest_path = preprocessed_dir / "splits.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(
+                f"Split manifest not found: {manifest_path}. Re-run the preprocess "
+                f"stage — split membership is defined by that file, not by the "
+                f"contents of {split_dir}."
             )
-        if not low_paths:
-            raise RuntimeError(f"No tensors found in {split_dir}")
+        manifest: dict[str, str] = json.loads(manifest_path.read_text())
+        scene_ids = sorted(sid for sid, sp in manifest.items() if sp == split)
+        if not scene_ids:
+            raise RuntimeError(f"Split {split!r} has no scenes in {manifest_path}")
+
+        low_paths = [split_dir / f"{sid}_low.pt" for sid in scene_ids]
+        high_paths = [split_dir / f"{sid}_high.pt" for sid in scene_ids]
+        missing = [p.name for p in (*low_paths, *high_paths) if not p.exists()]
+        if missing:
+            raise RuntimeError(
+                f"Split {split!r} is missing {len(missing)} tensor(s) the manifest "
+                f"declares, e.g. {missing[:3]}. The preprocessed directory is stale "
+                f"relative to {manifest_path}; re-run preprocess."
+            )
+
+        # Any tensor present but NOT in the manifest means a previous run wrote a
+        # different assignment into this directory. Refuse rather than ignore: this
+        # is the residue that caused the leak, and silently skipping it would hide
+        # that the run_dir holds two datasets. (Resource-fork files that appear on
+        # exFAT volumes are not residue.)
+        on_disk = {p.stem[: -len("_low")] for p in split_dir.glob("*_low.pt")
+                   if not p.name.startswith("._")}
+        orphans = sorted(on_disk - set(scene_ids))
+        if orphans:
+            raise RuntimeError(
+                f"Split {split!r} contains {len(orphans)} tensor(s) absent from the "
+                f"manifest, e.g. {orphans[:3]}. They are left over from a previous "
+                f"preprocess run under a different split assignment — training on "
+                f"them would score trained-on scenes as held-out. Re-run preprocess "
+                f"(it now clears split directories) or use a fresh --run-dir."
+            )
 
         self.low_paths = low_paths
         self.high_paths = high_paths
-        self.scene_ids = [p.stem.replace("_low", "") for p in low_paths]
+        self.scene_ids = scene_ids
 
     def __len__(self) -> int:
         return len(self.low_paths)

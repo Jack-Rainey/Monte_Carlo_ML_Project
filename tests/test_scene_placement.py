@@ -17,6 +17,7 @@ import pytest
 
 from amcd.config import Config
 from amcd.scenes.generator import _generation_plan, run_gen_scenes
+from amcd.simulators.base import SceneSpec
 
 from tests.conftest import QUIET, tiny_config
 
@@ -48,8 +49,8 @@ class TestResearchIPin:
 
     def test_figure5_geometry_and_placement(self, ri_config: Config) -> None:
         fam = ri_config.scenes.geometry_families
-        assert fam["shoebox"]["dims"] == [[4.0, 14.0], [3.0, 10.0], [2.4, 4.5]]
-        assert fam["corridor"]["dims"] == [[8.0, 24.0], [1.8, 4.0], [2.4, 4.0]]
+        assert fam["shoebox"].dims == [[4.0, 14.0], [3.0, 10.0], [2.4, 4.5]]
+        assert fam["corridor"].dims == [[8.0, 24.0], [1.8, 4.0], [2.4, 4.0]]
         assert ri_config.scenes.margins.model_dump() == {
             "wall": 0.5, "floor": 0.5, "ceiling": 0.3
         }
@@ -270,6 +271,150 @@ class TestRngStreamPreserved:
         run_gen_scenes(tiny_config(scenes={"n_id": 8}), tmp_path, QUIET)
         report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
         assert report["id"]["acceptance_rate"] == 1.0
+
+
+class TestCornerBiasIsHorizontal:
+    """AC-10: `corner_frac` must not be applied to the z axis.
+
+    With a declared height_range, z is an ergonomic band rather than a room
+    boundary — 1.2 m is 1.2 m off the floor either way — so biasing it buys no
+    boundary proximity while silently narrowing a REPORTED robustness split's
+    receiver-height distribution (observed: [1.20, 1.31] instead of [1.2, 1.8]).
+    """
+
+    def test_receiver_height_spans_the_declared_band(self, tmp_path: Path) -> None:
+        cfg = tiny_config(
+            scenes={
+                "n_id": 4,
+                "placement_regimes": {"near_corner": {
+                    "type": "corner", "corner_frac": 0.2,
+                    "height_range": [1.2, 1.8], "distance_range": None,
+                }},
+            },
+            splits={"test_placement_shift": {
+                "role": "test", "count": 40, "axes": {"placement": "near_corner"}}},
+        )
+        run_gen_scenes(cfg, tmp_path, QUIET)
+        specs = [json.loads(p.read_text())
+                 for p in sorted((tmp_path / "scenes").glob("scene_*.json"))]
+        corner = [s for s in specs if s["regime_axes"]["placement"] == "near_corner"]
+        assert corner
+
+        rcv_z = np.array([s["receiver_pos"][2] for s in corner])
+        # Horizontal axes ARE confined; z is not.
+        for s in corner:
+            for i in (0, 1):
+                hi = s["dims"][i] - cfg.scenes.margins.wall
+                corner_hi = cfg.scenes.margins.wall + 0.2 * (hi - cfg.scenes.margins.wall)
+                assert s["receiver_pos"][i] <= corner_hi + 1e-6
+        assert rcv_z.min() >= 1.2 and rcv_z.max() <= 1.8
+        # Must cover well beyond the collapsed [1.2, 1.32] band the bug produced.
+        assert rcv_z.max() - rcv_z.min() > 0.4, (
+            f"receiver height band collapsed to [{rcv_z.min():.3f}, {rcv_z.max():.3f}]"
+        )
+
+    def test_report_separates_source_and_receiver_heights(self, tmp_path: Path) -> None:
+        """A pooled source+receiver statistic hid the collapse."""
+        run_gen_scenes(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
+        entry = next(iter(report.values()))
+        assert "source_height_m" in entry and "receiver_height_m" in entry
+
+
+class TestPropagationDelay:
+    """AC-11: the scaffold must obey the speed of sound it declares."""
+
+    def test_onset_matches_distance_over_c(self) -> None:
+        from amcd.evaluation.room_acoustic import _find_onset
+        from tests.conftest import dry_run_simulator
+
+        cfg = tiny_config()
+        c = cfg.simulator.params["speed_of_sound_m_s"]
+        sim = dry_run_simulator(n_channels=4, n_samples=48000, sample_rate=48000)
+
+        for distance in (1.0, 5.0, 9.8):
+            scene = SceneSpec(
+                scene_id="s", seed=1, geometry_family="shoebox", dims=(30.0, 10.0, 3.0),
+                material_absorption=0.3,
+                source_pos=(1.0, 1.0, 1.5),
+                receiver_pos=(1.0 + distance, 1.0, 1.5),
+            )
+            onset = _find_onset(sim.render(scene, 5000).ir[0], cfg.metric_onset_rel_db)
+            expected = round(distance / c * 48000)
+            assert abs(onset - expected) <= 1, (
+                f"d={distance} m: onset {onset} vs expected {expected} at c={c} m/s"
+            )
+
+    def test_declared_speed_is_the_configured_one(self) -> None:
+        from tests.conftest import dry_run_simulator
+
+        cfg = tiny_config()
+        sim = dry_run_simulator(n_channels=4, n_samples=800, sample_rate=8000)
+        scene = SceneSpec(
+            scene_id="s", seed=1, geometry_family="shoebox", dims=(5.0, 4.0, 3.0),
+            material_absorption=0.3, source_pos=(1.0, 1.0, 1.5), receiver_pos=(3.0, 2.0, 1.5),
+        )
+        meta = sim.render(scene, 50).meta
+        assert meta["speed_of_sound_m_s"] == cfg.simulator.params["speed_of_sound_m_s"]
+
+
+class TestConfigGuards:
+    """Values that would otherwise be silently ignored or silently wrong."""
+
+    def test_negative_margin_rejected(self) -> None:
+        """F-34: a negative margin places sources OUTSIDE the room, and the
+        emptiness check passes because the box is merely inverted, not empty."""
+        with pytest.raises(ValueError, match="must be >= 0"):
+            tiny_config(scenes={"margins": {"wall": -1.0}})
+
+    def test_zero_placement_attempts_rejected(self) -> None:
+        """F-32: 0 attempts made every scene fail with a message blaming a
+        distance constraint the config never declared."""
+        with pytest.raises(ValueError, match="max_placement_attempts must be > 0"):
+            tiny_config(scenes={"max_placement_attempts": 0})
+
+    def test_frac_on_shift_split_rejected(self) -> None:
+        with pytest.raises(ValueError, match="`frac` would be ignored"):
+            tiny_config(splits={"test_geometry_shift": {
+                "role": "test", "count": 2, "frac": 0.1,
+                "axes": {"geometry": "corridor"}}})
+
+    def test_seed_on_id_pool_split_in_frac_mode_rejected(self) -> None:
+        """F-33: the researcher believes the split is independently seeded; in
+        frac mode it is not, because the pool is generated from one stream."""
+        with pytest.raises(ValueError, match="not independently seeded"):
+            tiny_config(splits={"train": {"role": "train", "frac": 0.6, "seed": 7777}})
+
+    def test_count_mode_requires_seed_on_shift_splits_too(self) -> None:
+        """F-35: count mode's contract is that EVERY split is independently
+        seeded, not just the id-pool ones."""
+        with pytest.raises(ValueError, match="EVERY split"):
+            tiny_config(
+                scenes={"n_id": None},
+                splits={
+                    "train":   {"role": "train", "frac": None, "count": 4, "seed": 11},
+                    "valid":   {"role": "valid", "frac": None, "count": 2, "seed": 12},
+                    "test_id": {"role": "test",  "frac": None, "count": 2, "seed": 13},
+                    "test_geometry_shift": {"role": "test", "count": 2,
+                                            "axes": {"geometry": "corridor"}},  # no seed
+                },
+            )
+
+    def test_unknown_geometry_key_rejected(self) -> None:
+        """F-31: an unrecognised key here is a HIDDEN GEOMETRY PARAMETER."""
+        with pytest.raises(ValueError, match="extra_forbidden|Extra inputs"):
+            tiny_config(scenes={"geometry_families": {
+                "shoebox": {"dims": [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]], "shape": "L"}}})
+
+    def test_typo_in_dims_key_rejected(self) -> None:
+        with pytest.raises(ValueError, match="extra_forbidden|Extra inputs|Field required"):
+            tiny_config(scenes={"geometry_families": {
+                "shoebox": {"dimz": [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]]}}})
+
+    def test_unknown_material_key_rejected(self) -> None:
+        with pytest.raises(ValueError, match="extra_forbidden|Extra inputs"):
+            tiny_config(scenes={"material_regimes": {
+                "mixed": {"absorption": [0.05, 0.8], "scattering": 0.5}}})
 
 
 class TestGenerationPlan:
