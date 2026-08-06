@@ -217,7 +217,8 @@ class TestSeedReproducibility:
 
         def _load_sorted(path: Path) -> list:
             return sorted(
-                (json.loads(f.read_text()) for f in path.glob("*.json") if not f.name.startswith("._")),
+                (json.loads(f.read_text()) for f in path.glob("scene_*.json")
+                 if not f.name.startswith("._")),
                 key=lambda d: d["scene_id"],
             )
 

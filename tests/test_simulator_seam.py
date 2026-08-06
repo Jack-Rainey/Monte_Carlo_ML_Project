@@ -206,9 +206,9 @@ class TestStageFingerprint:
     def test_unchanged_config_reuses_cache(self, tmp_path: Path) -> None:
         cfg = tiny_config(scenes={"n_id": 4})
         self._pipeline(cfg, tmp_path).run_stage("gen-scenes")
-        mtimes = {p: p.stat().st_mtime_ns for p in (tmp_path / "scenes").glob("*.json")}
+        mtimes = {p: p.stat().st_mtime_ns for p in (tmp_path / "scenes").glob("scene_*.json")}
         self._pipeline(cfg, tmp_path).run_stage("gen-scenes")  # must skip, not rerun
-        assert {p: p.stat().st_mtime_ns for p in (tmp_path / "scenes").glob("*.json")} == mtimes
+        assert {p: p.stat().st_mtime_ns for p in (tmp_path / "scenes").glob("scene_*.json")} == mtimes
 
     def test_changed_simulator_param_fails_loudly(self, tmp_path: Path) -> None:
         cfg = tiny_config(scenes={"n_id": 4})
@@ -239,7 +239,7 @@ class TestStageFingerprint:
         self._pipeline(cfg, tmp_path).run_stage("gen-scenes")
         self._pipeline(cfg, tmp_path).run_stage("render")
 
-        moved = tiny_config(scenes={"n_id": 4, "margin": 0.75})
+        moved = tiny_config(scenes={"n_id": 4, "margins": {"wall": 0.75}})
         with pytest.raises(RuntimeError, match="cached under a DIFFERENT config"):
             self._pipeline(moved, tmp_path).run_stage("render")
 
@@ -248,7 +248,7 @@ class TestStageFingerprint:
         self._pipeline(cfg, tmp_path).run_stage("gen-scenes")
         changed = tiny_config(scenes={"n_id": 6})
         self._pipeline(changed, tmp_path, force=True).run_stage("gen-scenes")
-        assert len(list((tmp_path / "scenes").glob("*.json"))) == 6 + 6  # id + shifts
+        assert len(list((tmp_path / "scenes").glob("scene_*.json"))) == 6 + 6  # id + shifts
 
     def test_legacy_sentinel_raises_rather_than_guessing(self, tmp_path: Path) -> None:
         cfg = tiny_config(scenes={"n_id": 4})

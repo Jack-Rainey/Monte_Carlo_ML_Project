@@ -1,0 +1,155 @@
+# ── Research I reproduction overlay (E1: "reproduce the old null") ────────────
+# Usage:  amcd all -c configs/base.yaml -c configs/research_i.yaml
+#
+# Pins docs/research_I_paper.md Figure 5 (dataset configuration, l.488-503) and
+# Figure 6 (split configuration, l.507-514). base.yaml is the v3 extension
+# baseline and deliberately differs; THIS file is the one that claims RI
+# faithfulness, so every RI-specified value is restated here even where base.yaml
+# already agrees — a reproduction config that silently inherits half its values
+# is not auditable (ledger RD-26).
+#
+# ── Figure 5 / 6 coverage ─────────────────────────────────────────────────────
+# PINNED HERE:      base seed 42 · 48 kHz · 3.0 s · order 3 · float32 · ray pair
+#                   5,000/200,000 · retained-path top-k 5,000 · shoebox and
+#                   corridor geometry ranges · per-axis margins · heights
+#                   1.2-1.8 m · source-receiver separation 1.0-10.0 m · split
+#                   counts 500/60/60/40/30/30 · per-split seeds 1001-1006
+# PINNED AT STEP 4: the four QC thresholds (onset mismatch 2.0 ms, minimum total
+#                   energy 1e-10, non-empty retained-path file, max retained-path
+#                   file 128 MB). Two of those config keys do not exist yet, so
+#                   they are NOT in this file — ledger RD-18.
+#
+# ── FOUR DELIBERATE DEVIATIONS — this config is NOT a verbatim RI clone ───────
+# Each is arbitrated and tracked; the E1 report must disclose them per split.
+#
+# 1. (RD-27) RI's test_geometry_shift is DUAL-axis — corridor AND
+#    `near_wall+far_pair` (Figure 6 l.514) — which breaks v3 invariant #10
+#    (a shift split perturbs exactly ONE axis). We keep invariant #10 and hold
+#    placement at the id regime. E1 is a methodological reproduction, not a
+#    bit-exact one (pygsound exposes no RNG seed at all — RD-23), and cloning a
+#    confounded split would make v3's own robustness claim uninterpretable.
+#    ⇒ v3's test_geometry_shift is NOT comparable to RI's 0.61 baseline rel-L2.
+#
+# 2. (RD-28) RI's material shift targets ceiling_absorptive AND asymmetric_walls.
+#    `asymmetric_walls` needs per-surface absorption; SceneSpec carries one
+#    scalar, so only ceiling_absorptive is applied.
+#    ⇒ the material shift here is WEAKER than RI's; the split is not comparable.
+#
+# 3. (RD-29) RI's placement regimes carry `+mid_pair` / `+far_pair` pairing
+#    sub-regimes whose distance sub-ranges the paper NEVER states numerically —
+#    only the global 1.0-10.0 m (Figure 5 l.502). Rather than invent them, all
+#    regimes get the global range. RI's *id* regime is `interior_random+mid_pair`,
+#    so this changes the source-receiver distance distribution of FIVE OF SIX
+#    splits, and distance drives DRR → C50/D50/EDT.
+#    ⇒ the realized per-split distance distribution is recorded in
+#      scenes/placement_report.json so the E1 report can state what stood in.
+#
+# 4. Values RI never quantifies are inherited from base.yaml and flagged inline
+#    below: near_corner's corner_frac, and the absorption ranges of the `mixed`
+#    and `ceiling_absorptive` material regimes.
+
+run_id: E1
+
+# ── Figure 5: base seed ───────────────────────────────────────────────────────
+seeds:
+  master: 42
+
+# ── Figure 5: audio ───────────────────────────────────────────────────────────
+# Stored data type float32 is structural (renders are written as float32), not a
+# config key.
+sample_rate: 48000
+ir_duration: 3.0
+ambisonics_order: 3
+
+# ── Figure 5: ray budgets — FROZEN for E1 ─────────────────────────────────────
+# Do not change these to explore cost. The Step 6 ray-budget probe informs the
+# EXTENSION's sweep ladder only; the reference leg defines every downstream
+# number, so lowering it would silently redefine the result being reproduced.
+low_ray_budget: 5000
+high_ray_budget: 200000
+
+# ── Figure 5: retained-path policy ────────────────────────────────────────────
+simulator:
+  name: gsound_sir
+  params:
+    path_retention:
+      mode: top_k
+      value: 5000
+
+scenes:
+  # Count mode: each id-pool split declares its own count and seed below, so
+  # there is no pool to divide. Explicitly null rather than absent — a YAML
+  # overlay cannot DELETE base.yaml's `n_id: 500` (RD-32).
+  n_id: null
+
+  id_regime:
+    geometry: shoebox
+    placement: interior_random
+    material: mixed
+
+  # Figure 5: minimum wall margin 0.5 m, floor 0.5 m, ceiling 0.3 m.
+  # NOTE: the ceiling margin never actually binds here — every RI room is at
+  # least 2.4 m tall, so the admissible height band [0.5, h-0.3] always contains
+  # the declared 1.2-1.8 m range. Pinned for faithfulness, not because it acts.
+  margins:
+    wall: 0.5
+    floor: 0.5
+    ceiling: 0.3
+
+  # Bound on distance-constraint rejection sampling. Needed here because this is
+  # the first config to declare a distance_range; it never binds in shoeboxes
+  # (see below) but does real work in long corridors.
+  max_placement_attempts: 1000
+
+  # Figure 5: shoebox L 4.0-14.0 / W 3.0-10.0 / H 2.4-4.5 m;
+  #           corridor L 8.0-24.0 / W 1.8-4.0 / H 2.4-4.0 m.
+  geometry_families:
+    shoebox:  { dims: [[4.0, 14.0], [3.0, 10.0], [2.4, 4.5]] }
+    corridor: { dims: [[8.0, 24.0], [1.8, 4.0], [2.4, 4.0]] }
+
+  placement_regimes:
+    # Figure 5: source/receiver height 1.2-1.8 m; separation 1.0-10.0 m.
+    # The separation constraint binds ASYMMETRICALLY, which matters when reading
+    # the acceptance rates in scenes/placement_report.json: in the smallest RI
+    # shoebox (4 x 3 m, heights 1.2-1.8, 0.5 m walls) the greatest achievable
+    # separation is only ~3.7 m, so the 10 m ceiling is inert and the constraint
+    # acts purely as a 1.0 m minimum; in a 24 m corridor the 10 m ceiling is what
+    # does the rejecting. See deviation 3 above.
+    interior_random:
+      type: interior
+      corner_frac: null
+      height_range: [1.2, 1.8]
+      distance_range: [1.0, 10.0]
+    near_corner:
+      type: corner
+      corner_frac: 0.2        # NOT an RI value — RI never quantifies near_corner
+      height_range: [1.2, 1.8]
+      distance_range: [1.0, 10.0]
+
+  material_regimes:
+    # NOT RI values — RI names the regimes but gives no absorption numbers, so
+    # base.yaml's disjoint ranges stand. `asymmetric_walls` is absent: see
+    # deviation 2 above.
+    mixed:              { absorption: [0.05, 0.80] }
+    ceiling_absorptive: { absorption: [0.85, 0.98] }
+
+# ── Figure 6: split counts and per-split seeds ────────────────────────────────
+# Count mode: every id-pool split states an exact count and its own seed, which
+# frac-based hash-bucketing cannot express (fracs cannot hit 500/60/60 exactly,
+# and one shared seed cannot be six). `frac: null` is explicit because the
+# overlay cannot delete base.yaml's fracs (RD-32).
+splits:
+  train:
+    { role: train, frac: null, count: 500, seed: 1001 }
+  valid:
+    { role: valid, frac: null, count: 60,  seed: 1002 }
+  test_id:
+    { role: test,  frac: null, count: 60,  seed: 1003 }
+  test_material_shift:
+    { role: test, count: 40, seed: 1004, axes: { material: ceiling_absorptive } }
+  test_placement_shift:
+    { role: test, count: 30, seed: 1005, axes: { placement: near_corner } }
+  # Deviation 1: RI also moves placement to near_wall+far_pair here. Held at the
+  # id placement regime to keep this a single-axis shift (invariant #10).
+  test_geometry_shift:
+    { role: test, count: 30, seed: 1006, axes: { geometry: corridor } }

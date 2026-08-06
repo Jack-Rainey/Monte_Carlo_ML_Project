@@ -52,19 +52,38 @@ scenes:
   # This fraction-based sizing intentionally differs from §6.1's illustrative
   # 500/60/60 counts (which the spec marks non-durable); the discrepancy is expected.
   n_id: 500                 # id-pool size → hash-bucketed into train/valid/test_id
+                            # (frac mode; count mode sets this null — see
+                            #  configs/research_i.yaml)
   id_regime:
     geometry: shoebox
     placement: interior_random
     material: mixed
-  margin: 0.5               # source/receiver wall margin (m)
+  # Per-axis clearance (m) keeping sources/receivers off the surfaces. Kept
+  # uniform at 0.5 here: Research I's asymmetric 0.3 m ceiling margin belongs to
+  # configs/research_i.yaml, and putting it here would silently re-generate every
+  # existing dry-run dataset (RD-36).
+  margins:
+    wall: 0.5
+    floor: 0.5
+    ceiling: 0.5
+  # Rejection-sampling bound, consumed only by regimes declaring a distance_range.
+  # Exceeding it raises with the geometry that made the constraint unreachable.
+  max_placement_attempts: 1000
   geometry_families:
     # dims: per-axis (lo, hi) metre ranges. corridor's long axis is DISJOINT from
     # shoebox's so geometry_shift is a genuine held-out region.
     shoebox:  { dims: [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]] }
     corridor: { dims: [[15.0, 30.0], [1.5, 3.0], [2.4, 3.5]] }
   placement_regimes:
-    interior_random: { type: interior }
-    near_corner:     { type: corner, corner_frac: 0.2 }
+    # `height_range` and `distance_range` are REQUIRED KEYS that may be null:
+    # presence is mandatory so a constraint is never silently defaulted, and null
+    # explicitly declares "no constraint". base.yaml declares none of them — the
+    # Research I values (heights 1.2-1.8 m, separation 1.0-10.0 m) are pinned in
+    # configs/research_i.yaml, which is the config that claims RI faithfulness.
+    interior_random:
+      { type: interior, corner_frac: null, height_range: null, distance_range: null }
+    near_corner:
+      { type: corner, corner_frac: 0.2, height_range: null, distance_range: null }
   material_regimes:
     # absorption: (lo, hi). ceiling_absorptive is DISJOINT from mixed so
     # material_shift is a genuine held-out region.

@@ -303,8 +303,8 @@ class TestDistributionShiftSplits:
                 id_hi = sc.material_regimes[id_mat]["absorption"][1]
                 assert shift_lo > id_hi, f"{name}: material absorption overlaps id"
             elif axis == "placement":
-                assert sc.placement_regimes[value]["type"] == "corner"
-                assert 0.0 < sc.placement_regimes[value]["corner_frac"] < 1.0, (
+                assert sc.placement_regimes[value].type == "corner"
+                assert 0.0 < sc.placement_regimes[value].corner_frac < 1.0, (
                     f"{name}: corner_frac must be a proper sub-region"
                 )
 
@@ -319,8 +319,8 @@ class TestDistributionShiftSplits:
         corridor_long_lo = sc.geometry_families["corridor"]["dims"][0][0]
         mixed_hi = sc.material_regimes["mixed"]["absorption"][1]
         ceiling_lo = sc.material_regimes["ceiling_absorptive"]["absorption"][0]
-        corner_frac = sc.placement_regimes["near_corner"]["corner_frac"]
-        margin = sc.margin
+        corner_frac = sc.placement_regimes["near_corner"].corner_frac
+        margin = sc.margins.wall
 
         assert corridor_long_lo > shoebox_long_hi, "corridor/shoebox long axis overlap"
         assert ceiling_lo > mixed_hi, "material ranges overlap"

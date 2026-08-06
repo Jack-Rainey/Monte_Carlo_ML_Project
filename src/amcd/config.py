@@ -210,21 +210,104 @@ class Seeds(BaseModel):
 class SplitSpec(BaseModel):
     """One config-declared evaluation split (design_spec §6.1, inv #9/#10).
 
-    id-pool splits (train/valid/test_id) share the id baseline (empty `axes`) and
-    are hash-bucketed by `frac`; the id-pool split with no `frac` is the residual
-    (test_id). Shift splits declare a `count` and exactly one axis override in
-    `axes` — a controlled, single-axis distribution shift held out for robustness."""
+    Shift splits always declare a `count` and exactly one axis override in `axes`
+    — a controlled, single-axis distribution shift held out for robustness.
+
+    id-pool splits (empty `axes`) can be sized two ways, and a config must pick
+    exactly one for all of them (`Config._check`):
+
+      frac mode  — `scenes.n_id` scenes are generated as one pool and
+                   hash-bucketed by `frac`; the split with no `frac` is the
+                   residual. Proportional sizing from a single pool size.
+      count mode — each id-pool split declares its own `count` and its own
+                   `seed`, and its scenes are generated directly into it. This is
+                   how Research I specifies its dataset (Figure 6: explicit
+                   counts 500/60/60 and per-split seeds 1001-1006), which frac
+                   mode cannot express — fracs cannot hit exact counts, and one
+                   shared seed cannot be six.
+
+    Both modes are live (the dry-run/test configs use frac; `research_i.yaml`
+    uses count), so neither is dead weight.
+    """
 
     model_config = {"extra": "forbid"}
 
     role: str            # "train" | "valid" | "test"
-    frac: float | None = None    # id-pool sizing (train/valid); residual gets remainder
-    count: int | None = None     # shift-split sizing
+    frac: float | None = None    # frac-mode id-pool sizing; residual has none
+    count: int | None = None     # shift-split sizing, and count-mode id-pool sizing
     axes: dict[str, str] = {}    # axis overrides vs id baseline; empty ⇒ id pool
+    #: This split's own scene-generation seed. `None` ⇒ draw from the shared
+    #: `scene_generation` stream (frac mode). Required in count mode, where the
+    #: whole point is that each split is generated independently and reproducibly.
+    seed: int | None = None
 
     @property
     def is_id_pool(self) -> bool:
         return not self.axes
+
+
+class Margins(BaseModel):
+    """Per-axis clearances (m) keeping sources/receivers off the surfaces.
+
+    Separate wall/floor/ceiling values because Research I specifies them
+    separately (Figure 5: wall 0.5, floor 0.5, ceiling 0.3) — a single scalar
+    cannot express that.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    wall: float      # horizontal (x, y) clearance
+    floor: float     # clearance above z = 0
+    ceiling: float   # clearance below z = height
+
+
+class PlacementRegime(BaseModel):
+    """One named source/receiver placement policy (design_spec §6.1).
+
+    `height_range` and `distance_range` are REQUIRED KEYS whose value may be
+    `null`. Presence is mandatory so no constraint is ever silently defaulted;
+    `null` explicitly declares *no constraint*, which is a different statement
+    from "nobody thought about it" and takes the unconstrained sampling path.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    #: "interior" — receiver uniform in the admissible box.
+    #: "corner"   — receiver biased into a corner sub-box of size `corner_frac`.
+    type: str
+    corner_frac: float | None
+
+    #: (lo, hi) metres for BOTH source and receiver z, or null for the full
+    #: admissible height. Research I pins 1.2-1.8 m (seated/standing ear height).
+    height_range: list[float] | None
+
+    #: (lo, hi) metres for the source-receiver separation, enforced by rejection
+    #: sampling, or null for no constraint. Research I pins 1.0-10.0 m.
+    distance_range: list[float] | None
+
+    @model_validator(mode="after")
+    def _check(self) -> "PlacementRegime":
+        if self.type not in ("interior", "corner"):
+            raise ValueError(f"placement type must be interior|corner; got {self.type!r}")
+        if self.type == "corner":
+            if self.corner_frac is None:
+                raise ValueError("placement type 'corner' requires a `corner_frac`")
+            if not (0.0 < self.corner_frac <= 1.0):
+                raise ValueError(f"corner_frac must be in (0, 1]; got {self.corner_frac}")
+        elif self.corner_frac is not None:
+            raise ValueError(
+                f"corner_frac is meaningless for placement type {self.type!r} "
+                f"(set it null) — a value here would be silently ignored"
+            )
+        for name in ("height_range", "distance_range"):
+            rng = getattr(self, name)
+            if rng is None:
+                continue
+            if len(rng) != 2 or rng[0] >= rng[1]:
+                raise ValueError(f"{name} must be [lo, hi] with lo < hi; got {rng}")
+            if rng[0] < 0:
+                raise ValueError(f"{name} must be non-negative; got {rng}")
+        return self
 
 
 class Scenes(BaseModel):
@@ -233,12 +316,18 @@ class Scenes(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    n_id: int                              # id-pool size → bucketed by split fracs
-    id_regime: dict[str, str]              # baseline {geometry, placement, material}
-    geometry_families: dict[str, dict]     # name → {dims: [[lo,hi],[lo,hi],[lo,hi]]}
-    placement_regimes: dict[str, dict]     # name → {type: interior|corner, corner_frac?}
-    material_regimes: dict[str, dict]      # name → {absorption: [lo, hi]}
-    margin: float                          # wall margin (m) for source/receiver placement
+    #: frac-mode id-pool size (hash-bucketed by split fracs). Explicitly `null` in
+    #: count mode, where each id-pool split declares its own `count` instead.
+    n_id: int | None
+    id_regime: dict[str, str]                       # baseline {geometry, placement, material}
+    geometry_families: dict[str, dict]              # name → {dims: [[lo,hi]×3]}
+    placement_regimes: dict[str, PlacementRegime]
+    material_regimes: dict[str, dict]               # name → {absorption: [lo, hi]}
+    margins: Margins
+    #: Rejection-sampling bound for `distance_range`. Consumed only when a regime
+    #: declares one; exceeding it raises rather than silently emitting a scene
+    #: that violates the constraint.
+    max_placement_attempts: int
 
 
 class ModelSpec(BaseModel):
@@ -426,26 +515,8 @@ class Config(BaseModel):
                 f"metric_onset_rel_db must be < 0 (dB below peak); got {self.metric_onset_rel_db}"
             )
 
-        # id-pool sizing: train/valid need a frac summing < 1; exactly one residual.
-        id_pool = self.id_pool_splits
-        if not id_pool:
-            raise ValueError("At least one id-pool split (empty `axes`) is required.")
-        frac_sum = 0.0
-        residuals = []
-        for name, sp in id_pool.items():
-            if sp.frac is None:
-                residuals.append(name)
-            else:
-                if not (0.0 < sp.frac < 1.0):
-                    raise ValueError(f"split {name!r}: frac must be in (0, 1)")
-                frac_sum += sp.frac
-        if len(residuals) != 1:
-            raise ValueError(
-                f"Exactly one id-pool split must be the residual (no `frac`); "
-                f"got {residuals or 'none'}"
-            )
-        if frac_sum >= 1.0:
-            raise ValueError(f"id-pool fracs sum to {frac_sum} (must be < 1.0)")
+        self._check_id_pool_sizing()
+        self._check_split_seeds()
 
         # Shift splits: each needs a count and exactly one axis, over a known regime
         # value that differs from the id baseline (controlled single-axis shift).
@@ -484,6 +555,120 @@ class Config(BaseModel):
                     f"scenes.id_regime.{axis}={id_regime.get(axis)!r} not in scenes.{axis} regimes"
                 )
         return self
+
+    # ── id-pool sizing modes ──────────────────────────────────────────────────
+    @property
+    def id_pool_is_counted(self) -> bool:
+        """True when id-pool splits are sized by explicit `count` + `seed`.
+
+        The two modes are mutually exclusive and validated in
+        `_check_id_pool_sizing`, so this single predicate is safe to branch on
+        downstream (the generator and split assignment both do)."""
+        return any(sp.count is not None for sp in self.id_pool_splits.values())
+
+    def _check_id_pool_sizing(self) -> None:
+        """id-pool splits are sized ALL by `frac` or ALL by `count`, never mixed.
+
+        A mixed declaration has no coherent meaning — some splits proportional to
+        a pool that the others do not draw from — and would quietly produce a
+        dataset of the wrong size, so it is rejected rather than interpreted.
+        """
+        id_pool = self.id_pool_splits
+        if not id_pool:
+            raise ValueError("At least one id-pool split (empty `axes`) is required.")
+
+        fracced = {n for n, sp in id_pool.items() if sp.frac is not None}
+        counted = {n for n, sp in id_pool.items() if sp.count is not None}
+        if fracced & counted:
+            raise ValueError(
+                f"id-pool split(s) {sorted(fracced & counted)} declare BOTH `frac` "
+                f"and `count`; pick one sizing mode per config."
+            )
+        if counted and len(counted) != len(id_pool):
+            raise ValueError(
+                f"id-pool sizing must be all-`count` or all-`frac`, not mixed. "
+                f"Counted: {sorted(counted)}; not counted: {sorted(set(id_pool) - counted)}. "
+                f"In count mode every id-pool split needs an explicit `count` "
+                f"(and `frac: null`)."
+            )
+
+        if counted:
+            # ── count mode (Research I) ──
+            if self.scenes.n_id is not None:
+                raise ValueError(
+                    f"scenes.n_id must be null in count mode: each id-pool split "
+                    f"declares its own `count`, so a pool size would be unused and "
+                    f"misleading (got n_id={self.scenes.n_id})."
+                )
+            missing_seed = sorted(n for n, sp in id_pool.items() if sp.seed is None)
+            if missing_seed:
+                raise ValueError(
+                    f"count mode requires an explicit per-split `seed`; missing on "
+                    f"{missing_seed}. Count mode exists to make each split's "
+                    f"generation independent and reproducible (inv #5), which a "
+                    f"shared stream cannot provide."
+                )
+            for name, sp in id_pool.items():
+                if sp.count <= 0:
+                    raise ValueError(f"split {name!r}: count must be > 0; got {sp.count}")
+        else:
+            # ── frac mode ──
+            if self.scenes.n_id is None:
+                raise ValueError(
+                    "scenes.n_id is required in frac mode (it is the pool the fracs "
+                    "divide up); set explicit per-split `count`s to use count mode."
+                )
+            frac_sum = 0.0
+            residuals = []
+            for name, sp in id_pool.items():
+                if sp.frac is None:
+                    residuals.append(name)
+                else:
+                    if not (0.0 < sp.frac < 1.0):
+                        raise ValueError(f"split {name!r}: frac must be in (0, 1)")
+                    frac_sum += sp.frac
+            if len(residuals) != 1:
+                raise ValueError(
+                    f"Exactly one id-pool split must be the residual (no `frac`); "
+                    f"got {residuals or 'none'}"
+                )
+            if frac_sum >= 1.0:
+                raise ValueError(f"id-pool fracs sum to {frac_sum} (must be < 1.0)")
+
+    def _check_split_seeds(self) -> None:
+        """Per-split seeds must be pairwise distinct and distinct from the named
+        per-aspect seeds (inv #5: each stochastic aspect draws its own entropy).
+
+        Two splits sharing a seed would generate the *same scenes* — an
+        overlap that reads as a legitimate dataset and is invisible downstream.
+        """
+        declared = {n: sp.seed for n, sp in self.splits.items() if sp.seed is not None}
+        if not declared:
+            return
+        seen: dict[int, str] = {}
+        for name, seed in declared.items():
+            if seed in seen:
+                raise ValueError(
+                    f"splits {seen[seed]!r} and {name!r} share seed {seed}; per-split "
+                    f"seeds must be pairwise distinct or the splits generate "
+                    f"identical scenes (inv #5)."
+                )
+            seen[seed] = name
+        collisions = {n: s for n, s in declared.items() if s in set(self.seeds.resolved().values())}
+        if collisions:
+            raise ValueError(
+                f"per-split seed(s) {collisions} collide with a named per-aspect "
+                f"seed; each stochastic aspect must draw its own entropy (inv #5)."
+            )
+        # A split_assignment override is INERT in count mode (no hash-bucketing
+        # happens), and a config value that silently does nothing is worse than an
+        # error — it reads as controlling something it does not.
+        if self.id_pool_is_counted and self.seeds.split_assignment is not None:
+            raise ValueError(
+                "seeds.split_assignment is set but count-mode id-pool splits are not "
+                "hash-bucketed, so it would have no effect. Remove the override (or "
+                "switch to frac-mode sizing)."
+            )
 
     # ── Loading ───────────────────────────────────────────────────────────────
     @staticmethod

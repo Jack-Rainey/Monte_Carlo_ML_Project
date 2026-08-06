@@ -2,12 +2,26 @@
 Config-driven split assignment (design_spec §6.1, invariants #1/#9/#10).
 
 The split *set* lives entirely in `config.splits` — this module hardcodes no
-split names. A shift scene carries its target split name in `split_regime` and is
-routed straight there (never train/valid — controlled-shift integrity). id scenes
-are hash-bucketed into the id-pool splits (train/valid/test_id) by cumulative
-fraction; the id-pool split with no `frac` is the residual. The hash is stable
-under adding regime bookkeeping fields, and keyed by the dedicated
-`split_assignment` seed so split membership shares no entropy with other stages.
+split names. A scene carries its target split name in `split_regime` and is
+routed straight there; only a scene tagged `"id"` is hash-bucketed.
+
+Which scenes are tagged `"id"` depends on the id-pool sizing mode the config
+declares (see `SplitSpec`), and this module needs no branch for it:
+
+  frac mode  — the generator emits one pooled set tagged `"id"`, and they are
+               hash-bucketed here into train/valid/test_id by cumulative `frac`
+               (the split with no `frac` is the residual). The hash is stable
+               under adding regime bookkeeping fields, and keyed by the dedicated
+               `split_assignment` seed so membership shares no entropy with other
+               stages.
+  count mode — the generator already emitted each id-pool split's exact count
+               under that split's own name and seed, so those scenes take the
+               direct-routing branch below exactly as shift scenes do. Nothing
+               is hash-bucketed, which is why an explicit `seeds.split_assignment`
+               is rejected as inert in this mode.
+
+Shift scenes are always routed directly, never into train/valid — controlled-shift
+integrity (invariant #10).
 """
 from __future__ import annotations
 
