@@ -30,13 +30,19 @@ always emits/saves a superset of level *n*.
 | 1 | provenance / timing | config snapshot + resolved seeds + `versions.json` (git SHA), `timings.json`, report bundle copies | run identity (`Run dir:`), per-stage `[done] (Xs)` durations |
 | 2 | progress | *(no artifacts today)* | `[run ]`/`[skip]`, per-stage counts/summaries, epoch progress |
 | 3 | metrics | `checkpoints/train_log.csv` | intermediate metrics: tensor shapes, device, best loss, eval headline, stats/report echo, D0a/D0b tables |
-| 4 | diagnostics | `renders/<id>/meta.json` QC records | *(no sites today — reserved)* |
+| 4 | diagnostics | *(no artifacts today — Step 4's per-criterion render QC record is the next)* | *(no sites today — reserved)* |
 | 5 | visual | *(reserved)* | *(reserved — see below)* |
 
-Naming note: the `diagnostics` *category* (level 4, per-unit QC observability —
-today only the render stage's `meta.json` records) is unrelated to the
-`diagnostics` *stage*, whose D0a/D0b tables print at `metrics` and whose JSON
-outputs are canonical.
+Naming note: the `diagnostics` *category* (level 4, per-unit QC observability) is
+unrelated to the `diagnostics` *stage*, whose D0a/D0b tables print at `metrics`
+and whose JSON outputs are canonical.
+
+`renders/<id>/meta.json` used to be the category's only artifact. It is now
+**canonical, written at every save level** (RD-16): it is the sole record of how
+an expensive dataset was made — installed simulator version, both ray budgets,
+declared speed of sound, ambisonic convention — and gating it meant the default
+`save=1` run produced a dataset nobody could later characterize. Diagnostic
+*extras* may still attach behind the gate; none exist yet.
 
 Outside the ladder entirely: **warnings and errors always emit, to stderr,
 at every show level** (F-24 — a suppressed fatal error is never acceptable).
@@ -68,7 +74,7 @@ table is total.
 | `cli.py` | `Run dir:` (timing) | `Config.stamp` trio (provenance) |
 | `pipeline.py` | `[run ]`/`[skip]` (progress); `[done] (Xs)` (timing); `[FAIL]` (error → stderr, always) | `timings.json` (provenance); `stages/*.done` sentinels **never gated** |
 | gen-scenes | generated-count summary (progress) | — (scene specs canonical) |
-| render | rendered-count summary (progress) | `renders/<id>/meta.json` (diagnostics) |
+| render | rendered-count summary (progress) | — (IR pair **and** `renders/<id>/meta.json` provenance are canonical, RD-16) |
 | preprocess | count summary (progress); tensor shape (metrics); empty-split `WARNING` (warning → stderr, always) | — (all outputs canonical) |
 | diagnostics | D0a + D0b tables and verdicts (metrics) | — (`d0a_gap.json`/`d0b_oracle.json` are the stage's results: canonical) |
 | train | epoch lines, early-stop (progress); device, best valid loss (metrics) | `train_log.csv` (metrics); `best.pt` canonical |

@@ -216,7 +216,14 @@ low_ray_budget: { sweep: [1000, 2000, 5000, 20000] }
 |---|---|
 | fixed | sample_rate 48k, ir_duration 3.0s, base_seed 42, high_ray_budget 200k, QC thresholds (onset 2 ms, min energy, max path-file 128 MB), normalization scheme |
 | tuned (on valid) | learning_rate, batch_size, loss-term weights, Huber δ, model depth/width/kernel/dilation, early-stopping patience |
-| swept (research) | low_ray_budget (was fixed 5k), retained-path count k, band resolution (representation study); ambisonic_order = fixed-3 v1 but sweep-capable |
+| swept (research) | low **diffuse** ray budget (was fixed 5k), retained-path count k, band resolution (representation study); ambisonic_order = fixed-3 v1 but sweep-capable |
+
+*The ray budgets are **diffuse** ray counts (RD-12): `low_ray_budget` /
+`high_ray_budget` drive GSound's `diffuse_count`, while `specular_count` is
+declared in `configs/simulators/gsound_sir.yaml` and held fixed across both legs,
+so the swept axis is never a moving total. Both counts are stamped into canonical
+render meta. They stay top-level config fields rather than simulator params so the
+swept axis survives a simulator name change (RD-40).*
 
 *Scene parameters — per-split counts, total dataset size, and the
 placement / material / geometry regimes — are all config-declared. The Research I

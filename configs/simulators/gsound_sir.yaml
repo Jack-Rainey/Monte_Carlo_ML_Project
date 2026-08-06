@@ -1,0 +1,71 @@
+# ── GSound-SIR render backend parameters ──────────────────────────────────────
+# Every backend value the render worker needs, declared here rather than in
+# Python. Validated by `GsoundSirSimulator.Params` (extra="forbid"), so a typo or
+# a missing key fails at config load, not mid-render under emulation.
+#
+# NOT here (named non-goal, RD-40): low_ray_budget / high_ray_budget. They are the
+# swept research axis and stay TOP-LEVEL config fields — inside this block, the
+# F-11 name-change scoping in `_merge_layer` would drop them the moment a second
+# raytracer were selected.
+
+# ── Upstream version pin ──────────────────────────────────────────────────────
+# yongyizang/GSound-SIR, cloned + built by scripts/setup_gsound_sir.py. The render
+# step verifies the INSTALLED sha against this value and hard-errors on mismatch;
+# GSound-SIR is never vendored with local modifications, so this pin is the whole
+# provenance story for the simulator code (docs/gsound_sir_setup.md).
+commit_sha: 608ea30f6dc4cda149c18947f9cae48bd379fa27
+
+# ── Ray budgets ───────────────────────────────────────────────────────────────
+# (RD-12) The swept axis — top-level `low_ray_budget` / `high_ray_budget` — maps
+# to gsound's DIFFUSE ray count (`ps.Context.diffuse_count`). The specular count is
+# declared here and held FIXED across both legs, so "ray budget" in every result
+# means the diffuse budget and never a moving total. Both counts are stamped into
+# canonical render meta so no artifact is ambiguous about which was varied.
+specular_count: 2000
+diffuse_depth: 100
+specular_depth: 50
+
+# ── Source / listener geometry and level ──────────────────────────────────────
+source_radius: 0.1        # m, gsound source sphere
+listener_radius: 0.1      # m, gsound listener sphere
+source_power: 1.0         # W, held constant — absolute level is not under study
+
+# ── Surface material ──────────────────────────────────────────────────────────
+# Scene specs carry per-scene absorption (scenes.material_regimes); scattering is
+# a backend-level surface property, constant across the dataset for now.
+scattering: 0.5
+
+# ── Filterbank band EDGES for SH synthesis (Hz) ───────────────────────────────
+# `spherical_harmonics_rt.generate_ambisonic_ir(frequency_points=…)` wants
+# n_bands-1 CROSSOVER frequencies, not band centres: they are consumed as
+# `CrossoverFilter crossover(sample_rate, freq_points)` and upstream range-checks
+# len == n_bands-1 (auralizer/src/cpp/binding.cpp:304,334).
+#
+# Derivation (traced end-to-end, not guessed): `pygsound::Context()`
+# (ray_generator/src/pygsound/src/Context.cpp:8) overrides GSound's log-spaced
+# defaults with octave band CENTRES {63, 125, 250, 500, 1000, 2000, 4000, 8000} Hz,
+# and `gs::FrequencyBands` derives each crossover as the geometric mean of adjacent
+# centres (gsFrequencyBands.cpp:83-88). Hence sqrt(63*125)=88.4, sqrt(125*250)=176.8, …
+#
+# ⚠️ Upstream `auralizer/test.py` passes the CENTRES here and is WRONG: it shifts
+# every band edge ~½ octave high and misassigns the simulated per-band energies in
+# the SH synthesis. Do not copy it.
+frequency_points: [88.4, 176.8, 353.6, 707.1, 1414.2, 2828.4, 5656.9]
+
+# ── Normalization ─────────────────────────────────────────────────────────────
+# Must stay false. Per-IR normalization destroys low↔high energy comparability,
+# and every paired-improvement metric plus the D0b carrier test rests on it. Both
+# `ps.Context.normalize` and `generate_ambisonic_ir(normalize=…)` are held false;
+# the Params validator rejects true with this reason.
+normalize_ir: false
+
+# ── Retained-path artifact ────────────────────────────────────────────────────
+# Applies ONLY to the saved paths_*.parquet file. IR synthesis always uses the
+# FULL path set — filtering before synthesis would change the IR and confound the
+# very ray-budget axis under study.
+#   all         → energy_percentage 100, max_rays 0
+#   top_percent → energy_percentage = value
+#   top_k       → max_rays = value          (Research I: top_k, k = 5000)
+path_retention:
+  mode: top_k
+  value: 5000

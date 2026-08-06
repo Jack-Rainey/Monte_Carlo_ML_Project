@@ -30,6 +30,10 @@ CANONICAL_GLOBS = [
     "scenes/scene_*.json",
     "renders/*/low.npy",
     "renders/*/high.npy",
+    # Canonical render provenance (RD-16): the only record of how an expensive
+    # dataset was made. Previously gated at `diagnostics`, which meant the default
+    # save=1 run wrote no record at all — now written at every save level.
+    "renders/*/meta.json",
     "preprocessed/meta.json",
     "preprocessed/splits.json",
     "preprocessed/carrier/*.npy",
@@ -60,7 +64,9 @@ GATED_PATHS = [
     "report/config.yaml",    # bundle copies: provenance, save >= 1
     "report/versions.json",
 ]
-GATED_GLOBS = ["renders/*/meta.json"]  # QC diagnostics, save >= 4
+# No gated globs today: render meta.json became canonical (RD-16), and Step 4's
+# per-criterion QC record is the next artifact that will legitimately sit here.
+GATED_GLOBS: list[str] = []
 
 
 def _run_all(run_dir: Path, *flags: str) -> "click.testing.Result":

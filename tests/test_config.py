@@ -13,12 +13,17 @@ class TestConfigLoad:
         cfg = Config.load(Path("configs/base.yaml"))
         assert cfg.sample_rate == 48000
         assert cfg.seeds.master == 42
-        assert cfg.simulator == "gsound_sir"
+        assert cfg.simulator.name == "gsound_sir"
+        # Backend params come from configs/simulators/gsound_sir.yaml, not base.yaml.
+        assert cfg.simulator.params["commit_sha"]
         assert cfg.model.name == "vanilla_cnn"
 
     def test_load_dry_run_overrides_base(self) -> None:
         cfg = Config.load(Path("configs/base.yaml"), Path("configs/dry_run.yaml"))
-        assert cfg.simulator == "dry_run"
+        assert cfg.simulator.name == "dry_run"
+        # F-11 scoping: switching the simulator name must not leave gsound_sir's
+        # params (commit_sha, frequency_points, …) attached to dry_run.
+        assert cfg.simulator.params == {}
         assert cfg.scenes.n_id == 20
         assert cfg.ir_duration == 0.25
         # dry_run declares its own small shift counts, overriding the base R1 defaults.
@@ -202,7 +207,7 @@ class TestSeedReproducibility:
         cfg = Config.with_overrides(
             scenes={"n_id": 5},
             seeds={"master": 42},
-            simulator="dry_run",
+            simulator={"name": "dry_run"},
             splits={
                 "test_material_shift": {"role": "test", "count": 1, "axes": {"material": "ceiling_absorptive"}},
                 "test_placement_shift": {"role": "test", "count": 1, "axes": {"placement": "near_corner"}},

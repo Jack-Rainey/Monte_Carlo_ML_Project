@@ -41,6 +41,7 @@ _CONFIGS_DIR = Path(__file__).parent.parent.parent / "configs"
 _BASE_YAML = _CONFIGS_DIR / "base.yaml"
 _MODELS_DIR = _CONFIGS_DIR / "models"
 _REPS_DIR = _CONFIGS_DIR / "representations"
+_SIMS_DIR = _CONFIGS_DIR / "simulators"
 
 # Named seeds, one per stochastic pipeline aspect. Order is stable-for-life:
 # it fixes how per-aspect seeds are derived from `seeds.master`, so appending a
@@ -251,6 +252,27 @@ class ModelSpec(BaseModel):
     params: dict[str, Any] = {}
 
 
+class SimulatorSpec(BaseModel):
+    """Simulator (render backend) selection: a registry name plus its own parameter
+    block, loaded from configs/simulators/<name>.yaml (design_spec §5/§8, mirrors
+    ModelSpec/RepresentationSpec). The master config never bakes in backend-specific
+    fields — GSound-SIR's pinned commit SHA, filterbank band edges, specular count
+    and retained-path policy live beside the backend, so swapping simulators is a
+    config edit.
+
+    NOT here (named non-goal, RD-40): `low_ray_budget` / `high_ray_budget`. They are
+    the swept research axis (design_spec §7 l.219) and stay TOP-LEVEL Config fields.
+    Inside a plugin block they would sit under `_merge_layer`'s F-11 name-change
+    scoping, which drops a block's `params` when the name changes — silently
+    discarding the sweep the moment a second raytracer is selected.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    name: str
+    params: dict[str, Any] = {}
+
+
 class RepresentationSpec(BaseModel):
     """Representation (output-domain) selection: a registry name plus its own
     parameter block, loaded from configs/representations/<name>.yaml (design_spec
@@ -283,7 +305,7 @@ class Config(BaseModel):
     seeds: Seeds
 
     # Simulator / representation / model selection
-    simulator: str
+    simulator: SimulatorSpec
     representation: RepresentationSpec
     model: ModelSpec
 
@@ -477,12 +499,18 @@ class Config(BaseModel):
     def _from_merged(cls, merged: dict, selection: dict[str, int] | None) -> "Config":
         # Attach each plugin's parameter block from its configs/<kind>/<name>.yaml,
         # so the master config never bakes in model- or rep-specific fields (§7/§8).
+        # RD-13: `simulator` is attached HERE, not merely listed in _PLUGIN_BLOCKS.
+        # _PLUGIN_BLOCKS membership only scopes params across a name change (F-11);
+        # attachment is what puts the params file's contents into the tree BEFORE
+        # _resolve_roles runs, which is what lets a `sweep:` inside simulator params
+        # (e.g. the roadmap's retained-path-count axis) expand into sibling runs.
         merged = {
             **merged,
             "model": _attach_params_block(merged.get("model"), "model", _MODELS_DIR),
             "representation": _attach_params_block(
                 merged.get("representation"), "representation", _REPS_DIR
             ),
+            "simulator": _attach_params_block(merged.get("simulator"), "simulator", _SIMS_DIR),
         }
 
         concrete, roles = _resolve_roles(merged, selection or {})
@@ -573,6 +601,7 @@ class Config(BaseModel):
 _PLUGIN_REGISTRY = {
     "model": ("amcd.models", "model_registry"),
     "representation": ("amcd.representations", "representation_registry"),
+    "simulator": ("amcd.simulators", "simulator_registry"),
 }
 
 
@@ -621,7 +650,7 @@ def _attach_params_block(block: Any, kind: str, config_dir: Path) -> dict:
 
 
 #: Config blocks of the form `{name, params}` whose params are scoped to `name`.
-_PLUGIN_BLOCKS = ("model", "representation")
+_PLUGIN_BLOCKS = ("model", "representation", "simulator")
 
 
 def _merge_layer(base: dict, incoming: dict) -> None:

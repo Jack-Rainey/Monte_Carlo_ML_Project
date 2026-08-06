@@ -19,7 +19,11 @@ seeds:
   master: 42
 
 # ── Simulator / representation / model selection ──────────────────────────────
-simulator: gsound_sir
+# Each is a `{name, params}` plugin block: the name selects a registered plugin and
+# its parameters come from configs/<kind>/<name>.yaml, so this master config stays
+# plugin-agnostic. Add `params:` here only to override a specific value.
+simulator:
+  name: gsound_sir      # backend params come from configs/simulators/gsound_sir.yaml
 representation:
   name: spectrogram     # framing params come from configs/representations/spectrogram.yaml
 model:
@@ -31,8 +35,14 @@ ir_duration: 3.0
 ambisonics_order: 3
 
 # ── Simulation ray budgets ────────────────────────────────────────────────────
-low_ray_budget: 5000        # swept-capable research axis (E4)
-high_ray_budget: 200000     # reference is fixed
+# (RD-12) These are DIFFUSE ray counts: they drive gsound's `diffuse_count`, while
+# `specular_count` is declared in configs/simulators/gsound_sir.yaml and held fixed
+# across both legs. So "ray budget" always means the diffuse budget, never a total.
+# They stay TOP-LEVEL rather than moving into the simulator block (RD-40): as the
+# swept research axis they must survive a simulator name change, and a plugin
+# block's params do not (F-11 name-change scoping).
+low_ray_budget: 5000        # low leg — swept-capable research axis (E4)
+high_ray_budget: 200000     # converged reference — fixed
 
 # ── Scene generation ──────────────────────────────────────────────────────────
 # The id baseline is the controlled reference; each shift split (below) perturbs

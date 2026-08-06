@@ -2,7 +2,8 @@
 # Proves the pipeline end-to-end on synthetic IRs. Counts are chosen so all six
 # splits populate with n≥2 (stats/CI/MDES non-degenerate) — unrelated to the
 # base.yaml Research-I sizes.
-simulator: dry_run
+simulator:
+  name: dry_run
 
 scenes:
   n_id: 20            # → ~12/4/4 train/valid/test_id after hash-bucketing

@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import numpy as np
+from pydantic import BaseModel
 
 from ..registry import simulator_registry
 from .base import IRResult, SceneSpec
 
 
+# The speed this backend actually uses. Declared into canonical render provenance
+# (REQUIRED_PROVENANCE_KEYS) rather than read from config: a simulator's effective
+# speed is a property OF the simulator, and gsound's 344 m/s lives in C++ where no
+# config can govern it (RD-19). Step 4 adds the render-stage check that a config
+# value, where one exists, agrees with what the backend declares.
 _SPEED_OF_SOUND = 343.0  # m/s
 
 
@@ -26,6 +32,16 @@ class DryRunSimulator:
         component is shared (early reflections resolve even at low ray count).
     Everything is deterministic from scene.seed + ray_budget.
     """
+
+    class Params(BaseModel):
+        """dry_run's config schema: deliberately empty.
+
+        The synthetic IR is a pure function of the scene spec and the ray budget,
+        so this scaffold has no tunable backend parameters. The empty schema still
+        earns its keep: `extra="forbid"` means a stray key in
+        configs/simulators/dry_run.yaml fails loudly instead of being ignored.
+        """
+        model_config = {"extra": "forbid"}
 
     def __init__(self, n_channels: int, n_samples: int, sample_rate: int) -> None:
         self.n_channels = n_channels
@@ -69,10 +85,18 @@ class DryRunSimulator:
         return IRResult(
             ir=ir,
             meta={
+                # Required provenance (REQUIRED_PROVENANCE_KEYS, RD-31).
                 "simulator": "dry_run",
+                "ray_budget": ray_budget,
+                "speed_of_sound_m_s": _SPEED_OF_SOUND,
+                # Synthesized directly in the channel basis with no SH encoding, so
+                # no ambisonic convention is in play; declared explicitly rather
+                # than left absent, so the field is never silently missing.
+                "ambisonic_convention": "none_synthetic",
+                "rng_seeded": True,  # fully determined by scene.seed + ray_budget
+                # Backend-specific extras.
                 "rt60_s": rt60,
                 "distance_m": distance,
-                "ray_budget": ray_budget,
                 "noise_scale": noise_scale,
             },
         )

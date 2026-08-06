@@ -1,0 +1,9 @@
+# ── dry_run simulator params: intentionally empty ─────────────────────────────
+# The synthetic IR is a pure function of the scene spec (dims, absorption,
+# source/receiver positions, seed) and the ray budget, so this scaffold has no
+# backend parameters to declare.
+#
+# The file exists rather than being omitted so the seam is visible: every
+# registered simulator has a params file beside it, and `DryRunSimulator.Params`
+# forbids extras, so a stray key added here fails loudly at config load.
+{}
