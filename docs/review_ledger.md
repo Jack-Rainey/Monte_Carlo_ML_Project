@@ -16,8 +16,11 @@ this file — so a cited id that is not in the table below is not an error, it i
 row that was closed. Recover it from git, which is the audit trail (RR-25):
 
 ```
-git log -S 'RD-49' -- docs/review_ledger.md
+git log -S 'RD-49' -p -- docs/review_ledger.md
 ```
+
+`-p` matters: without it the command prints commit subjects and you still have to
+run `git show <sha>:docs/review_ledger.md` to see the row itself.
 
 **Exception — ids that predate this file.** The ledger entered git history after the
 first review rounds, so these 16 cited ids have NO ledger commit and the command
@@ -27,10 +30,16 @@ above returns nothing for them:
 RD-05 · RR-17`
 
 For those, the citing comment in the code is the primary record — each was written
-to explain the finding it cites, so `grep -rn 'F-09' src/ tests/` recovers the
-substance. Verified 2026-08-10 by checking every id cited anywhere in
-`src/`, `tests/` and `configs/` against `git log -S … -- docs/review_ledger.md`;
-every other cited id IS recoverable.
+to explain the finding it cites, not merely to point at it — so
+
+```
+grep -rn 'F-09' src/ tests/ configs/
+```
+
+recovers the substance. `configs/` belongs in that list: RD-05's only citation in
+the whole repo is in `configs/base.yaml`. Verified 2026-08-10 by checking every id
+cited anywhere in `src/`, `tests/` and `configs/` against
+`git log -S … -- docs/review_ledger.md`; every other cited id IS recoverable.
 
 ## OPEN findings
 
@@ -42,23 +51,13 @@ every other cited id IS recoverable.
 | RD-33 | research-director | major | OPEN | gate definition; src/amcd/simulators/gsound_sir.py (render raises NotImplementedError) | The no-real-render gate. See RD-70 — its lift condition drifted into "zero OPEN rows across the whole codebase", which pass 4 judges unreachable, and it is not the binding constraint anyway. | Do not lift silently. Resolution is RD-70's split (33a dataset / 33b probe), which requires user assent. |
 | RD-42 | research-director | major | OPEN | cycle-1 plan Step 7 vs RD-33's lift condition | The cycle was titled "lift the RD-33 render gate" but cannot: RD-33's condition is a clean pass, CLAUDE.md defines clean as zero OPEN rows, and a cycle fixing ~7 of 47 does not get there. Either the gate never lifts or someone declares it lifted with ~30 OPEN rows — the dishonest-completion failure the Reporting rule forbids. | **USER DECISION (2026-08-10):** do NOT mass-triage to DEFERRED; remaining rows stay OPEN and are addressed next pass. Superseded in substance by RD-70/RD-71, which re-status only rows that are DEFINITIONALLY unimplementable before their step exists. Keep OPEN until the gate question is settled with the user. |
 | RD-46 | research-director | major | OPEN | configs/research_i.yaml `ceiling_absorptive` | Step 6 corrected the WORDING of a disclosure whose underlying split may be scientifically void: α on six surfaces is near-anechoic (AC-20), the diffuse-field premise has failed for 100 % of it (AC-21), and its EDT approaches estimator resolution (AC-26) — 40 scenes × 2 legs of emulated render returning estimator artifacts, under a per-shift breakdown that IS the research result. | **USER DECISION (2026-08-10):** keep the range and the split for the PAIRED comparison, suppress absolute ISO values below `metric_min_measurable_t60_s`, mark the split diagnostic-only. **CAVEAT NOW MEASURED AND WORSE (AC-26):** the suppression does not merely fail to bite — it *censors* and biases the surviving mean +34.5 %. The diagnostic-only framing rests on the DISCLOSURE, not on suppression. Revisit once AC-25/AC-26 land. |
-| RD-53 | research-director | minor | OPEN | src/amcd/config.py (`REQUIRED_ROLE_COUNTS`) | The cardinality rule hardcodes single-holdout validation into config validation; k-fold / repeated holdout under the roadmap's deeper hyperparameter search would need multiple `valid` splits. | FIX APPLIED (1b9b194), awaiting re-review: expressed as the declared `REQUIRED_ROLE_COUNTS` mapping with the roadmap item named in its comment, consumed through one lookup helper (`split_names_with_role` / `the_split_with_role`). Not re-confirmed in pass 4. |
-| RD-56 | research-director | major | OPEN | plan review of `~/.claude/plans/tingly-jumping-hamster.md` (AC-22 design) vs configs/base.yaml | Raised on the cycle-2 PLAN, before implementation. The builder's first AC-22 design declared `min_ir_duration_t60_ratio: 1.0` in base.yaml — but base's own declared support corner (shoebox [12,10,5] → V 600, S 460, α 0.05) gives Sabine T60 4.20 s against `ir_duration: 3.0`, so **base.yaml would have RAISED AT CONFIG LOAD**, taking the whole suite and every evidence command with it. Structurally, a required threshold set per-config to whatever makes that config load is a rubber stamp, and it gated on a corner with ~0 draw probability while realized violations are 4/720 and 1/600. | IMPLEMENTED AS ARBITRATED and **CONFIRMED at pass 4**: the corner became a recorded disclosure (`Config.worst_case_t60`, stamped into resolved.yaml), and the hard gate became the REALIZED over-limit fraction against `scenes.max_t60_over_ir_duration_frac`, taken overall. base raised ir_duration 3.0 → 4.25 s with tolerance 0.0; research_i keeps RI-pinned 3.0 s with 0.01 set from measurement; plumbing overlays declare 1.0. Residual carried separately as **RD-65**. |
-| RD-57 | research-director | major | OPEN | plan review (base.yaml minimum separation) | Raised on the PLAN. The builder proposed `distance_range: [0.3, null]`, justified as the largest shipped backend floor. Wrong justification for a value that sets the SCENE DISTRIBUTION: 0.3 m is `DryRunSimulator`'s declared floor — scaffolding scheduled for deletion — so base's scene distribution would depend on the scaffold concretely (CLAUDE.md scaffolding rule, one layer up), and a roadmap raytracer with a 0.5 m floor would silently force a re-dataset. It is also acoustically consequential: at d = 0.3 m in a mid base room (S ≈ 200 m², α 0.2 → r_c ≈ 1.0 m) DRR is +10.5 dB — direct-dominated, C50/D50 saturating, the diffuse tail under study 10 dB down. | IMPLEMENTED AS ARBITRATED and **CONFIRMED at pass 4** ("exactly as asked"): base declares `[1.0, null]` on BOTH regimes with a three-part acoustic justification, and the backend floor enters only as the gen-scenes inequality whose error tells the researcher to raise the CONFIG value. Note **AC-30** corrects part (b) of that justification. |
-| RD-58 | research-director | minor | OPEN | plan review (AC-19 `min_bins_per_band`) | Raised on the PLAN. Shipping the guard + declared literals + band-limit + per-band in-band fraction IS an honest discharge of AC-19's "declare" half, and refusing the band-floor call as a builder is correct — but a no-op value plus a DELETED AC-19 row would leave a live defect with no owner. Severity is also lower than AC-19 implied: reported ISO-3382 metrics are 500/1000 Hz octave-band quantities computed from DECODED WAVEFORMS, so one-bin low bands cannot corrupt an E1 headline number; they corrupt the learned representation and low-frequency reconstruction, an E2 concern. | IMPLEMENTED AS ARBITRATED and **CONFIRMED at pass 4** ("yes, that is the split I wanted"): mechanism closed in cycle 2, VALUE opened as the DEFERRED `AC-19-value` row gated at E2 naming multi-resolution sampling. Residual (the citation had no row) carried as **RD-68**. |
-| RD-59 | research-director | major | OPEN | plan review (RD-54: wire eval/stats STAGE_FINGERPRINT) | Raised on the PLAN. RD-54's stated hazard is "metric DEFINITION changed under a cached run", and its trigger case (AC-17's shared Schroeder window, f3c3543) was a CODE change in `evaluation/room_acoustic.py` that no config-key fingerprint can see. Wiring eval/stats over config keys alone would have closed RD-54 with a mechanism that does not cover the hazard it cites — false assurance. | IMPLEMENTED (a git-sha `code_version` in `_eval_fingerprint`, plus an explicit scope statement in `STAGE_FINGERPRINT`'s docstring) and judged at pass 4 **"sufficient in principle, insufficient in practice"**: `git rev-parse HEAD` is blind to UNCOMMITTED edits, which is exactly this project's loop. Superseded by **F-55** (falsifier, stronger evidence incl. the wheel-install and foreign-repo cases) and **RD-66**. Close this row with F-55. |
-| RD-60 | research-director | minor | OPEN | plan review (`simulator_min_separation` / build_simulator) | Raised on the PLAN. The floor is needed at GEN-SCENES time. If it were obtainable only by constructing an instance, gen-scenes would become the first pre-render stage that must build the render backend — a standing cross-platform risk under the two-env split (native arm64 pipeline, x86 render env), inert today only because `GsoundSirSimulator.__init__` imports no native dependency. A pinned-SHA or installed-version check in `__init__` would break gen-scenes on any host without the render env. | IMPLEMENTED AS ARBITRATED and **CONFIRMED at pass 4** ("enough"): declared as a CLASSMETHOD over validated params, read via `simulator_min_separation` without instantiating, validated at `build_simulator`, with the named constraint "no simulator `__init__` may require the render environment" documented in the `Simulator` Protocol docstring. |
-| RD-61 | research-director | minor | OPEN | plan review ("rows addressed" list vs RD-36) | Raised on the PLAN. Step A's "preserve the exact RNG call sequence when `distance_range` is null" and the before/after gen-scenes diff are exactly RD-36's two named constraints and its evidence, but RD-36 was not in the plan's addressed list — so the cycle would produce the proof and not claim it, leaving the row to linger. | IMPLEMENTED: RD-36 was claimed and evidenced (27 of 600 scenes changed, and exactly the 27 that violated the declared floor; the other 573 bit-identical; margins held at 0.5/0.5/0.5). RD-36 **CONFIRMED FIXED and deleted at pass 4**. |
-| RD-62 | research-director | minor | OPEN | plan review (F-51's CLAUDE.md half) | Raised on the PLAN. F-51's fix would edit CLAUDE.md, the project's own operating-instruction file. No agent message authorizes an agent to rewrite the project's operating rules; the code/doc half (the `gsound_sir.py` error string, README) is the builder's to change. | IMPLEMENTED AS ARBITRATED and **CONFIRMED at pass 4** ("correct call"): `gsound_sir.py` and README were fixed directly; CLAUDE.md was NOT self-edited and the wording was proposed to the user instead. Remaining half tracked as **F-51** and **RR-34**, both awaiting the user. |
-| RD-63 | research-director | minor | OPEN | plan review (cycle-2 ordering + evidence) | Raised on the PLAN. Two sequencing hazards: (1) the base.yaml separation floor and the AC-22 `ir_duration` decision both re-dataset base, and doing them in separate steps would invalidate every render/carrier/tensor twice in one cycle (the RD-47 inefficiency); (2) the RD-50 baseline and its re-run must use DIFFERENT run_dirs, since F-50 changes the gen-scenes fingerprint payload and a reused dir would refuse the cached stage. Also: cycle 2 adds ~6 required no-default config keys, so `tests/conftest.py` fixtures must gain them in the same commit or the suite fails for an unrelated reason. | IMPLEMENTED AS ARBITRATED: both base.yaml decisions landed together before the baseline capture, so base re-datasetted exactly once; the baseline and re-run used separate fresh run_dirs; the new config keys landed with their config declarations in the same commit (suite 296 green). Not separately re-confirmed at pass 4. |
 | RD-64 | research-director | major | OPEN | src/amcd/scenes/generator.py `_room_acoustics`, `_disclose_and_gate_record_length`; src/amcd/config.py `GeometryFamily` | ROADMAP FORECLOSURE. Both run over EVERY scene and assume a closed enclosure — Sabine/Eyring T60, room constant, critical distance and DRR all derived from `dims` alone — and `worst_case_t60()` sweeps every declared geometry family through the same closed-box formula. Works for shoebox and corridor; the roadmap's OUTDOOR and PARTIALLY-OPEN scenes (paper §6) cannot be admitted without either emitting meaningless closed-box numbers into the canonical `placement_report.json` or rewriting the gate. Same class as the metric-`kind` contract: a uniform spine assuming a property that only happens to hold today. | Have `GeometryFamily` DECLARE its characterization (e.g. `characterization: sabine \| none`, no default). `_room_acoustics` and the gate skip non-enclosures with a recorded `(split, reason)` rather than a number, per "nothing leaves a result silently". One field now; a rewrite of the E1 dataset characterization later. |
 | RD-65 | research-director | minor | OPEN | src/amcd/scenes/generator.py `_disclose_and_gate_record_length` | The AC-22/RD-56 gate is the OVERALL over-limit fraction — the one aggregation invariant #9 forbids for results. research_i's 0.01 over 720 scenes permits 7 over-limit scenes that could ALL sit in the 30-scene `test_geometry_shift` (23 % of that split) and still pass, while the per-shift breakdown IS the research result. Per-split counts reach `placement_report.json` but surface only when the gate trips. | Keep the overall gate (its reasoning is right — a per-split gate lets the smallest split set the tolerance for train). ADD an always-emitted per-split WARNING naming any split whose OWN over-limit fraction exceeds the declared limit, and carry per-split counts into the E1 report table, not only the JSON. |
 | RD-66 | research-director | minor | OPEN | src/amcd/pipeline.py `_code_version` | RD-59's fix is blind to its own trigger workflow: `git rev-parse HEAD` does not see UNCOMMITTED edits, and this project's loop is edit → run → review → commit. **Independently reproduced by falsifier as F-55 — see that row, which carries the stronger evidence and the wheel-install/foreign-repo cases.** | Merged into **F-55**. Close both together. |
 | RD-67 | research-director | minor | DEFERRED | src/amcd/simulators/gsound_sir.py (gate: Step 3) | Consolidates the Step-3 provenance-fill residues of RD-16 / RD-19 / RD-21 / RD-12 (all otherwise confirmed fixed) into one gate-anchored row, so five rows do not linger for one obligation. | At Step 3 the gsound leg's `IRResult.meta` must carry: INSTALLED upstream sha verified == the pinned `commit_sha`; the diffuse AND specular counts for that leg; `ambisonic_convention: "acn_n3d"` (AC-15's stamp); native IR length + `truncated` bool + discarded-tail energy in dB (RD-21) against a config-declared QC threshold; and a `PathData.speeds_of_sound` cross-check against the declared `speed_of_sound_m_s` (RD-19's free empirical check). |
-| RD-68 | research-director | minor | OPEN | src/amcd/representations/spectrogram.py vs this ledger | The docstring cites "ledger: DEFERRED at E2, multi-resolution sampling" as the home of the band-floor VALUE decision, and no such row existed. RD-58's split (no-op floor now, value at E2) is only real if the deferred row exists. | FIXED IN THIS PASS: the row now exists (see `AC-19-value` in the DEFERRED backlog). Row stays OPEN until a reviewer confirms the citation resolves. |
 | RD-69 | research-director | minor | OPEN | docs/design_spec.md §7 fixed-parameter table vs configs/base.yaml | The §7 table still declares `ir_duration 3.0s` as a fixed parameter of the study, while base.yaml now declares 4.25 s (research_i keeps the RI-pinned 3.0). CLAUDE.md requires every plan to cite design_spec sections, so a fixed-parameter table that disagrees with the reference config is a wrong authority for the next plan. | Update the §7 table to state ir_duration per config (base 4.25 s, research_i 3.0 s RI-pinned) with the AC-22 reason, as base.yaml already explains it. |
+| RD-72 | research-director | minor | OPEN | src/amcd/representations/spectrogram.py; configs/representations/spectrogram.yaml; README.md | RR-25's traceability guarantee had one live hole and one signposting gap. (a) the spectrogram docstring cited its deferred row BY DESCRIPTION — "(ledger: DEFERRED at E2, multi-resolution sampling)" — not by id, and was the ONLY id-less ledger citation of the fourteen in `src/`; `git log -S` cannot recover a description, so once `AC-19-value` is closed and deleted that citation would dangle with no recovery path, reintroducing the exact failure RR-25 exists to prevent. (b) README stated the `git log -S` procedure without pointing at the 16 pre-ledger exceptions, so a newcomer grepping `F-09` gets silence and no explanation. | FIX APPLIED, awaiting re-review: (a) both the docstring and the yaml comment now cite `AC-19-value` by id; (b) README's recovery note now names the 16-id exception list in the ledger header and gives the `grep -rn '<id>' src/ tests/ configs/` remedy. |
 | RD-70 | research-director | major | OPEN | ledger RD-33 (lift condition) + src/amcd/simulators/gsound_sir.py | RD-33's condition drifted into "zero OPEN rows across the whole codebase", which has no reachable fixed point: reviewer finding-rate on subsystems unrelated to render risk has matched closure rate for two cycles. Worse, it is not the binding constraint — `GsoundSirSimulator.render` still raises NotImplementedError, so no real render is possible regardless. And it forbids the ≤4-scene Step 6 probe on the same terms as a 720-scene emulated dataset, though the probe is the cheapest way to learn whether the plumbing works AND is what validates the high leg every downstream number already assumes is converged. | Split the gate. **RD-33a (DATASET render):** unchanged strictness; requires the probe to have validated the high leg plus zero OPEN rows ANCHORED IN the scene/split/metric path. **RD-33b (PROBE/smoke render):** permitted at ≤4 scenes into a throwaway run_dir, artifact labelled engineering-feasibility and never an E1 result, once Steps 2/3 exist (AC-17 already landed). **REQUIRES USER ASSENT — the gate is theirs.** |
-| RD-71 | research-director | minor | OPEN | this ledger (status hygiene) | ~14 rows were OPEN for design commitments to code that does not exist (Steps 2/3/4/6) or E1-report prose with no report to live in. Under CLAUDE.md, DEFERRED with a named gate is exactly that state; keeping them OPEN is what makes any "zero OPEN rows" condition self-blocking. | APPLIED IN THIS PASS: RD-12→E4; RD-14→Step 4; RD-17, RD-52→Step 6; RD-20, RD-21→Step 3; RD-24→Step 2; RD-27, RD-28, RD-29→E1 report. Row stays OPEN until a reviewer confirms the re-statuses are honest rather than convenient. |
 
 ### falsifier
 
@@ -101,12 +100,11 @@ every other cited id IS recoverable.
 | ID | agent | sev | status | anchor | finding | resolution |
 |----|-------|-----|--------|--------|---------|------------|
 | RR-24 | readability-reviewer | major | OPEN | README.md (repository map; "40+ tests"; Simulator note) | The README's prose survived the `configs/` reorg; its REPO MAP did not. It still reads `configs/  # base / dry_run / test_tiny / models/*` — neither `configs/dry_run.yaml` nor `configs/test_tiny.yaml` exists any more, and the map names none of `overlays/`, `representations/`, `simulators/`, contradicting the correct three-file-kinds section 60 lines above. The map also omits `scripts/`, and neither it nor the Simulator note links `docs/gsound_sir_setup.md` or `scripts/setup_gsound_sir.py`, so a newcomer on an x86 box is told the real backend "builds and runs natively" with no path to the installer. "40+ tests" understates a 296-test suite. | Three edits: replace the `configs/` map line with the three kinds; add `scripts/` and `gsound_sir_setup.md` plus a link from the Simulator note; drop the test count or state it as "the full suite". |
-| RR-25 | readability-reviewer | major | OPEN | src/amcd/*.py, tests/*.py, this ledger, README.md | Ledger-id citations are the codebase's primary traceability device — 239 of them across 28 files in `src/` alone — but five cited ids existed in NO ledger row: RD-56..RD-60, raised on a plan and never written down. The problem is structural, not incidental: CLAUDE.md requires resolved rows be DELETED, so every id in code eventually points at a row that is not in the file, and nothing stated how to recover one. | FIX APPLIED, awaiting re-review: (a) the recovery procedure (`git log -S 'RD-45' -- docs/review_ledger.md`) is stated in this file's header AND in README's docs list, with the reason a missing id is expected rather than an error; (b) all eight plan-review rows RD-56..RD-63 are now recorded above with their pass-4 dispositions, so every id cited in code resolves — and once they are confirmed and deleted, `git log -S` finds them permanently. **MEASURED while fixing, and disclosed rather than glossed:** the recovery command is verified to work for every id cited anywhere in `src/`, `tests/` and `configs/` EXCEPT 16 that predate the ledger's own first commit (listed in the header) — for those the citing code comment is the primary record. |
 | RR-26 | readability-reviewer | major | OPEN | configs/research_i.yaml | The E1 disclosure record contradicts its own numbering. The header declares "FOUR DELIBERATE DEVIATIONS" and numbers them 1-4, then a SECOND "── Deviation 4: the record does not cover the declared support ──" was added in cycle 2. There are five deviations, two share a number, and other comments cross-reference by number ("See deviation 2 above"). This is the file an E1 auditor reads to count what was not reproduced. **Introduced by the builder in cycle 2.** | Renumber to five: make the record-length item deviation 5 (or promote it into the header list and renumber the inherited-values item), and update the header's "FOUR" and every "see deviation N" cross-reference. |
 | RR-27 | readability-reviewer | minor | OPEN | src/amcd/simulators/base.py; src/amcd/config.py | Line-number citations into `docs/design_spec.md` are stale and verifiably point at the wrong text. `Simulator` cites "design_spec §8 l.243" — §8 begins at l.274; l.243 is §7's role-classification table. `SimulatorSpec` cites "§7 l.219" for the swept research axis — l.219 is the `fixed` bullet; the relevant note is l.248-253. Line numbers in a living doc cannot survive an edit. | Drop line numbers from doc citations; cite section number + heading text, which survives reflow and is greppable. |
 | RR-28 | readability-reviewer | minor | OPEN | src/amcd/config.py (`Seeds` docstring) | "One master seed plus optional per-aspect overrides (design_spec §5, inv #5)" — §5 is *Architecture (seams now, v1 only)* and mentions seeds nowhere; the numbered invariants live in §10. The coincidence of "§5 / inv #5" makes it look deliberate. | Cite "design_spec §10 inv #5" (and §7 if the per-aspect derivation is meant). Sweep the other `§N, inv #M` pairs for the same mismatch — `SplitSpec`'s "§6.1, inv #9/#10" is correct and is the pattern to follow. |
 | RR-29 | readability-reviewer | minor | OPEN | tests/conftest.py (module docstring) | "Test configuration is loaded from `configs/test_tiny.yaml`" — that path no longer exists, and `tiny_config()` now composes THREE layers. The constants below it are correctly documented; only the docstring is pre-reorg. | Update to name the three composed layers, matching `SIMULATOR_DRY_RUN` / `TEST_TINY` / `CANONICAL_DRY_RUN`. |
-| RR-30 | readability-reviewer | minor | OPEN | docs/review_ledger.md | The ledger was 445 lines, ~340 of them stacked historical resume notes — five dated blocks, one explicitly labelled superseded and one a full closed-gate write-up. CLAUDE.md says this file holds only unresolved findings plus "a short resume-here pointer". | LARGELY FIXED IN THIS PASS: four superseded resume blocks deleted (git history is the audit trail); the durable upstream API facts they carried were RELOCATED FIRST to `docs/gsound_sir_setup.md` §4, as RR-30 required. Row stays OPEN until a reviewer confirms nothing durable was lost. |
+| RR-30 | readability-reviewer | minor | OPEN | docs/review_ledger.md | The ledger was 445 lines, ~340 of them stacked historical resume notes — five dated blocks, one explicitly labelled superseded and one a full closed-gate write-up. CLAUDE.md says this file holds only unresolved findings plus "a short resume-here pointer". | FIX APPLIED, awaiting re-review. Confirmation pass judged the deletion itself credible (ledger 445 → ~190 lines while carrying MORE rows; every category RR-30's caveat protected is present in `docs/gsound_sir_setup.md` §4) but found TWO residuals, both now fixed: (1) **the relocated `frequency_points` value was WRONG** — it carried `88.4` = √(62.5×125), the pre-AC-12 value, while `configs/simulators/gsound_sir.yaml` correctly pins `88.7412` = √(63×125) and says so explicitly; the doc contradicted both the config and its own derivation, under a heading reading "verified by introspection". Now full-precision with the AC-12 note and a statement that the config is the authority. (2) the surviving resume note had itself become a 100-line audit log (a 31-id deleted-row list, and duplicates of four live rows) — now cut to a pointer, with RD-71's over-general "all ten are design commitments" corrected to 9-of-10 (RD-20 is a sequenced refactor, not definitionally blocked). |
 | RR-31 | readability-reviewer | minor | OPEN | configs/base.yaml (`metric_min_measurable_t60_s` comment) | 16 lines on one scalar, the last 5 being a live reviewer DISPUTE, duplicated near-verbatim in this ledger. A config file is where a VALUE is justified; an unsettled disagreement between two reviewers belongs to the row it is about, and duplicating it guarantees the copies diverge. **Now doubly urgent: AC-26/AC-27 have settled the dispute and both copies are wrong.** | Replace with the measured justification in 2 lines (per AC-27) and delete the ⚠ paragraph, whose content is now superseded by AC-26/AC-27 anyway. |
 | RR-32 | readability-reviewer | minor | OPEN | src/amcd/scenes/generator.py; src/amcd/config.py | Two docstrings have tipped from "why" into re-litigating the bug report, with numbers pinned to a config state that no longer holds. `_check_regimes_clear_backend_floor` embeds "measured P(d < 0.3 m) = 0.186 %/scene → ~67 % chance a 600-scene run aborts" — base.yaml now declares a 1.0 m minimum, so that measurement describes a config that can no longer be produced. `_check_split_roles` replays the F-44 reproduction transcript. Both facts are already in the ledger rows the docstrings cite. (Contrast: `_disclose_and_gate_record_length` and `_sample_positions` are the right altitude.) | Cut each to the contract plus the ledger id. |
 | RR-33 | readability-reviewer | minor | OPEN | configs/overlays/*.yaml | The same AC-22 rationale for `max_t60_over_ir_duration_frac: 1.0` is written out three times, near-verbatim. Three copies of one rule is three places to update and three chances to disagree. The rest of the new overlay prose is load-bearing and should stay. | Keep the full paragraph in ONE overlay (`dry_run.yaml`, the canonical one); reduce the other two to `# plumbing overlay, no acoustic fidelity — see overlays/dry_run.yaml (AC-22)`. |
@@ -138,101 +136,45 @@ every other cited id IS recoverable.
 | AC-19-value | acoustics-reviewer / research-director (RD-58, RD-68) | minor | DEFERRED (gate: E2) | configs/representations/spectrogram.yaml (`min_bins_per_band` VALUE) | AC-19's MECHANISM closed in cycle 2 (config-declared ladder, recorded band description, measured in-band fractions). The VALUE is shipped as 1 — today's behaviour — because raising it is a research decision with real cost: at production framing 3 bins drops every band below ~315 Hz, i.e. all low-frequency coverage. Measured basis: the five lowest bands hold ONE FFT bin each and a 63 Hz tone peaks in the WRONG band (58.7 % in the 78.7 Hz band vs 35.5 % in 49.6 Hz). | Blast radius is bounded: reported ISO-3382 metrics are 500/1000 Hz octave-band quantities computed from DECODED WAVEFORMS, not from these bands, so this cannot corrupt an E1 headline number — it affects the learned representation and low-frequency reconstruction. The roadmap fix is **multi-resolution sampling** (paper §6); merge-or-reframe the low bands is preferred, dropping them is the fallback. Decide at E2 with `preprocessed/meta.json`'s recorded in-band fractions in hand. |
 
 ---
-
 ## Resume here
 
-**2026-08-10 — pass-3 remediation cycle 2 COMPLETE and pass 4 RUN (all four
-reviewers). NOT CLEAN. RD-33 HAS NOT LIFTED. No real gsound render.**
+**2026-08-10 — pass-3 remediation cycle 2 COMPLETE; pass 4 RUN (all four
+reviewers); confirmation pass RUN. NOT CLEAN. RD-33 HAS NOT LIFTED. No real
+gsound render.**
 
-HEAD `3b0880a`. Suite **296 passing** (was 217). Plan:
+HEAD after this pass. Suite **296 passing** (was 217). Cycle-2 plan:
 `~/.claude/plans/tingly-jumping-hamster.md`, reviewed by `research-director`
-before implementation (its rows RD-56..RD-63 were folded in; see the note on
-RR-25 below).
+before implementation. Pass 4 was the first pass in which all four reviewers ran
+(`research-director` had not run since pass 2; `readability-reviewer` never).
 
-**Pass 4 is the first pass in which all four reviewers ran.** `research-director`
-had not run since pass 2; `readability-reviewer` had never run at all.
+**Two findings gate everything else. Read their rows, not a summary of them:**
+**F-53** — the stage cache does not protect the reported result — and **AC-28** —
+the scaffold's placement axis is acoustically inert.
 
-### What pass 4 confirmed fixed (32 rows deleted from this file)
+**Two decisions are the USER's and are not the builder's to take:**
+**RD-70** (split the render gate into 33a dataset / 33b probe) and **F-51 /
+RR-34** (`CLAUDE.md:17` names a `--backend dry_run` flag that has never existed;
+the builder does not self-edit the project's operating rules — see RD-62).
 
-- **research-director (15):** RD-13, RD-16, RD-19, RD-22, RD-25, RD-26, RD-30,
-  RD-31, RD-32, RD-34, RD-35, RD-36, RD-37, RD-39, RD-40.
-- **falsifier (8):** F-38, F-44, F-46, F-47, F-48, F-49, F-50, F-52.
-- **acoustics-reviewer (8):** AC-13, AC-17, AC-18, AC-19, AC-20, AC-21, AC-22,
-  AC-24.
-- **AC-23 WITHDRAWN by the reviewer that raised it.** Its "+89 % EDT at
-  T60 = 0.06 s" was one draw from a distribution with 34 % sd reported as a bias;
-  measured over 32 realizations the bias is **−17.8 %**. The builder's
-  counter-measurement was right. Replaced by AC-26 + AC-27.
+**Next cycle, in order:**
 
-Ten further rows were re-statused from OPEN to DEFERRED with a named gate
-(RD-71), because they are design commitments for code that does not exist yet.
-
-### The two things a resumer must not miss
-
-1. **F-53 — the stage cache does not protect the reported result.** Reproduced
-   end to end: change the model architecture, learning rate, Huber δ and epoch
-   count on a complete run_dir, re-run `amcd all`, and all nine stages print
-   `[skip]` with exit 0 — `config.yaml` re-stamped with the NEW values while
-   `checkpoints/best.pt` is the OLD model and `summary.txt` / `ci_table.csv` are
-   the old model's numbers. This is a provenance LIE in the artifact that is the
-   research result. F-54, F-55, F-57 and F-58 are four more doors into the same
-   room, and **F-54/F-55/F-57 were introduced by cycle 2 itself.**
-2. **AC-28 — the scaffold's placement axis is acoustically inert.** dry_run's
-   "direct sound" is a one-pole envelope with a 7.96 Hz corner, so 6e-7 of its
-   energy reaches the 500 Hz band. Measured: **C50 reads 1.91 dB at
-   d = 0.5, 1, 2, 4 and 8 m — identical to 3 s.f.** while the published DRR swings
-   +7.6 → −16.5 dB. `test_placement_shift` therefore carries no acoustic
-   difference from the id baseline in any reported ISO metric, and the class
-   docstring claiming otherwise is false as implemented.
-
-Also material: **AC-25** (a model output still changes its own ground truth, via
-the band-set channel RD-43 did not close) and **AC-26** (the measurability floor
-censors a noisy estimator, biasing the surviving mean **+34.5 %** at the decay
-time of the split it was written for).
-
-### Corrections to claims the builder made in cycle 2
-
-Recorded because they were stated confidently and are wrong:
-
-- **AC-30:** the ISO `d_min` justification written into `configs/base.yaml` for
-  the 1.0 m floor is partly wrong. The formula is volume-INdependent; "~2.6 m at
-  the largest" is not a corner but a mid-α point; the true range is
-  **[0.41, 5.16] m**, so 1.0 m sits near its BOTTOM, not "inside the band". 25.4 %
-  of id and 42.5 % of material-shift scenes still sit below their own d_min. The
-  floor remains a real improvement on 0.3 m; the stated justification flattered it.
-- **F-59:** "`min_bins_per_band: 1` preserves today's behaviour exactly" holds
-  ONLY at 48 kHz. The Nyquist rule change moved the ladder at 8 kHz (19 → 18
-  bands — the test suite's own framing) and at 44.1 kHz (28 → 27, leaving 18.5 %
-  of the spectrum in no band).
-- **RD-69:** `design_spec.md` §7 still lists `ir_duration 3.0s` as a fixed
-  parameter after base.yaml moved to 4.25 s.
-- **RR-26:** `configs/research_i.yaml` now has two "Deviation 4" blocks under a
-  "FOUR DELIBERATE DEVIATIONS" header.
-
-### Open questions for the USER (do not decide these unilaterally)
-
-1. **RD-70 — restate the RD-33 render gate?** Its condition drifted to "zero OPEN
-   rows across the whole codebase", which pass 4 judges unreachable (finding rate
-   ≈ closure rate for two cycles), and it is not the binding constraint anyway:
-   `GsoundSirSimulator.render` still raises `NotImplementedError`. Proposed split:
-   **33a** (dataset render) keeps full strictness; **33b** permits a ≤4-scene
-   throwaway probe once Steps 2/3 exist. The gate is the user's.
-2. **F-51 / RR-34 — `CLAUDE.md:17` names a `--backend dry_run` flag that has
-   never existed.** The builder will not self-edit the project's operating
-   instructions (RD-62). Proposed wording: "Prove plumbing with the canonical dry
-   run (`-c configs/base.yaml -c configs/overlays/simulator_dry_run.yaml -c
-   configs/overlays/dry_run.yaml`) before any real render/train."
-
-### Recommended next cycle, in order
-
-1. **The cache cluster first** — F-53 → F-54 → F-58 → F-55 → F-57. Mostly
-   one-line `STAGE_UPSTREAM` wiring; F-54 also restores the leaf diff F-49 bought.
-   This is the only cluster that currently corrupts a reported result.
+1. **The cache cluster** — F-53 → F-54 → F-58 → F-55 → F-57. Mostly one-line
+   `STAGE_UPSTREAM` wiring; F-54 also restores the leaf diff F-49 bought. The only
+   cluster that currently corrupts a reported result.
 2. **The metric-integrity pair** — AC-25 then AC-26, with AC-27's corrected
-   justification. Both are cheap, deterministic and need no render.
-3. **AC-28** — the inert placement axis, which silently voids one of the three
-   shift splits under the only backend that exists today.
+   justification. Cheap, deterministic, no render needed.
+3. **AC-28** — the inert placement axis, which silently voids one of three shift
+   splits under the only backend that exists.
 4. **F-45's D0b half** (three lines), then the minors and the readability rows.
-5. **The actual unblocker:** Steps 2+3 — the PathData schema and the subprocess
+5. **The actual unblocker: Steps 2+3** — the PathData schema and the subprocess
    worker behind the existing seam, plus RD-20's `RunContext` while the dispatch
-   signature is being touched anyway.
+   signature is being touched anyway. `research-director` has now said twice that
+   ledger hygiene is not what stands between this project and a real render;
+   `GsoundSirSimulator.render` raising `NotImplementedError` is.
+
+**On the DEFERRED re-statuses (RD-71):** nine of the ten are design commitments
+for code that does not exist yet — verified individually, not asserted. **RD-20 is
+not**: it is a refactor that is implementable today, deliberately sequenced onto
+the Step-3 dispatch change so nine stages are not touched twice. That distinction
+is recorded here because the earlier blanket wording rounded 9/10 up to 10/10, and
+the user rejected mass-triage-to-DEFERRED at RD-42.

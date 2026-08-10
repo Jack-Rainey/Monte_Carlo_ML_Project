@@ -169,8 +169,21 @@ centres (`gsFrequencyBands.cpp:83-88`). The correct values, as pinned in
 `configs/simulators/gsound_sir.yaml`, are therefore
 
 ```
-[88.4, 176.8, 353.6, 707.1, 1414.2, 2828.4, 5656.9] Hz
+[88.7412, 176.7767, 353.5534, 707.1068, 1414.2136, 2828.4271, 5656.8542] Hz
 ```
+
+⚠️ **The first value is 88.7412, NOT 88.4** (ledger AC-12). 88.4 is
+√(62.5×125) — the base-two *nominal* 62.5 Hz centre — but pygsound uses the
+IEC-rounded **63** Hz, so 88.4 disagrees with the ray generator's own band
+definition by 0.384 %. Full precision is given here rather than 1 dp because a
+rounded first value is exactly how the refuted number survived: this section
+originally carried `88.4`, copied forward from a pre-AC-12 note, while
+`gsound_sir.yaml` had already been corrected. The config is the authority; if
+these two ever disagree again, the config is right.
+
+Consequence worth knowing: the two reported ISO bands
+(`iso_eval_freqs` 500/1000 Hz, edges 353.553 / 707.107 / 1414.214) coincide
+**exactly** with simulated bands 3 and 4.
 
 ⚠️ **Upstream `auralizer/test.py` is wrong here** — it passes
 `[125,250,500,1000,2000,4000,8000]`, i.e. the band centres used as if they were

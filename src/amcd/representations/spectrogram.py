@@ -50,8 +50,8 @@ def _build_third_octave_filters(
     `min_bins_per_band` gives the band floor a name. Choosing a value above 1 is a
     research decision with real cost — at production framing 3 bins would drop
     every band below ~315 Hz — so the number stays the researcher's, now with the
-    measurement in front of them (ledger: DEFERRED at E2, multi-resolution
-    sampling).
+    measurement in front of them (ledger row `AC-19-value`, DEFERRED at E2 —
+    the roadmap fix is multi-resolution sampling).
     """
     if min_bins_per_band < 1:
         raise ValueError(

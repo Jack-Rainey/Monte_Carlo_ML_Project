@@ -17,8 +17,12 @@ the audit trail — so a cited id that is not in the ledger is a row that was cl
 not a mistake. Recover it with:
 
 ```bash
-git log -S 'RD-45' -- docs/review_ledger.md
+git log -S 'RD-45' -p -- docs/review_ledger.md   # -p shows the row, not just the commit
 ```
+
+16 ids predate the ledger itself and are **listed as exceptions in the ledger
+header** — for those, `grep -rn '<id>' src/ tests/ configs/` is the record, because
+each citing comment states the finding rather than merely pointing at it.
 
 ## Install
 

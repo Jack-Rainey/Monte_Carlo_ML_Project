@@ -33,5 +33,6 @@ min_center_freq_hz: 10.0     # lower bound of the ladder (the upper is derived
 # evidence. Blast radius today is bounded: reported ISO-3382 metrics are 500/1000
 # Hz octave-band quantities computed from DECODED WAVEFORMS, not from these bands,
 # so this affects the learned representation and low-frequency reconstruction (E2),
-# not an E1 headline number. Ledger: DEFERRED at E2 (multi-resolution sampling).
+# not an E1 headline number. Ledger row `AC-19-value`, DEFERRED at E2
+# (roadmap fix: multi-resolution sampling).
 min_bins_per_band: 1
