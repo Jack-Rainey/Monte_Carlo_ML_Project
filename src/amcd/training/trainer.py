@@ -36,9 +36,11 @@ def run_train(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     n_channels = meta["n_channels"]
     split_counts = meta["split_counts"]
 
-    # Split names are role-derived from config (never hardcoded).
-    train_split = next(name for name, sp in config.splits.items() if sp.role == "train")
-    valid_split = next(name for name, sp in config.splits.items() if sp.role == "valid")
+    # Split names are role-derived from config (never hardcoded). Cardinality is
+    # guaranteed at config load (REQUIRED_ROLE_COUNTS), so this cannot silently take
+    # the first of two `valid` splits or raise a bare StopIteration for zero (F-44).
+    train_split = config.the_split_with_role("train")
+    valid_split = config.the_split_with_role("valid")
 
     if split_counts.get(train_split, 0) == 0:
         raise RuntimeError(f"Training split {train_split!r} is empty — cannot train.")

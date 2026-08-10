@@ -5,7 +5,7 @@ import pytest
 
 from amcd.config import Config
 
-from tests.conftest import QUIET, dry_run_simulator
+from tests.conftest import QUIET, dry_run_simulator, tiny_config
 
 
 class TestConfigLoad:
@@ -266,3 +266,54 @@ class TestSeedReproducibility:
             out1 = model(x)
             out2 = model(x)
         assert torch.equal(out1, out2), "Model forward is not deterministic"
+
+
+class TestSplitRoleVocabulary:
+    """F-44: `role` routes a split through the entire pipeline, so an unrecognised
+    role must fail at config load — not silently produce a split that is generated,
+    rendered and preprocessed and then appears in no result."""
+
+    def test_unknown_role_rejected_at_load(self) -> None:
+        with pytest.raises(ValueError) as exc:
+            tiny_config(splits={"test_id": {"role": "tset"}})
+        msg = str(exc.value)
+        assert "tset" in msg and "test_id" in msg
+        # The message must name the vocabulary and where it lives, so the fix is
+        # findable without reading the validator (house pattern).
+        assert "SPLIT_ROLES" in msg
+        assert "train" in msg and "valid" in msg and "test" in msg
+
+    def test_role_typo_is_caught_before_any_expensive_stage(self) -> None:
+        """The whole point of moving this to config load: the failure must happen
+        before gen-scenes/render, which under research_i.yaml is 60 emulated renders."""
+        from amcd.config import Config
+        with pytest.raises(ValueError):
+            tiny_config(splits={"test_material_shift": {"role": "holdout"}})
+        # And a valid config still loads (the guard is not simply rejecting everything).
+        cfg = tiny_config()
+        assert isinstance(cfg, Config)
+        assert cfg.the_split_with_role("train") == "train"
+        assert cfg.the_split_with_role("valid") == "valid"
+
+    def test_missing_valid_split_rejected(self) -> None:
+        """Pre-fix this surfaced as a bare StopIteration with an empty message, and
+        only after render + preprocess had already run."""
+        with pytest.raises(ValueError) as exc:
+            tiny_config(splits={"valid": {"role": "test", "frac": None, "count": 2,
+                                          "seed": 7}})
+        assert "valid" in str(exc.value)
+        assert "REQUIRED_ROLE_COUNTS" in str(exc.value)
+
+    def test_two_train_splits_rejected(self) -> None:
+        """Pre-fix the trainer silently took whichever came first."""
+        with pytest.raises(ValueError) as exc:
+            tiny_config(splits={"test_id": {"role": "train"}})
+        assert "train" in str(exc.value)
+
+    def test_split_names_with_role_rejects_unknown_role(self) -> None:
+        """A typo at a CALL SITE must raise rather than return an empty tuple, which
+        would read as 'no such splits declared'."""
+        cfg = tiny_config()
+        with pytest.raises(ValueError) as exc:
+            cfg.split_names_with_role("tset")
+        assert "SPLIT_ROLES" in str(exc.value)

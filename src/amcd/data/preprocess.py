@@ -57,12 +57,10 @@ def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     }
 
     # The training split (role: train) is the sole source of normalization stats.
-    train_split_names = [name for name, sp in config.splits.items() if sp.role == "train"]
-    if len(train_split_names) != 1:
-        raise ValueError(
-            f"Expected exactly one split with role 'train', got {train_split_names}"
-        )
-    train_split = train_split_names[0]
+    # Its uniqueness is enforced at config load (REQUIRED_ROLE_COUNTS) rather than
+    # here, so the failure lands before gen-scenes and render rather than after
+    # them (F-44).
+    train_split = config.the_split_with_role("train")
 
     # Build representation (rep-agnostic: params validated by the rep's own schema)
     rep = build_representation(

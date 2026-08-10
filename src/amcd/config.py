@@ -76,6 +76,30 @@ ID_POOL_TAG = "id"
 #: itself. Reserved for the same reason as ID_POOL_TAG (F-38).
 RESERVED_SPLIT_NAMES = (ID_POOL_TAG, "carrier")
 
+#: The roles the pipeline spine understands. `role` is what routes a split: `train`
+#: and `valid` drive the trainer, `test` splits are the held-out sets that infer /
+#: eval / stats / report consume. A split whose role is outside this set is
+#: understood by NO stage, so it is generated, RENDERED and preprocessed and then
+#: appears in no result at all — reproduced with a one-character typo: nine stages
+#: `[done]`, exit 0, the split present in preprocessed/meta.json with scenes on disk
+#: and absent from ci_table.csv and summary.txt (F-44).
+#:
+#: Declared as a tuple + explicit membership check rather than a typing.Literal, to
+#: match the house pattern (RESERVED_SPLIT_NAMES above, METRIC_KINDS in
+#: evaluation/metric_row.py, REQUIRED_PROVENANCE_KEYS in simulators/base.py): the
+#: vocabulary is data the error message can name, and `typing.Literal` is not used
+#: anywhere in this package.
+SPLIT_ROLES = ("train", "valid", "test")
+
+#: How many splits each role must have. Single-holdout validation is what the
+#: pipeline implements today: one training set, one model-selection set, any number
+#: of held-out test sets (design_spec §6.1 invariant #9 — test splits are never
+#: pooled). Declared as data rather than inline `if`s so that k-fold or repeated
+#: holdout — a plausible instantiation of the roadmap's deeper hyperparameter
+#: search (research_I_paper.md §6) — relaxes `valid` to a range here instead of
+#: needing the validation rewritten (RD-53).
+REQUIRED_ROLE_COUNTS = {"train": 1, "valid": 1}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Role grammar (fixed / tuned / swept)
@@ -558,7 +582,34 @@ class Config(BaseModel):
     @property
     def test_split_names(self) -> tuple[str, ...]:
         """All held-out test splits, in declaration order (never pooled — inv #9)."""
-        return tuple(name for name, sp in self.splits.items() if sp.role == "test")
+        return self.split_names_with_role("test")
+
+    def split_names_with_role(self, role: str) -> tuple[str, ...]:
+        """Declared splits carrying `role`, in declaration order.
+
+        The single lookup every stage goes through, so role routing lives in one
+        place: adding a role later touches SPLIT_ROLES and its consumers, never the
+        enumeration logic in trainer.py / preprocess.py again (RD-53). Raises on a
+        role outside the vocabulary, so a typo cannot silently return an empty
+        tuple at a call site (F-44)."""
+        if role not in SPLIT_ROLES:
+            raise ValueError(
+                f"unknown split role {role!r}; expected one of {list(SPLIT_ROLES)} "
+                f"(amcd.config.SPLIT_ROLES)."
+            )
+        return tuple(name for name, sp in self.splits.items() if sp.role == role)
+
+    def the_split_with_role(self, role: str) -> str:
+        """The single split carrying `role` — for roles `REQUIRED_ROLE_COUNTS` pins
+        to exactly one. `Config._check` has already guaranteed the count, so this
+        never has to guess or silently take the first of several (F-44)."""
+        names = self.split_names_with_role(role)
+        if len(names) != 1:
+            raise ValueError(
+                f"expected exactly one split with role {role!r}, got {list(names)} — "
+                f"Config._check should have rejected this at load."
+            )
+        return names[0]
 
     # ── Validation ────────────────────────────────────────────────────────────
     @model_validator(mode="after")
@@ -613,6 +664,9 @@ class Config(BaseModel):
                 f"sentinels or non-split directories, and would silently misroute or "
                 f"retain scenes). Reserved: {list(RESERVED_SPLIT_NAMES)}."
             )
+        # Role vocabulary + cardinality. Must run BEFORE the shift-split loop below,
+        # which already assumes `role == "test"` is meaningful (F-44/RD-53).
+        self._check_split_roles()
         self._check_id_pool_sizing()
         self._check_split_seeds()
         self._check_inert_split_fields()
@@ -664,6 +718,40 @@ class Config(BaseModel):
         `_check_id_pool_sizing`, so this single predicate is safe to branch on
         downstream (the generator and split assignment both do)."""
         return any(sp.count is not None for sp in self.id_pool_splits.values())
+
+    def _check_split_roles(self) -> None:
+        """Every split declares a role the spine understands, and the roles the
+        pipeline can only have one of have exactly one (F-44).
+
+        Without this, a role outside SPLIT_ROLES is understood by no stage: the
+        split is generated, rendered and preprocessed, then silently absent from
+        every inferential artifact with exit code 0 — under research_i.yaml that is
+        60 emulated renders producing nothing beneath a report that looks complete.
+        Two siblings close here too: two `valid` splits (the trainer took the first
+        of them without comment) and zero `valid` splits (a bare StopIteration with
+        an empty message, raised only AFTER render and preprocess).
+
+        Checked at config load — the cheapest possible point — rather than at
+        preprocess, which is where the old train-only check lived."""
+        unknown = {
+            name: sp.role for name, sp in self.splits.items() if sp.role not in SPLIT_ROLES
+        }
+        if unknown:
+            raise ValueError(
+                f"split(s) declare an unknown role: "
+                f"{ {n: r for n, r in sorted(unknown.items())} }. "
+                f"Expected one of {list(SPLIT_ROLES)} (amcd.config.SPLIT_ROLES). A "
+                f"role no stage recognises would still be generated, rendered and "
+                f"preprocessed, then appear in no result at all."
+            )
+        for role, required in REQUIRED_ROLE_COUNTS.items():
+            names = self.split_names_with_role(role)
+            if len(names) != required:
+                raise ValueError(
+                    f"exactly {required} split must have role {role!r}; got "
+                    f"{len(names)}: {list(names)}. "
+                    f"(amcd.config.REQUIRED_ROLE_COUNTS)"
+                )
 
     def _check_id_pool_sizing(self) -> None:
         """id-pool splits are sized ALL by `frac` or ALL by `count`, never mixed.
