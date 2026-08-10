@@ -10,6 +10,7 @@ dry_run path, which is what proves the real backend will be a drop-in.
 """
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
 
@@ -19,11 +20,12 @@ from amcd.registry import simulator_registry
 from amcd.simulators.base import (
     REQUIRED_PROVENANCE_KEYS,
     IRResult,
+    SceneSpec,
     build_simulator,
     validate_provenance,
 )
 
-from tests.conftest import QUIET, TEST_TINY, tiny_config
+from tests.conftest import QUIET, TEST_TINY, dry_run_simulator, tiny_config
 
 
 def _merged(*layers: dict) -> dict:
@@ -272,3 +274,67 @@ class TestStageFingerprint:
         pipe = self._pipeline(cfg, tmp_path)
         pipe._mark_done("stats")
         assert pipe._is_done("stats")
+
+
+class TestDryRunTailIsUnbiased:
+    """AC-18: the scaffold's diffuse tail must not BE the noise.
+
+    It previously read `diffuse = decay * noise * noise_scale` with
+    `noise_scale = 1/sqrt(N)`, so E[tail energy] scaled as 1/N. Measured, the low
+    leg's late-window energy was 39.7x the high leg's — 16.0 dB, exactly
+    200000/5000 — which makes low→high a deterministic level shift (trivially
+    learnable) whose converged limit is an IR with no reverberant tail at all.
+    That is the mechanism behind the dry_run D0b "CARRIER BOTTLENECK" verdict
+    being a plumbing artifact rather than a result (RD-07).
+
+    A ray budget controls VARIANCE, not level: the late-window energy must agree
+    between legs while the per-sample variance still falls as 1/N.
+    """
+
+    def _late_window(self, ir, sample_rate):
+        lo = int(0.20 * sample_rate)
+        hi = int(1.00 * sample_rate)
+        return ir[0, lo:hi].astype(float)
+
+    def test_tail_level_is_budget_independent_but_variance_is_not(self) -> None:
+        cfg = tiny_config(sample_rate=48000, ir_duration=1.5)
+        sim = dry_run_simulator(
+            n_channels=cfg.n_channels, n_samples=cfg.n_samples,
+            sample_rate=cfg.sample_rate,
+        )
+        scene = SceneSpec(
+            scene_id="scene_ac18", seed=4242,
+            dims=(10.0, 8.0, 3.5), material_absorption=0.15, geometry_family="shoebox",
+            source_pos=(2.0, 2.0, 1.5), receiver_pos=(7.0, 6.0, 1.5),
+            split_regime="id", regime_axes={},
+        )
+        low = self._late_window(sim.render(scene, 5000).ir, cfg.sample_rate)
+        high = self._late_window(sim.render(scene, 200000).ir, cfg.sample_rate)
+
+        energy_ratio = float((low ** 2).sum() / (high ** 2).sum())
+        assert 0.9 < energy_ratio < 1.1, (
+            f"late-window energy ratio low/high = {energy_ratio:.2f}; the tail LEVEL "
+            f"still moves with the ray budget (pre-fix this was 39.7 = 200000/5000, "
+            f"a deterministic -16 dB shift the model can learn trivially) — AC-18."
+        )
+
+        # The tail must remain a WAVEFORM, not an envelope. `decay*(1 + n·σ)` would
+        # also equalise the energy, but is strictly positive — and a positive tail
+        # carries almost no energy in the 500/1000 Hz eval bands after octave
+        # filtering, hollowing out the ISO metrics this scaffold exists to exercise.
+        assert (np.diff(np.sign(low)) != 0).sum() > len(low) // 10, (
+            "the diffuse tail does not oscillate about zero — it is an envelope, not "
+            "an impulse response, and will not survive octave-band filtering."
+        )
+
+        # The budget must still do something: the legs differ by MC estimation noise
+        # that shrinks as 1/sqrt(N). Known answer — with the converged response shared,
+        # std(low - high) / rms(high) ≈ sqrt(1/5000 + 1/200000) = 0.0143.
+        rel_noise = float(np.std(low - high) / np.sqrt((high ** 2).mean()))
+        expected = (1 / 5000 + 1 / 200000) ** 0.5
+        assert 0.5 * expected < rel_noise < 2.0 * expected, (
+            f"low-vs-high difference is {rel_noise:.5f} of the reference rms, expected "
+            f"~{expected:.5f} (1/sqrt(N) Monte-Carlo convergence). Too small means the "
+            f"ray budget no longer controls anything and there is nothing to denoise; "
+            f"too large means the legs differ by more than estimation noise."
+        )

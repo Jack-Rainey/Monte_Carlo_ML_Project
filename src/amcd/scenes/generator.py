@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..acoustics import eyring_rt60, sabine_rt60
 from ..config import Config, Margins, PlacementRegime
 from ..runtime import Verbosity, emit
 from ..simulators.base import SceneSpec
@@ -170,10 +171,6 @@ def _generation_plan(config: Config) -> list[tuple[str, int, dict[str, str], int
     return plan
 
 
-#: Sabine's constant, 24 ln(10) / c ≈ 0.161 s·m⁻¹ at 20 °C (c = 343 m/s).
-_SABINE_K = 0.161
-
-
 def _room_acoustics(
     dims: tuple[float, float, float], absorption: float, distance: float
 ) -> dict:
@@ -204,10 +201,13 @@ def _room_acoustics(
     surface = 2.0 * (lx * ly + ly * lz + lx * lz)
     alpha = float(np.clip(absorption, 1e-6, 1.0 - 1e-6))
 
-    t60_sabine = _SABINE_K * volume / (alpha * surface)
+    # Shared declarations (amcd.acoustics) — the scaffold renders from the same
+    # constant and the same formula, so the described room and the rendered room
+    # cannot drift apart (AC-24).
+    t60_sabine = sabine_rt60(volume, surface, alpha)
     # Eyring is the better estimate at high absorption, where Sabine overpredicts
     # — and ceiling_absorptive reaches α = 0.98.
-    t60_eyring = _SABINE_K * volume / (-surface * np.log1p(-alpha))
+    t60_eyring = eyring_rt60(volume, surface, alpha)
     # Room constant R = Sα/(1-α); critical distance r_c = sqrt(R/16π).
     room_constant = surface * alpha / (1.0 - alpha)
     r_c = float(np.sqrt(room_constant / (16.0 * np.pi)))

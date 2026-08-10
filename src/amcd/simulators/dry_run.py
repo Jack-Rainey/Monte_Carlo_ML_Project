@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 from pydantic import BaseModel
 
+from ..acoustics import sabine_rt60
 from ..registry import simulator_registry
 from .base import IRResult, SceneSpec
 
@@ -69,8 +70,14 @@ class DryRunSimulator:
         lx, ly, lz = scene.dims
         volume = lx * ly * lz
         surface = 2.0 * (lx * ly + ly * lz + lx * lz)
+        # One declared Sabine constant, shared with the scene report's own
+        # characterization, so the T60 described and the T60 rendered cannot drift
+        # apart (AC-24). The clamps below stay — they are numerical guards for the
+        # scaffold — but they are now RECORDED in provenance rather than silent.
         alpha = float(np.clip(scene.material_absorption, 0.01, 0.99))
-        rt60 = float(np.clip(0.161 * volume / (alpha * surface), 0.05, 3.0))
+        rt60_native = sabine_rt60(volume, surface, alpha)
+        rt60 = float(np.clip(rt60_native, 0.05, 3.0))
+        rt60_clipped = rt60 != rt60_native
 
         # --- Direct-to-reverberant ratio from source↔receiver distance (placement shift) ---
         src = np.asarray(scene.source_pos, dtype=np.float64)
@@ -110,13 +117,36 @@ class DryRunSimulator:
         # Per-channel amplitude variation (fixed by scene)
         channel_scales = (0.7 + 0.3 * rng_scene.random(self.n_channels)).astype(np.float32)
 
-        # Monte Carlo noise convergence: σ ∝ 1/√N
+        # --- Diffuse tail: a CONVERGED response plus Monte-Carlo estimation noise ---
+        #
+        # The tail must not BE the noise (AC-18). It previously read
+        # `diffuse = decay * noise * noise_scale` with noise_scale = 1/sqrt(N), so
+        # E[tail energy] scaled as 1/N: the low leg's late-window energy measured
+        # 39.7x the high leg's — 16.0 dB, exactly 200000/5000 — which made low→high a
+        # deterministic level shift (trivially learnable) whose converged limit is an
+        # IR with no reverberant tail at all. That is the unnamed mechanism behind the
+        # dry_run D0b "CARRIER BOTTLENECK" verdict being a plumbing artifact (RD-07).
+        #
+        # `decay * (1 + noise*noise_scale)` — the form AC-18 proposed — fixes the
+        # energy but produces a STRICTLY POSITIVE tail (verified: zero sign changes
+        # over a 200 ms window). An impulse response is a pressure signal that
+        # oscillates about zero; a positive envelope carries almost no energy in the
+        # 500/1000 Hz eval bands after octave filtering, which would hollow out the
+        # ISO-3382 metrics this scaffold exists to exercise.
+        #
+        # So the tail models what ray tracing actually converges TO: a fixed
+        # realization of the room's diffuse response (drawn from rng_scene, identical
+        # in both legs — this is the signal), plus estimation noise that shrinks as
+        # 1/sqrt(N) (drawn from rng_noise, budget-dependent — this is what the model
+        # must remove). E[energy] is then (1 + 1/N)·decay², i.e. budget-independent to
+        # within 0.02 %, while low - high is pure noise.
         noise_scale = float(1.0 / np.sqrt(max(ray_budget, 1)))
 
         ir = np.zeros((self.n_channels, self.n_samples), dtype=np.float32)
         for c in range(self.n_channels):
-            noise = rng_noise.standard_normal(n_active).astype(np.float32)
-            diffuse = decay * noise * noise_scale
+            converged = rng_scene.standard_normal(n_active).astype(np.float32)
+            mc_noise = rng_noise.standard_normal(n_active).astype(np.float32)
+            diffuse = decay * (converged + mc_noise * noise_scale)
             ir[c, delay_samples:] = channel_scales[c] * (direct + diffuse)
 
         return IRResult(
@@ -133,6 +163,11 @@ class DryRunSimulator:
                 "rng_seeded": True,  # fully determined by scene.seed + ray_budget
                 # Backend-specific extras.
                 "rt60_s": rt60,
+                # Both recorded: the scene report characterizes the room with the
+                # UNCLIPPED Sabine T60, so without these a clipped scene would be
+                # described as one room and rendered as another (AC-24).
+                "rt60_native_s": rt60_native,
+                "rt60_clipped": bool(rt60_clipped),
                 "distance_m": distance,
                 "noise_scale": noise_scale,
             },
