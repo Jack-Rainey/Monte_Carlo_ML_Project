@@ -1,0 +1,200 @@
+# Cycle-4 lane partition — the single source of truth for who owns what.
+#
+# Read by `scripts/new_lane.py`, which writes each worktree's LANE.md (what the
+# session reads) and .claude/lane.json (what `scripts/lane_guard.py` enforces).
+# Declaring ownership once here is what stops those two from disagreeing.
+#
+# `owns` is a list of repo-relative paths; a trailing `/**` means the directory
+# and everything under it. Every path appears in AT MOST ONE lane — that
+# exclusivity is what makes textual merge conflicts impossible (rule 1).
+#
+# Each row declares `fix` and `test` paths. `tests/test_lane_partition.py`
+# asserts BOTH fall inside the owning lane's `owns`, so a row that cannot be
+# finished inside its own lane fails at declaration time instead of halfway
+# through a session (RD-83 — F-72 was exactly that: assigned to S while its
+# test class sits in a file lane P owns).
+#
+# ── Accounting (RD-87: print it, do not merely assert it) ──────────────────
+#   67 OPEN = 25 lane + 13 integrator_queue + 22 awaiting_re_review + 7 new
+#             (RD-81…87, raised against THIS partition and fixed by it)
+# Every OPEN ledger row appears exactly once across those four lists; the
+# partition test asserts the union equals the ledger's OPEN set. Lane R's four
+# rows are DEFERRED, not OPEN — they are gated at Steps 2/3, and cycle 4 IS
+# Steps 2+3, so they become active here (see `note` on lane R).
+
+cycle: cycle4
+base_branch: v3-rebuild
+
+lanes:
+  - id: M
+    title: metric path
+    brief: docs/lanes/cycle4-M.md
+    inbox: docs/ledger_inbox/M.md
+    # Rule 2: everything that can move a number in a REPORTED ARTIFACT is one
+    # lane. Note this set is the metric COMPUTATION path; `stats/aggregate.py`
+    # and `reporting/tables.py`, which write ci_table.csv and summary.txt, are
+    # lane P's — so a row needing a new reported COLUMN is a spanning row, not
+    # an M row (RD-82).
+    owns:
+      - src/amcd/evaluation/**
+      - src/amcd/representations/**
+      - src/amcd/acoustics.py
+      - src/amcd/simulators/dry_run.py
+      - configs/base.yaml
+      - configs/research_i.yaml
+      - configs/representations/**
+      - tests/test_metrics.py
+      - tests/test_filterbank.py
+      - tests/test_acoustic_validity.py
+      - tests/test_eval_improvement.py
+      - tests/test_signal_domain.py
+    rows:
+      # USER DECISION 2026-08-10: remedy (a) guard + (c) sweep. Only the guard
+      # is an M row — `min_db` lives entirely in spectrogram.py, so the guard
+      # belongs in `encode`, NOT in data/preprocess.py (lane P's). The (c)
+      # sweep half needs diagnostics/probe.py and is in the integrator queue.
+      - {id: AC-37, fix: [src/amcd/representations/spectrogram.py, configs/representations/spectrogram.yaml], test: [tests/test_metrics.py]}
+      - {id: AC-38, fix: [src/amcd/evaluation/room_acoustic.py, configs/base.yaml], test: [tests/test_metrics.py]}
+      - {id: AC-39, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: AC-42, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      # Verify-and-report, not re-fix: the cycle-3 resume note records AC-28 as
+      # closed but its row was never deleted (RD-87).
+      - {id: AC-28, fix: [src/amcd/simulators/dry_run.py], test: [tests/test_acoustic_validity.py]}
+      - {id: F-68, fix: [src/amcd/evaluation/room_acoustic.py], test: []}
+      - {id: RR-37, fix: [src/amcd/simulators/dry_run.py], test: []}
+      - {id: RR-38, fix: [src/amcd/evaluation/room_acoustic.py], test: []}
+      - {id: RR-45, fix: [src/amcd/representations/spectrogram.py], test: []}
+
+  - id: P
+    title: provenance, stage cache and reported tables
+    brief: docs/lanes/cycle4-P.md
+    inbox: docs/ledger_inbox/P.md
+    # Owns the code that WRITES the reported artifacts (aggregate.py:324 →
+    # ci_table.csv, tables.py:144 → summary.txt). That is why a new reported
+    # column is never a single-lane row (RD-82).
+    owns:
+      - src/amcd/pipeline.py
+      - src/amcd/provenance.py
+      - src/amcd/config.py
+      - src/amcd/data/**
+      - src/amcd/stats/**
+      - src/amcd/reporting/**
+      - src/amcd/training/**
+      - tests/test_stage_cache.py
+      - tests/test_config.py
+      - tests/test_dataset_integrity.py
+      - tests/test_stats.py
+      - tests/test_report.py
+    rows:
+      - {id: F-64, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: F-63, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: F-66, fix: [src/amcd/pipeline.py, src/amcd/provenance.py], test: [tests/test_stage_cache.py]}
+      - {id: F-65, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py, tests/test_config.py]}
+      - {id: F-69, fix: [src/amcd/provenance.py], test: [tests/test_stage_cache.py]}
+      - {id: F-73, fix: [src/amcd/config.py], test: [tests/test_config.py]}
+      - {id: F-74, fix: [src/amcd/training/trainer.py, src/amcd/training/infer.py, src/amcd/config.py], test: [tests/test_config.py]}
+      - {id: RR-35, fix: [src/amcd/config.py], test: []}
+      - {id: RR-36, fix: [src/amcd/pipeline.py], test: []}
+      - {id: RR-42, fix: [src/amcd/provenance.py], test: []}
+
+  - id: S
+    title: scenes, QC and diagnostics
+    brief: docs/lanes/cycle4-S.md
+    inbox: docs/ledger_inbox/S.md
+    # `tests/test_probe.py` does not exist yet and is declared so S can CREATE
+    # it: the guard denies new files outside `owns` too. F-45's existing probe
+    # class stays in lane P's test_dataset_integrity.py — S must not touch it
+    # (RD-83). Splitting probe tests across two files is a one-cycle cost,
+    # recorded here rather than discovered.
+    owns:
+      - src/amcd/scenes/**
+      - src/amcd/diagnostics/**
+      - tests/test_scene_placement.py
+      - tests/test_min_separation.py
+      - tests/test_invariants.py
+      - tests/test_probe.py
+    rows:
+      - {id: F-71, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-44, fix: [src/amcd/scenes/generator.py], test: []}
+      - {id: F-72, fix: [src/amcd/diagnostics/probe.py], test: [tests/test_probe.py]}
+      # Per-split WARNING half only; the "carry counts into the E1 report
+      # table" half needs reporting/tables.py (P) and is in the queue (RD-82).
+      - {id: RD-65, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      # placement_report.json half only; the base.yaml comment half is queued.
+      - {id: AC-30, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-32, fix: [src/amcd/scenes/generator.py], test: []}
+
+  - id: R
+    title: render enablement (Steps 2+3)
+    brief: docs/lanes/cycle4-R.md
+    inbox: docs/ledger_inbox/R.md
+    # RD-81: clearing ledger rows CANNOT lift RD-33a, because that gate needs
+    # BOTH zero OPEN rows on its path list AND the RD-17 probe — and RD-17
+    # "cannot run before Steps 2/3 exist". This lane builds Steps 2+3, so the
+    # cycle can move the gate instead of only its row count.
+    #
+    # Split from S on LOAD, not taxonomy: S already owned these files and had
+    # no rows for them, but folding PathData + the subprocess worker into S's
+    # six QC rows would make S the wall-clock floor and waste M and P's
+    # parallelism. Run three terminals and fold R into S if you prefer.
+    note: >-
+      These four rows are DEFERRED in the ledger at gate Step 2 / Step 3.
+      Cycle 4 IS Steps 2+3, so they are in-gate here. Do not re-status them in
+      the ledger from a lane — record the transition in the inbox and let the
+      integrator do it (rule 3).
+    owns:
+      - src/amcd/simulators/base.py
+      - src/amcd/simulators/render.py
+      - src/amcd/simulators/gsound_sir.py
+      - src/amcd/runtime.py
+      - configs/simulators/**
+      - tests/test_simulator_seam.py
+      - tests/test_setup_gsound_sir.py
+      - tests/test_runtime.py
+    rows:
+      - {id: RD-24, fix: [src/amcd/simulators/base.py, src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-08, fix: [src/amcd/simulators/base.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-67, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-21, fix: [src/amcd/simulators/gsound_sir.py, configs/simulators/gsound_sir.yaml], test: [tests/test_simulator_seam.py]}
+
+# Rows deliberately NOT given to a lane, and why. Listed individually so the
+# count reconciles — RD-73 was raised because a plan's coverage figure silently
+# equalled its own scope.
+integrator_queue:
+  # Rule 4: anchors span two lanes' files, so they are not parallelized.
+  - {id: AC-41, reason: "scenes/generator.py (S) + acoustics.py and simulators/dry_run.py (M)"}
+  - {id: RR-43, reason: "evaluation/evaluator.py (M) + data/dataset.py (P)"}
+  - {id: RR-27, reason: "simulators/base.py (R) + config.py (P)"}
+  - {id: RD-75, reason: "acoustics.py (M) + scenes/generator.py (S); re-review half only"}
+  - {id: RD-20, reason: "RunContext spans pipeline.py (P) + runtime.py (R) + cli.py (unowned) — RD-81"}
+  # RD-82: a new REPORTED COLUMN needs stats/aggregate.py or reporting/tables.py,
+  # which lane P owns, so these cannot be finished in the lane that raised them.
+  - {id: F-70, reason: "imputed-population CI column → stats/aggregate.py (P), raised against evaluation/ (M)"}
+  - {id: AC-43, reason: "disclosure must reach the D0a/D0b artifacts → diagnostics/probe.py (S), raised against dry_run.py (M)"}
+  # configs/base.yaml is owned by M, so a row whose fix is mostly a config
+  # declaration elsewhere would need a second lane's file. Known contention
+  # point of the partition, not an oversight.
+  - {id: RD-18, reason: "config keys in base.yaml (M) + docs/design_spec.md (integrator)"}
+  - {id: F-60, reason: "config key in base.yaml (M) + scenes/generator.py (S) + eval output"}
+  # Integrator-owned files by rule 3.
+  - {id: RR-24, reason: "README.md"}
+  - {id: RR-26, reason: "configs/research_i.yaml prose, after M's semantic changes land"}
+  - {id: RR-33, reason: "configs/overlays/*.yaml prose"}
+  - {id: RD-69, reason: "docs/design_spec.md"}
+  - {id: RD-33a, reason: "a gate, not a fix — lifts on evidence, not on an edit"}
+
+# Rows whose resolution reads "FIX APPLIED, awaiting re-review", or which
+# delegate to an assigned row. NOT lane work: they are confirmations the
+# post-merge reviewer pass produces, and assigning one invites a second fix on
+# top of a first that was never checked. Listed rather than described so
+# deliberate exclusion is distinguishable from omission (RD-87).
+awaiting_re_review:
+  [RD-66, RD-72, RD-73, RD-74, RD-76, RD-77, RD-78, RD-79, RD-80,
+   F-45, F-55, F-59, F-61, F-62, F-67,
+   AC-26, AC-27, AC-36, AC-40,
+   RR-28, RR-29, RR-34]
+
+# Raised by research-director AGAINST this partition and fixed by this revision
+# of it. They join awaiting_re_review once the integrator's reviewer pass sees
+# them; they are listed separately so the arithmetic above is checkable.
+raised_against_this_partition: [RD-81, RD-82, RD-83, RD-84, RD-85, RD-86, RD-87]
