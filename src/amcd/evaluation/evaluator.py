@@ -1,4 +1,5 @@
-"""eval stage: compute per-scene metrics → metrics/metrics.parquet + drops.csv"""
+"""eval stage: compute per-scene metrics → metrics/metrics.parquet + drops.csv
++ iso_integration_windows.json (the shared Schroeder window per scene/band, AC-17)."""
 from __future__ import annotations
 
 import json
@@ -47,6 +48,10 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # leg its kind consumes (unscored) or was only partially computed — written
     # to metrics/drops.csv so nothing leaves a result silently.
     drop_rows: list[dict] = []
+    # Shared ISO-3382 Schroeder integration window per (scene, band) (AC-17/RD-44).
+    # Recorded for every scene the room-acoustic path scores, so a reported absolute
+    # T30/EDT/C50 can always be traced to the window — and the leg — that set it.
+    iso_windows: dict[str, dict[str, dict[str, object]]] = {}
 
     for pred_path in pred_paths:
         scene_id = pred_path.stem.replace("_pred", "")
@@ -103,14 +108,23 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             decoded_ir = np.load(decoded_ir_path)          # (C, T)
             high_ref_ir = np.load(high_ir_path)            # (C, T)
             low_ref_ir = np.load(low_ir_path)              # (C, T)
-            room_triples, room_reasons = compute_room_acoustic_metrics(
+            room_triples, room_reasons, room_window = compute_room_acoustic_metrics(
                 decoded_ir, high_ref_ir, low_ref_ir,
                 sample_rate=config.sample_rate,
                 iso_eval_freqs=[float(f) for f in config.iso_eval_freqs],
                 onset_rel_db=config.metric_onset_rel_db,
+                min_measurable_t60_s=config.metric_min_measurable_t60_s,
             )
             all_metrics.update(room_triples)
             nan_reasons.update(room_reasons)
+            # The shared Schroeder window is recorded for EVERY scored scene, not
+            # only for dropped ones (RD-44): reported ISO absolutes are windowed by
+            # the noisier physical leg, so a reader must be able to see the window
+            # that produced them.
+            iso_windows[scene_id] = {
+                band: {"trunc_idx": idx, "set_by_leg": src}
+                for band, (idx, src) in room_window.items()
+            }
         else:
             # Room-acoustic artifacts (decoded IR / reference waveforms) absent for
             # this scene — record an all-NaN triple for each ISO-3382 metric rather
@@ -175,6 +189,12 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         drop_rows, columns=["scene_id", "split", "metric", "leg", "reason"]
     )
     drops_df.to_csv(metrics_dir / "drops.csv", index=False)
+
+    # Canonical, not verbosity-gated: without it a reported ISO absolute cannot be
+    # interpreted, because the window is set by the noisier physical leg (RD-44).
+    (metrics_dir / "iso_integration_windows.json").write_text(
+        json.dumps(iso_windows, indent=2, sort_keys=True)
+    )
 
     n_scenes = df["scene_id"].nunique()
     # Headline count: scenes whose energy MSE improved over the low-ray baseline.

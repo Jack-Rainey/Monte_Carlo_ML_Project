@@ -146,6 +146,23 @@ iso_eval_freqs: [500, 1000]
 # start-of-response convention (not an arbitrary gate). (RD-05/AC-08 provenance)
 metric_onset_rel_db: -20.0
 
+# Shortest decay an octave band can honestly resolve (s). Below this a fitted
+# T30/EDT measures the filter rather than the room, so the value is reported as
+# unscored-with-reason instead of as a small number (AC-23).
+#
+# MEASURED, not assumed (scratchpad/p_minT60.py, 8 seeds, 500+1000 Hz, exponentially
+# decaying band-limited noise, no noise floor): T30 recovery error is -0.3 % at
+# T60 = 0.03 s, -4.2 % at 0.05 s, and <= 5.6 % everywhere up to 0.5 s. This is the
+# physically expected result — a 4th-order octave filter at 500 Hz is ~353 Hz wide,
+# so its ringing lasts ~3 ms and cannot dominate a 60 ms decay. 0.05 s is therefore
+# a degenerate-case guard, not an active suppression threshold.
+#
+# ⚠ AC-23 asserted EDT reads +89 % at T60 = 0.06 s; that did NOT reproduce here
+# (+8.3 %), and the residual EDT error is non-monotonic across 0.03-0.5 s, i.e.
+# realization variance rather than a measurability floor. The ledger row stays OPEN
+# for the acoustics-reviewer to supply its exact probe or withdraw the magnitude.
+metric_min_measurable_t60_s: 0.05
+
 # ── Stats: bootstrap CI (design_spec §9) ──────────────────────────────────────
 bootstrap_n_resamples: 1000
 bootstrap_alpha: 0.05

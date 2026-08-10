@@ -66,6 +66,33 @@ from the STFT energy grid — that is non-standard and (per the falsifier)
 near-circular against an FFT-filtered reference. This rule governs §3, §4 (D0b),
 and the eval stage; D1 and D3 are subordinate to it.
 
+**Reported ISO absolutes are paired-comparison quantities, not literature values
+(AC-17/RD-44).** Lundeby truncation is noise-floor dependent, and in this study the
+noise floor IS the independent variable (ray budget). Truncating each leg at its own
+index therefore manufactures a metric difference with no acoustic cause — measured
+at a −50 dB floor with identical decay and only the floor scaled by √40 (the
+5,000:200,000 ray ratio), the noisier leg read T30 12–16 % short, rising to ~51 %
+at −30 dB, against a declared T30 JND of 0.05. All legs of a comparison are
+therefore integrated over **one shared Schroeder window per (scene, band)**,
+derived from the **physical legs only** (`low`/`high`) and *applied* to `pred`: a
+model output must never set the window used to measure its own ground truth
+(RD-43).
+
+Two consequences that must be stated wherever these numbers are reported:
+
+1. The shared window is set by the noisier physical leg, so a reported **absolute**
+   T30/EDT/C50 is a function of the low-ray budget as well as the room. Absolutes
+   are comparable **within** a paired comparison, not against Research I or the
+   literature. The window and the leg that set it are recorded per scene and band
+   in `metrics/iso_integration_windows.json`.
+2. An E4-style "metric vs ray count" curve is therefore confounded by its own
+   estimator unless the window is made budget-independent. Closing that needs
+   Lundeby extrapolated-tail compensation (ISO 3382-1 Annex), which is deferred to
+   the E4 gate.
+
+A decay too short for a band to resolve is reported as **unscored with a reason**,
+never as a small number (`metric_min_measurable_t60_s`, AC-23).
+
 ## 4. Pre-training diagnostics (run BEFORE any training)
 
 Two cheap probes that can falsify the premise for ~zero compute:

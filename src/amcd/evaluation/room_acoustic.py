@@ -9,16 +9,25 @@ STFT energy grid directly.
 Public API
 ----------
 compute_room_acoustic_metrics(pred_ir, high_ref_ir, low_ref_ir, *, sample_rate,
-                               iso_eval_freqs, onset_rel_db)
+                               iso_eval_freqs, onset_rel_db, min_measurable_t60_s)
     Standard ISO-3382 waveform path for the eval stage (pred/high/low in one
-    call) → (metric triples, NaN reasons); legs band-averaged over the
-    cross-leg-shared band set (AC-08).
-channel_band_avg_metrics(ir_w, *, sample_rate, iso_eval_freqs, onset_rel_db)
+    call) → (metric triples, NaN reasons, shared integration window); legs
+    band-averaged over the cross-leg-shared band set (AC-08) and integrated over
+    the cross-leg-shared Schroeder window (AC-17).
+channel_band_avg_metrics(ir_w, *, sample_rate, iso_eval_freqs, onset_rel_db,
+                         min_measurable_t60_s, trunc_idx_per_band=None)
     Single-IR onset-aligned band-averaged metrics → (values, NaN reasons); the
-    D0b oracle probe's unit.
-channel_per_band_metrics(ir_w, *, sample_rate, iso_eval_freqs, onset_rel_db)
+    D0b oracle probe's unit. Pass `trunc_idx_per_band` to join a paired
+    comparison's shared window.
+channel_per_band_metrics(ir_w, *, sample_rate, iso_eval_freqs, onset_rel_db,
+                         min_measurable_t60_s, trunc_idx_per_band=None)
     Per-band (values, reasons) — the shared unit under both of the above
     (identical alignment + truncation).
+_shared_truncation_per_band(reference_legs, *, sample_rate, iso_eval_freqs,
+                            onset_rel_db)
+    Per band, the one Schroeder integration limit every leg of a paired
+    comparison must use (AC-17). Reference legs are PHYSICAL legs only — never a
+    model output (RD-43).
 
 Energy-domain helpers (private, kept for training metric-consistency loss — §3-D4)
 -----------------------------------------------------------------------------------
@@ -114,10 +123,75 @@ def _find_onset(ir_w: np.ndarray, rel_db: float) -> int:
     return int(above[0]) if above.size else 0
 
 
+def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.ndarray:
+    """Octave-band energy envelope (squared band-filtered samples) — the input both
+    to Lundeby truncation and to Schroeder integration. Factored out so a truncation
+    index can be derived WITHOUT computing metrics (AC-17)."""
+    return _butter_octave_filter(ir_w, fc, sample_rate) ** 2
+
+
+def _shared_truncation_per_band(
+    reference_legs: dict[str, np.ndarray],  # leg name → (T,) W-channel waveform
+    *,
+    sample_rate: int,
+    iso_eval_freqs: list[float],
+    onset_rel_db: float,
+) -> list[tuple[int, str]]:
+    """Per eval band, the truncation index SHARED by every leg of a paired
+    comparison, plus the name of the leg that set it (AC-17).
+
+    Why this exists
+    ---------------
+    `_lundeby_truncate` is noise-floor dependent, and the noise floor IS this
+    study's independent variable (ray budget). Truncating each leg at its own index
+    integrates the legs over DIFFERENT limits, manufacturing a metric difference
+    with no acoustic cause: with identical decay and only the floor scaled by
+    sqrt(40) (the 5,000:200,000 ray ratio), the noisier leg read T30 12-16 % short
+    at a -50 dB floor and ~51 % short at -30 dB — 3-10x the project's own declared
+    T30 JND (`d0b_t30_jnd_frac` = 0.05). All legs are the same room, so ISO-3382
+    band metrics are only comparable over a common integration limit.
+
+    The index is the MINIMUM over the reference legs, so no leg is ever integrated
+    into its own noise floor. Where the shared window is too short to support a
+    metric, that metric is NaN with a reason (F-21) rather than a biased number.
+
+    `reference_legs` is passed EXPLICITLY and must contain only PHYSICAL legs
+    (`low`/`high`) — never a model output (RD-43). Deriving the window from `pred`
+    would let a degenerate prediction shorten the window used to measure its own
+    ground truth, compressing the legs together and shrinking |pred - high|: a
+    worse model scoring better by corrupting the measurement of its target.
+
+    Each leg is onset-aligned first (AC-02), so the returned indices are counted
+    from each leg's own direct arrival and are directly comparable.
+    """
+    if not reference_legs:
+        raise ValueError(
+            "_shared_truncation_per_band requires at least one reference leg; "
+            "an empty leg set would leave the integration limit undefined."
+        )
+    aligned = {
+        leg: ir[_find_onset(ir, onset_rel_db):] for leg, ir in reference_legs.items()
+    }
+    out: list[tuple[int, str]] = []
+    for fc in iso_eval_freqs:
+        per_leg = {
+            leg: _lundeby_truncate(_band_energy(ir, float(fc), sample_rate), sample_rate)
+            if ir.shape[0] >= _MIN_FILTER_SAMPLES else 0
+            for leg, ir in aligned.items()
+        }
+        limiting = min(per_leg, key=lambda leg: per_leg[leg])
+        out.append((per_leg[limiting], limiting))
+    return out
+
+
 def _iso3382_band_metrics(
     ir_w: np.ndarray,   # (T,) W-channel waveform
     fc: float,
     sample_rate: int,
+    *,
+    min_measurable_t60_s: float,
+    trunc_idx: int | None = None,
+    trunc_source: str | None = None,
 ) -> tuple[dict[str, float], dict[str, str]]:
     """
     T30, EDT, C50 for a single octave band centered at fc Hz.
@@ -134,15 +208,23 @@ def _iso3382_band_metrics(
     if ir_w.shape[0] < _MIN_FILTER_SAMPLES:
         reason = f"record shorter than the {_MIN_FILTER_SAMPLES}-sample octave-filter minimum"
         return {m: float("nan") for m in all_metrics}, {m: reason for m in all_metrics}
-    ir_band = _butter_octave_filter(ir_w, fc, sample_rate)
-    energy = ir_band ** 2  # (T,)
+    energy = _band_energy(ir_w, fc, sample_rate)  # (T,)
 
-    # Lundeby truncation before Schroeder
-    trunc_idx = _lundeby_truncate(energy, sample_rate)
+    # Lundeby truncation before Schroeder. `trunc_idx` is supplied by a paired
+    # caller so every leg integrates over the SAME limit (AC-17); a single-IR caller
+    # passes None and gets this IR's own index.
+    if trunc_idx is None:
+        trunc_idx = _lundeby_truncate(energy, sample_rate)
+        trunc_source = "self"
+    trunc_idx = min(trunc_idx, len(energy))
+    window_note = (
+        "" if trunc_source in (None, "self")
+        else f" [shared integration window, set by the {trunc_source} leg]"
+    )
     energy_trunc = energy[:trunc_idx]
 
     if len(energy_trunc) < 2:
-        reason = "Lundeby truncation leaves <2 samples"
+        reason = f"Lundeby truncation leaves <2 samples{window_note}"
         return {m: float("nan") for m in all_metrics}, {m: reason for m in all_metrics}
 
     # Schroeder backward integration on truncated portion
@@ -165,6 +247,26 @@ def _iso3382_band_metrics(
     t30, t30_reason = _slope_to_rt(-5.0, -35.0)
     edt, edt_reason = _slope_to_rt(0.0, -10.0)
 
+    # Measurability floor (AC-23). Below a few tens of ms the zero-phase 4th-order
+    # octave filter's own ringing is comparable to the decay itself, so the fitted
+    # slope measures the FILTER, not the room: at a true T60 of 0.06 s the 500/1000 Hz
+    # bands read EDT +89 %, and +21 % at 0.10 s. `test_material_shift` is exactly this
+    # regime (Eyring T60 median 0.059 s), so an unflagged number there would be an
+    # estimator artifact reported as a physical quantity. Suppress rather than report
+    # — a decay time the band cannot resolve is unscored, not small.
+    for _name, _val, _set in (("T30", t30, "t30"), ("EDT", edt, "edt")):
+        if not np.isnan(_val) and _val < min_measurable_t60_s:
+            reason = (
+                f"{_name} {_val:.4f} s is below the {min_measurable_t60_s:g} s "
+                f"minimum measurable decay for the {fc:g} Hz octave band — at this "
+                f"decay the filter's own ringing dominates the fitted slope"
+                f"{window_note}"
+            )
+            if _set == "t30":
+                t30, t30_reason = float("nan"), reason
+            else:
+                edt, edt_reason = float("nan"), reason
+
     # C50: early/late split at 50 ms. The late window integrates only to the Lundeby
     # truncation index (as T30/EDT do), NOT the full record — otherwise the noise-floor
     # tail inflates `late` and, since the low-ray carrier is noisier than the high-ray
@@ -175,7 +277,7 @@ def _iso3382_band_metrics(
         c50 = float("nan")
         c50_reason = (
             f"50 ms split (sample {split}) ≥ Lundeby truncation index ({trunc_idx}) — "
-            f"no late window; a sub-50 ms IR has no honest C50"
+            f"no late window; a sub-50 ms IR has no honest C50{window_note}"
         )
     else:
         early = float(energy[:split].sum())
@@ -201,9 +303,16 @@ def channel_band_avg_metrics(
     sample_rate: int,
     iso_eval_freqs: list[float],  # config.iso_eval_freqs (§7)
     onset_rel_db: float,          # config.metric_onset_rel_db (§3 metric path)
+    min_measurable_t60_s: float,  # config.metric_min_measurable_t60_s (§3, AC-23)
+    trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> tuple[dict[str, float], dict[str, str]]:
     """Onset-align a W-channel IR to its direct arrival, then average ISO-3382 band
     metrics (T30/EDT/C50) over the evaluation bands.
+
+    `trunc_idx_per_band` (from `_shared_truncation_per_band`) makes this leg
+    integrate over a window shared with the other legs of a paired comparison
+    (AC-17). Omit it for a genuinely standalone IR, which then uses its own
+    Lundeby index.
 
     Single-IR unit (the D0b oracle probe and known-answer tests): averages THIS
     IR's surviving bands. The eval stage's paired triples do NOT use this
@@ -220,6 +329,8 @@ def channel_band_avg_metrics(
     per_band = channel_per_band_metrics(
         ir_w, sample_rate=sample_rate,
         iso_eval_freqs=iso_eval_freqs, onset_rel_db=onset_rel_db,
+        min_measurable_t60_s=min_measurable_t60_s,
+        trunc_idx_per_band=trunc_idx_per_band,
     )
     out: dict[str, float] = {}
     reasons: dict[str, str] = {}
@@ -244,16 +355,33 @@ def channel_per_band_metrics(
     sample_rate: int,
     iso_eval_freqs: list[float],  # config.iso_eval_freqs (§7)
     onset_rel_db: float,          # config.metric_onset_rel_db (§3 metric path)
+    min_measurable_t60_s: float,  # config.metric_min_measurable_t60_s (§3, AC-23)
+    trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> list[tuple[dict[str, float], dict[str, str]]]:
     """Onset-align a W-channel IR (AC-02), then compute per-eval-band ISO-3382
     metrics — one (values, nan_reasons) pair per band of `iso_eval_freqs`.
 
     The shared unit behind both consumers: `channel_band_avg_metrics` (single-IR
     band average — probe/tests) and `compute_room_acoustic_metrics` (cross-leg
-    band intersection — eval, AC-08)."""
+    band intersection — eval, AC-08). `trunc_idx_per_band` carries the shared
+    integration window of a paired comparison (AC-17); None = this IR's own."""
+    if trunc_idx_per_band is not None and len(trunc_idx_per_band) != len(iso_eval_freqs):
+        raise ValueError(
+            f"trunc_idx_per_band has {len(trunc_idx_per_band)} entries but there are "
+            f"{len(iso_eval_freqs)} eval bands — the shared integration window must be "
+            f"declared per band."
+        )
     onset = _find_onset(ir_w, onset_rel_db)  # align t=0 to the direct arrival
     ir_w = ir_w[onset:]
-    return [_iso3382_band_metrics(ir_w, float(fc), sample_rate) for fc in iso_eval_freqs]
+    return [
+        _iso3382_band_metrics(
+            ir_w, float(fc), sample_rate,
+            min_measurable_t60_s=min_measurable_t60_s,
+            trunc_idx=None if trunc_idx_per_band is None else trunc_idx_per_band[b][0],
+            trunc_source=None if trunc_idx_per_band is None else trunc_idx_per_band[b][1],
+        )
+        for b, fc in enumerate(iso_eval_freqs)
+    ]
 
 
 def compute_room_acoustic_metrics(
@@ -264,7 +392,8 @@ def compute_room_acoustic_metrics(
     sample_rate: int,
     iso_eval_freqs: list[float],  # from config.iso_eval_freqs (§7)
     onset_rel_db: float,          # from config.metric_onset_rel_db (§3 metric path)
-) -> tuple[dict[str, MetricTriple], dict[tuple[str, str], str]]:
+    min_measurable_t60_s: float,  # from config.metric_min_measurable_t60_s (§3, AC-23)
+) -> tuple[dict[str, MetricTriple], dict[tuple[str, str], str], dict[str, tuple[int, str]]]:
     """
     Standard ISO-3382 room-acoustic metrics (T30, C50, EDT) from decoded waveforms.
 
@@ -279,11 +408,26 @@ def compute_room_acoustic_metrics(
     let a pred-only band drop produce a scored comparison that mixed acoustic
     difference with band-composition difference). No shared band → all legs NaN
     (unscored), with the excluded bands and their causes in nan_reasons.
+
+    All three legs also share ONE Schroeder integration window per band (AC-17),
+    derived from the PHYSICAL legs only — `low` and `high`, the two whose noise
+    floor is the study's independent variable. `pred` consumes that window but never
+    sets it (RD-43): a degenerate prediction must not be able to shorten the window
+    used to measure its own ground truth. Returns the per-band window alongside the
+    triples so every scored row can record it (RD-44), not just the dropped ones.
     """
+    shared_trunc = _shared_truncation_per_band(
+        {"low": low_ref_ir[0], "high": high_ref_ir[0]},
+        sample_rate=sample_rate,
+        iso_eval_freqs=iso_eval_freqs,
+        onset_rel_db=onset_rel_db,
+    )
     per_leg = {
         leg: channel_per_band_metrics(
             ir[0], sample_rate=sample_rate,
             iso_eval_freqs=iso_eval_freqs, onset_rel_db=onset_rel_db,
+            min_measurable_t60_s=min_measurable_t60_s,
+            trunc_idx_per_band=shared_trunc,
         )
         for leg, ir in [("pred", pred_ir), ("high", high_ref_ir), ("low", low_ref_ir)]
     }
@@ -332,7 +476,11 @@ def compute_room_acoustic_metrics(
             low=leg_vals["low"], pred=leg_vals["pred"], high=leg_vals["high"],
             kind="match_reference",
         )
-    return triples, nan_reasons
+    window = {
+        f"{fc:g}": (idx, src)
+        for fc, (idx, src) in zip(iso_eval_freqs, shared_trunc)
+    }
+    return triples, nan_reasons, window
 
 
 # ---------------------------------------------------------------------------

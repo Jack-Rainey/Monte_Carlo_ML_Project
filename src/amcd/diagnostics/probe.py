@@ -27,7 +27,10 @@ import torch
 
 from ..config import Config
 from ..data.normalization import denormalize
-from ..evaluation.room_acoustic import channel_band_avg_metrics
+from ..evaluation.room_acoustic import (
+    _shared_truncation_per_band,
+    channel_band_avg_metrics,
+)
 from ..representations import build_representation
 from ..runtime import Verbosity, emit
 
@@ -199,13 +202,32 @@ def _run_d0b(
 
             # ISO-3382 metrics for oracle and reference (W-channel, onset-aligned, all
             # eval bands) — same shared path as the eval stage (AC-02/AC-04).
+            #
+            # D0b is a PAIRED comparison (`residual = |oracle - ref|`), so it carries
+            # the AC-17 defect exactly as the eval stage did: truncating each leg at
+            # its own noise-dependent Lundeby index integrates them over different
+            # limits and manufactures a residual with no acoustic cause. Both legs
+            # therefore share one window per band. The reference set is the two
+            # PHYSICAL legs available here — the raw high-ray reference and the
+            # carrier-decoded oracle, whose floor tracks the low-ray carrier it was
+            # decoded onto. No model output is involved in D0b at all (RD-43).
+            shared_trunc = _shared_truncation_per_band(
+                {"reference": high_ref_ir[0], "oracle": oracle_ir[0]},
+                sample_rate=config.sample_rate,
+                iso_eval_freqs=iso_eval_freqs,
+                onset_rel_db=config.metric_onset_rel_db,
+            )
             oracle_metrics, oracle_nan_reasons = channel_band_avg_metrics(
                 oracle_ir[0], sample_rate=config.sample_rate,
                 iso_eval_freqs=iso_eval_freqs, onset_rel_db=config.metric_onset_rel_db,
+                min_measurable_t60_s=config.metric_min_measurable_t60_s,
+                trunc_idx_per_band=shared_trunc,
             )
             ref_metrics, ref_nan_reasons = channel_band_avg_metrics(
                 high_ref_ir[0], sample_rate=config.sample_rate,
                 iso_eval_freqs=iso_eval_freqs, onset_rel_db=config.metric_onset_rel_db,
+                min_measurable_t60_s=config.metric_min_measurable_t60_s,
+                trunc_idx_per_band=shared_trunc,
             )
 
             residuals: dict[str, float] = {}
@@ -217,6 +239,12 @@ def _run_d0b(
                 "oracle": oracle_metrics,
                 "reference": ref_metrics,
                 "residual": residuals,
+                # The window both legs were integrated over, and which leg set it
+                # (AC-17/RD-44) — a residual is only interpretable alongside it.
+                "iso_integration_window": {
+                    f"{fc:g}": {"trunc_idx": idx, "set_by_leg": src}
+                    for fc, (idx, src) in zip(iso_eval_freqs, shared_trunc)
+                },
             }
             # No silent exclusion (F-21): a NaN residual (leg dropped by the shared
             # metric unit) carries its reasons into the probe record.

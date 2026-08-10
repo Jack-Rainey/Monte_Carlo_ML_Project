@@ -513,6 +513,12 @@ class Config(BaseModel):
     # Direct-arrival onset threshold (dB below peak) for metric integration start (§3)
     metric_onset_rel_db: float
 
+    # Shortest decay an octave band can honestly resolve (s). Below this the
+    # zero-phase 4th-order octave filter's own ringing is comparable to the decay,
+    # so a fitted T30/EDT measures the filter rather than the room (AC-23) — such a
+    # value is reported as unscored-with-reason, never as a small number.
+    metric_min_measurable_t60_s: float
+
     # Stats — bootstrap CI (design_spec §9)
     bootstrap_n_resamples: int
     bootstrap_alpha: float
