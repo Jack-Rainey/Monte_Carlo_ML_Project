@@ -28,7 +28,28 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # "N sc/att" = scored/attempted per (split, metric) (F-21): the scored count
     # is the paired-improvement population; a gap vs attempted means legs were
     # dropped — per-leg reasons in the run's metrics/drops.csv.
-    col_w = {"metric": 22, "n": 8, "pred": 10, "imp": 10, "ci": 22, "mdes": 10, "improved": 14}
+    col_w = {"metric": 22, "n": 8, "pred": 10, "imp": 10, "ci": 22, "mdes": 10,
+             "improved": 14, "caveat": 18}
+
+    def _caveats(row: dict) -> str:
+        """Composition caveats on the scored population (F-62 / AC-25 / RD-78).
+
+        `4/4` reads as fully scored, and on the RI smoke run it was not: one
+        scene's EDT was a ONE-BAND average while the other three were two-band
+        averages, so the split's CI pooled improvements computed over different
+        band sets. Rendered next to the count rather than left in drops.csv,
+        because the count is what a reader takes away.
+        """
+        parts = []
+        if row.get("n_partial_band"):
+            parts.append(f"{row['n_partial_band']} partial-band")
+        if row.get("n_pred_band_unresolved"):
+            parts.append(f"{row['n_pred_band_unresolved']} pred-unresolved")
+        if row.get("n_estimator_variance_limited"):
+            # Not a drop: the value is scored, but its ESTIMATOR carries 24-31 %
+            # sd in this range, which a bare point estimate does not convey.
+            parts.append(f"{row['n_estimator_variance_limited']} high-variance")
+        return ", ".join(parts)
 
     def _metric_row(row: dict) -> str:
         # Inferential columns (imp mean / CI / MDES) are the §9 paired improvement
@@ -55,8 +76,9 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             f"{imp_mean_str:>{col_w['imp']}} "
             f"{ci_str:<{col_w['ci']}} "
             f"{mdes_str:>{col_w['mdes']}} "
-            f"{improved_str:<{col_w['improved']}}"
-        )
+            f"{improved_str:<{col_w['improved']}} "
+            f"{_caveats(row):<{col_w['caveat']}}"
+        ).rstrip()
 
     # CI level from config, not hardcoded in the label (RR-17, same rule as RR-11).
     ci_label = f"Imp {100 * (1 - config.bootstrap_alpha):g}% CI"
@@ -67,8 +89,9 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         f"{'Imp mean':>{col_w['imp']}} "
         f"{ci_label:<{col_w['ci']}} "
         f"{'MDES':>{col_w['mdes']}} "
-        f"{'% Improved':<{col_w['improved']}}"
-    )
+        f"{'% Improved':<{col_w['improved']}} "
+        f"{'Caveats':<{col_w['caveat']}}"
+    ).rstrip()
 
     # One section per split — never pool test splits (invariant #9).
     #
@@ -108,6 +131,12 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     lines += [
         "",
         "N sc/att = scenes scored / attempted; per-leg drop reasons: metrics/drops.csv",
+        "Caveats — partial-band: the band average is over fewer bands than declared, so",
+        "  this split's CI pools improvements computed over DIFFERENT band sets (F-62).",
+        "  pred-unresolved: the model produced no measurable value in a band the physical",
+        "  legs resolve; the physical legs keep their own values (AC-25).",
+        "  high-variance: EDT below metric_edt_variance_limited_s, where the ESTIMATOR's",
+        "  sd is 24-31 % of T60 — a scored value, not a precise one (AC-27/RD-78).",
         "=" * 70,
     ]
     summary_txt = "\n".join(lines)

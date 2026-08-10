@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn.functional as F
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..registry import representation_registry
 
@@ -67,15 +67,35 @@ def _build_third_octave_filters(
     # Fractional-octave centres about the declared reference: f_n = f_ref * r^n.
     # A band is admitted only if it lies ENTIRELY below Nyquist (upper edge
     # included). This replaces a `sample_rate / 2 * 1.01` fudge factor that
-    # admitted the top band by arithmetic accident rather than by a stated rule;
-    # it reproduces that ladder exactly at the production framing (27 bands, top
-    # edge 22627.4 Hz) while ruling out a band straddling Nyquist, which would be
-    # half-empty and read as a real measurement.
+    # admitted the top band by arithmetic accident rather than by a stated rule,
+    # ruling out a band straddling Nyquist, which would be half-empty and read as
+    # a real measurement.
+    #
+    # It is NOT behaviour-preserving in general — only at 48 kHz (F-59). MEASURED
+    # against the old rule, min_bins_per_band=1:
+    #     48000/2048 → 27 vs 27 (bank bit-identical)   48000/512 → 21 vs 21
+    #      8000/256  → 18 vs 19                        44100/2048 → 27 vs 28
+    # At 44.1 kHz the change leaves 17959.4-22050 Hz — 18.5 % of the spectrum — in
+    # NO band, where `decode()` passes it through unshaped at scale 1.0. That is
+    # the correct trade (a straddling band is not a measurement) but it is a real
+    # change of coverage at any framing other than 48 kHz, so it is stated rather
+    # than implied.
     candidate_freqs: list[float] = []
     f = reference_freq_hz
     while f * half_width <= nyquist:
         candidate_freqs.append(f)
         f *= ratio
+    # The rung the Nyquist rule just rejected. Recorded (F-59) because a candidate
+    # excluded by the loop CONDITION never becomes a candidate, so it could not
+    # appear in `dropped_bands` — meta.json under-reported which bands were removed
+    # and why. Only the first is recorded: the ladder above it is infinite.
+    nyquist_excluded = {
+        "center_hz": float(f),
+        "lo_hz": float(f / half_width),
+        "hi_hz": float(f * half_width),
+        "n_bins": 0,
+        "reason": "upper edge above Nyquist",
+    }
     f = reference_freq_hz / ratio
     while f >= min_center_freq_hz:
         candidate_freqs.insert(0, f)
@@ -94,7 +114,13 @@ def _build_third_octave_filters(
             filters.append(mask.astype(np.float32))
             kept.append(entry)
         else:
-            dropped.append(entry)
+            dropped.append({
+                **entry,
+                "reason": f"fewer than min_bins_per_band={min_bins_per_band} FFT bins",
+            })
+
+    # Kept ascending in frequency, so `dropped_bands` reads as one ordered ladder.
+    dropped.append(nyquist_excluded)
 
     if not filters:
         raise ValueError(
@@ -112,9 +138,15 @@ def _build_third_octave_filters(
         # stated rather than inferred from the centres.
         "represented_band_limit_hz": [kept[0]["lo_hz"], kept[-1]["hi_hz"]],
         "fft_bin_spacing_hz": float(sample_rate / n_fft),
-        # Power that reaches no band at all: below the lowest edge (incl. DC) or
-        # above the highest. Measured 6.1 % for white noise at production framing.
-        "uncovered_power_fraction": float(
+        # FFT BINS that reach no band at all: below the lowest edge (incl. DC) or
+        # above the highest. A property of the BANK, not of any signal — it was
+        # named `uncovered_power_fraction`, which a reader takes as "this fraction
+        # of the run's power is in no band" (AC-31). The two coincide only for a
+        # white spectrum: measured at production framing this figure is 0.0585
+        # while the true uncovered POWER is 0.0610 for white noise and 0.7794 for
+        # a low-passed signal. Renamed rather than redefined, because the bank
+        # property is what belongs in a bank description.
+        "uncovered_bin_fraction": float(
             (~np.any(np.array(filters, dtype=bool), axis=0)).sum() / n_freqs
         ),
         "dropped_bands": dropped,
@@ -134,6 +166,23 @@ class ThirdOctaveSpectrogram:
         model_config = {"extra": "forbid"}
         n_fft: int
         hop_length: int
+
+        #: Lower clamp on the encoded band energy, in **dB re 1.0 in STFT power of
+        #: the float32 IR** — an ABSOLUTE floor, not a level below the per-scene
+        #: peak (AC-33). The reference has to be stated because the absolute scale
+        #: of an IR is set by the backend (`normalize_ir: false`,
+        #: `source_power: 1.0 W`, the 1/d direct term), so the effective
+        #: dB-below-peak floor is scene-dependent: measured, encoding the SAME IR
+        #: at gains 0.01 … 100 moves the clamped fraction 0.760 → 0.513 and the
+        #: retained range below peak 91.7 → 171.7 dB.
+        #:
+        #: Absolute is the DELIBERATE choice, not an oversight. Absolute level
+        #: carries the placement axis — DRR and C50 are level ratios against the
+        #: 1/d direct term — so a per-scene-peak-relative floor would normalize
+        #: away part of the signal `test_placement_shift` exists to test. The cost
+        #: is that a second backend, or a different `source_power`, silently moves
+        #: the floor; `TestMinDbIsAnAbsoluteFloor` in tests/test_filterbank.py pins
+        #: the dependence so it cannot change unnoticed.
         min_db: float
 
         #: The fractional-octave ladder, declared rather than written as literals
@@ -141,9 +190,28 @@ class ThirdOctaveSpectrogram:
         #: `bands_per_octave` sets the spacing (3 = third-octave), and
         #: `min_center_freq_hz` bounds it below. The upper bound is DERIVED from
         #: Nyquist.
-        reference_freq_hz: float
-        bands_per_octave: int
-        min_center_freq_hz: float
+        #:
+        #: The bounds are enforced, not documented (AC-32): all three build the
+        #: ladder by repeated multiplication, so three schema-valid settings made
+        #: `_build_third_octave_filters` loop FOREVER — a hang or an OOM at
+        #: preprocess, i.e. AFTER the render it would waste.
+        #:   reference_freq_hz = 0 → `0 * half_width <= nyquist` is true forever
+        #:   min_center_freq_hz = 0 → the descending `f /= ratio` underflows to 0
+        #:                            and `0 >= 0` stays true
+        #:   bands_per_octave < 1 → ratio <= 1, so the ascending loop never
+        #:                          reaches Nyquist and appends without bound
+        reference_freq_hz: float = Field(
+            gt=0.0,
+            description="ladder anchor in Hz; must be > 0 or the ascending loop never terminates",
+        )
+        bands_per_octave: int = Field(
+            ge=1,
+            description="bands per octave; must be >= 1 or the ladder ratio is <= 1 and never reaches Nyquist",
+        )
+        min_center_freq_hz: float = Field(
+            gt=0.0,
+            description="lower bound of the ladder in Hz; must be > 0 or the descending loop underflows to 0 and never terminates",
+        )
 
         #: Fewest FFT bins a band must contain to be kept. Below the bin spacing a
         #: "band" measures window leakage, not band content — see

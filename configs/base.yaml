@@ -191,22 +191,16 @@ iso_eval_freqs: [500, 1000]
 # start-of-response convention (not an arbitrary gate). (RD-05/AC-08 provenance)
 metric_onset_rel_db: -20.0
 
-# Shortest decay an octave band can honestly resolve (s). Below this a fitted
-# T30/EDT measures the filter rather than the room, so the value is reported as
-# unscored-with-reason instead of as a small number (AC-23).
-#
-# MEASURED, not assumed (scratchpad/p_minT60.py, 8 seeds, 500+1000 Hz, exponentially
-# decaying band-limited noise, no noise floor): T30 recovery error is -0.3 % at
-# T60 = 0.03 s, -4.2 % at 0.05 s, and <= 5.6 % everywhere up to 0.5 s. This is the
-# physically expected result — a 4th-order octave filter at 500 Hz is ~353 Hz wide,
-# so its ringing lasts ~3 ms and cannot dominate a 60 ms decay. 0.05 s is therefore
-# a degenerate-case guard, not an active suppression threshold.
-#
-# ⚠ AC-23 asserted EDT reads +89 % at T60 = 0.06 s; that did NOT reproduce here
-# (+8.3 %), and the residual EDT error is non-monotonic across 0.03-0.5 s, i.e.
-# realization variance rather than a measurability floor. The ledger row stays OPEN
-# for the acoustics-reviewer to supply its exact probe or withdraw the magnitude.
-metric_min_measurable_t60_s: 0.05
+# How many times the octave filter's OWN decay a room's decay must exceed to be
+# resolvable in that band. The floor is MEASURED per (metric, band) from the
+# filter's impulse response — 500 Hz: T30 21.97 ms, EDT 10.70 ms; 1000 Hz: 10.96 /
+# 5.44 ms; exactly 1/f — so this declares only the safety margin (AC-26/AC-27).
+metric_band_resolvability_margin: 2.0
+
+# EDT below this is variance-limited, not filter-limited: measured sd 24-31 % of
+# T60 here, against 6-10 % for T30. A disclosure bound, never a suppression
+# threshold — eval counts how many scenes fall below it per split (AC-27/RD-78).
+metric_edt_variance_limited_s: 0.15
 
 # ── Stats: bootstrap CI (design_spec §9) ──────────────────────────────────────
 bootstrap_n_resamples: 1000

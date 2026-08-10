@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 import time
 from pathlib import Path
 from typing import Callable
 
+from . import provenance
 from .config import Config
 from .runtime import Verbosity, emit
 
@@ -37,7 +37,8 @@ def _sentinel(run_dir: Path, stage: str) -> Path:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _gen_scenes_fingerprint(config: Config) -> dict:
-    """Config inputs that determine the generated scene set.
+    """Config inputs that determine the generated scene set — and whether it is
+    ADMITTED.
 
     Covers the sampling ranges, the split set (shift splits carry their own
     counts, and their scenes are generated here) and every seed that feeds scene
@@ -51,6 +52,17 @@ def _gen_scenes_fingerprint(config: Config) -> dict:
     dataset that provably had not changed. Failing safe, but the cost it imposed is
     precisely the cost RD-16/RD-30 built this machinery to avoid. `frac`/`role`
     still reach `_preprocess_fingerprint`, which carries the full dump.
+
+    `ir_duration` and the SIMULATOR are here for a different reason (F-57): they
+    do not change which scenes are sampled, they change whether gen-scenes SUCCEEDS
+    and what it discloses. `ir_duration` is what AC-22's record-length gate compares
+    against, and the simulator declares the minimum source-receiver separation
+    AC-13's pre-flight check enforces. Without them the gate was bypassable through
+    the cache — REPRODUCED: generate at 4.25 s, change ONLY `ir_duration` to 0.25 s,
+    and gen-scenes printed `[skip] (cached)` while `--force` on the same config
+    raised "16 of 29 scenes (55.172%) exceed it". `placement_report.json` also stayed
+    stamped at 4.25 s while `config.yaml` said 0.25 — the disclosure artifact
+    contradicting its own run.
     """
     return {
         "scenes": config.scenes.model_dump(),
@@ -59,6 +71,8 @@ def _gen_scenes_fingerprint(config: Config) -> dict:
             for name, sp in config.splits.items()
         },
         "seed_scene_generation": config.seed("scene_generation"),
+        "ir_duration": config.ir_duration,
+        "simulator": {"name": config.simulator.name, "params": config.simulator.params},
     }
 
 
@@ -100,6 +114,59 @@ def _preprocess_fingerprint(config: Config) -> dict:
     }
 
 
+def _train_fingerprint(config: Config) -> dict:
+    """Config inputs that determine the trained weights.
+
+    RD-41 deferred this on COST grounds — "the expensive artifact is the render" —
+    and that rationale does not survive contact with what the gap actually did
+    (F-53). REPRODUCED end to end: on a complete run_dir, changing
+    `model.params.hidden_channels` 8→32, `n_layers` 2→4, `learning_rate`
+    0.001→0.05, `huber_delta` 1.0→3.0 and `n_epochs` 2→7, then re-running
+    `amcd all`, printed `[skip]` for ALL NINE stages and exited 0. `config.yaml`
+    was re-stamped with the new values while `checkpoints/best.pt` still held the
+    OLD model, so `report/summary.txt` and `stats/ci_table.csv` were the old
+    model's numbers under the new model's provenance stamp. A cache that is cheap
+    to rebuild is not a reason to leave the reported result unprotected.
+
+    Both training seeds are named individually (inv #5): weight init and data
+    shuffle are separate aspects and a run that differs in either is a different
+    run.
+    """
+    return {
+        "model": {"name": config.model.name, "params": config.model.params},
+        "n_epochs": config.n_epochs,
+        "batch_size": config.batch_size,
+        "learning_rate": config.learning_rate,
+        "huber_delta": config.huber_delta,
+        "early_stopping_patience": config.early_stopping_patience,
+        "seed_weight_init": config.seed("weight_init"),
+        "seed_data_shuffle": config.seed("data_shuffle"),
+        "representation": {
+            "name": config.representation.name,
+            "params": config.representation.params,
+        },
+        "code_version": _code_version("train"),
+    }
+
+
+def _infer_fingerprint(config: Config) -> dict:
+    """Config inputs that determine the predictions.
+
+    Inference re-instantiates the model from `model.name`/`params` to load the
+    checkpoint, and decodes through the representation, so both are inputs even
+    though neither is re-trained here. Everything else it depends on arrives
+    through the chain from `train` (F-53).
+    """
+    return {
+        "model": {"name": config.model.name, "params": config.model.params},
+        "representation": {
+            "name": config.representation.name,
+            "params": config.representation.params,
+        },
+        "code_version": _code_version("infer"),
+    }
+
+
 def _eval_fingerprint(config: Config) -> dict:
     """Config inputs — AND the code version — that determine the reported metrics.
 
@@ -118,44 +185,66 @@ def _eval_fingerprint(config: Config) -> dict:
     return {
         "iso_eval_freqs": list(config.iso_eval_freqs),
         "metric_onset_rel_db": config.metric_onset_rel_db,
-        "metric_min_measurable_t60_s": config.metric_min_measurable_t60_s,
+        "metric_band_resolvability_margin": config.metric_band_resolvability_margin,
         "representation": {
             "name": config.representation.name,
             "params": config.representation.params,
         },
         "sample_rate": config.sample_rate,
-        "code_version": _code_version(),
+        "code_version": _code_version("eval"),
     }
 
 
 def _stats_fingerprint(config: Config) -> dict:
-    """Config inputs that determine the CIs and MDES, chained to eval's."""
+    """Config inputs that determine the CIs and MDES.
+
+    Its dependence on eval is expressed by `STAGE_UPSTREAM["stats"] = "eval"`, NOT
+    by a key here. An earlier version carried
+    `"upstream_eval": _fingerprint_sha(_eval_fingerprint(config))` — a chain
+    RECOMPUTED FROM THE CURRENT CONFIG, which is exactly what the STAGE_UPSTREAM
+    docstring below forbids, in the fix that closed the row about it (F-54). Both
+    consequences reproduced: `stats --force` after a `metric_onset_rel_db` change
+    stamped the NEW config's eval sha while `eval.done` still recorded the old one,
+    so the provenance chain claimed artifacts that did not exist; and the
+    non-forced failure named no leaf, losing the recursive diff F-49 bought.
+    """
     return {
         "bootstrap_n_resamples": config.bootstrap_n_resamples,
         "bootstrap_alpha": config.bootstrap_alpha,
         "bootstrap_power": config.bootstrap_power,
         "seed_bootstrap": config.seed("bootstrap"),
-        "upstream_eval": _fingerprint_sha(_eval_fingerprint(config)),
     }
 
 
-def _code_version() -> str:
-    """Current commit sha, or a sentinel when git cannot answer.
+#: Per stage, the package sources its OUTPUT is a function of — the code half of a
+#: fingerprint (F-55). `provenance.code_version` adds the core modules (config,
+#: seeds, registry, shared acoustics) to every scope, so these list only what is
+#: specific to the stage.
+#:
+#: Declared rather than inferred, and asserted in tests against what the stage
+#: actually imports, because the failure mode of a wrong scope is silent: a stage
+#: whose real dependency is missing here goes on serving a cached artifact under
+#: changed code, which is the defect this exists to close.
+STAGE_CODE_SCOPE: dict[str, tuple[str, ...]] = {
+    # Trains weights: the model, the loss, the trainer, the dataset it reads, and
+    # the representation whose domain the loss is expressed in.
+    "train": ("training", "models", "data", "representations"),
+    # Loads the checkpoint and decodes predictions through the representation.
+    "infer": ("training", "models", "representations"),
+    # The stage whose output IS the research claim. `representations` is in scope
+    # because eval decodes before measuring.
+    "eval": ("evaluation", "representations"),
+}
 
-    An unavailable sha must not silently weaken the check into a config-only
-    fingerprint, so the sentinel is a distinct VALUE that itself participates in
-    the hash — moving between a git checkout and an exported tree invalidates
-    eval rather than quietly matching it.
+
+def _code_version(stage: str) -> str:
+    """The content hash of `stage`'s declared sources — see
+    `amcd.provenance.code_version`.
+
+    Shared with `Config.stamp` through that module so the cache key and
+    `versions.json` cannot describe different code (F-56).
     """
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=Path(__file__).resolve().parent,
-            capture_output=True, text=True, timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return "unavailable"
-    return out.stdout.strip() if out.returncode == 0 else "unavailable"
+    return provenance.code_version(STAGE_CODE_SCOPE[stage])
 
 
 #: Per-stage declaration of the config inputs a cached artifact depends on.
@@ -168,18 +257,21 @@ def _code_version() -> str:
 #: SCOPE, stated because the mechanism looks stronger than it is: a fingerprint
 #: built from config keys sees CONFIG changes only. A code change to a stage —
 #: a redefined metric, a different sampling rule — moves nothing in these payloads
-#: and a cached artifact is served under the new code (RD-59). `eval` carries a
-#: commit sha for exactly that reason; the other stages do not, so the remedy for
-#: a code change upstream of them is a fresh run_dir or `--force`.
+#: and a cached artifact is served under the new code (RD-59). The three stages
+#: that produce or shape the REPORTED RESULT (`train`, `infer`, `eval`) therefore
+#: carry `code_version()` as well; the others do not, so the remedy for a code
+#: change upstream of them is a fresh run_dir or `--force`.
 #:
-#: The remaining `None`s are a live gap, not a design (ledger RD-41).
+#: The remaining `None`s are `diagnostics` and `report` (ledger RD-41). Both are
+#: terminal — nothing chains to them — so an unwired fingerprint there cannot
+#: corrupt another stage's provenance, only its own re-use.
 STAGE_FINGERPRINT: dict[str, Callable[[Config], dict] | None] = {
     "gen-scenes": _gen_scenes_fingerprint,
     "render": _render_fingerprint,
     "preprocess": _preprocess_fingerprint,
     "diagnostics": None,
-    "train": None,
-    "infer": None,
+    "train": _train_fingerprint,
+    "infer": _infer_fingerprint,
     "eval": _eval_fingerprint,
     "stats": _stats_fingerprint,
     "report": None,
@@ -195,15 +287,27 @@ STAGE_FINGERPRINT: dict[str, Callable[[Config], dict] | None] = {
 #: value even though the stage had consumed the OLD upstream artifacts, leaving a
 #: run_dir whose chain validated while the artifacts disagreed — precisely the
 #: silent mixed dataset this machinery exists to prevent.
+#: The chain runs unbroken from the scenes to the reported CIs:
+#:
+#:   gen-scenes → render → preprocess → train → infer → eval → stats
+#:
+#: Before F-53 it stopped at `preprocess`. `eval` and `stats` carried fingerprints,
+#: which READ as "the reported metrics are cache-protected", while neither was
+#: chained to its actual inputs and `train`/`infer` carried none at all — so a
+#: changed model was reported under a stale checkpoint's numbers. Wiring the chain
+#: is what makes a fingerprint transitive: `stats` is stale when the SCENES changed,
+#: through six links, without `_stats_fingerprint` naming a single scene key.
+#:
+#: `diagnostics` and `report` are terminal and stay unchained (RD-41).
 STAGE_UPSTREAM: dict[str, str | None] = {
     "gen-scenes": None,
     "render": "gen-scenes",
     "preprocess": "render",
     "diagnostics": None,
-    "train": None,
-    "infer": None,
-    "eval": None,
-    "stats": None,
+    "train": "preprocess",
+    "infer": "train",
+    "eval": "infer",
+    "stats": "eval",
     "report": None,
 }
 
@@ -442,6 +546,20 @@ class Pipeline:
             if self._is_done(stage):
                 emit(self.verbosity, "progress", f"[skip] {stage} (cached)")
                 return
+
+            # INVALIDATE BEFORE MUTATING (F-58). The stage is about to overwrite
+            # its artifacts, so from this moment the old sentinel describes a
+            # directory that no longer exists. Leaving it in place until success
+            # meant a stage that failed or was killed PART-WAY THROUGH WRITING left
+            # the PREVIOUS run's success sentinel standing over half-new artifacts,
+            # and the next invocation printed `[skip] (cached)` against it —
+            # reproduced with gen-scenes aborting after writing all 29 scene JSONs.
+            # The costly instance is render: the orphan prune runs first, so a
+            # --force render killed at scene 300/600 leaves scenes 300-599 holding
+            # the PREVIOUS config's .npy under a sentinel that validates. That is
+            # the silently mixed dataset RD-16 exists to prevent, and under
+            # emulation it is the multi-hour case.
+            _sentinel(self.run_dir, stage).unlink(missing_ok=True)
 
             emit(self.verbosity, "progress", f"\n[run ] {stage}")
             fn = _dispatch(stage)

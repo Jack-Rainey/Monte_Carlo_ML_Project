@@ -75,6 +75,54 @@ class TestLadderIsDeclaredNotHardcoded:
                       "min_center_freq_hz", "min_bins_per_band"):
             assert ThirdOctaveSpectrogram.Params.model_fields[field].is_required()
 
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("reference_freq_hz", 0.0),      # `0 * half_width <= nyquist` forever
+            ("min_center_freq_hz", 0.0),     # descending `f /= ratio` underflows to 0
+            ("bands_per_octave", -3),        # ratio < 1: ascending loop never ends
+        ],
+    )
+    def test_a_ladder_setting_that_would_hang_is_rejected_at_load(
+        self, field: str, value: float
+    ) -> None:
+        """AC-32: three SCHEMA-VALID settings made the construction loop run
+        forever — verified with a 3 s alarm. Not a wrong result: a hang or an OOM
+        at preprocess, i.e. AFTER the render it would waste. The bound must be in
+        `Params`, so the failure is a config-load error, not a stalled run."""
+        from pydantic import ValidationError
+
+        from amcd.representations.spectrogram import ThirdOctaveSpectrogram
+
+        params = dict(
+            n_fft=256, hop_length=64, min_db=-80.0, reference_freq_hz=1000.0,
+            bands_per_octave=3, min_center_freq_hz=10.0, min_bins_per_band=1,
+        )
+        params[field] = value
+        with pytest.raises(ValidationError):
+            ThirdOctaveSpectrogram.Params(**params)
+
+    @pytest.mark.parametrize(
+        "sample_rate, n_fft, expected_bands",
+        [(48000, 2048, 27), (48000, 512, 21), (44100, 2048, 27), (8000, 256, 18)],
+    )
+    def test_band_count_is_pinned_per_sample_rate(
+        self, sample_rate: int, n_fft: int, expected_bands: int
+    ) -> None:
+        """F-59: the Nyquist admission rule is behaviour-preserving only at 48 kHz.
+
+        The old rule (`f <= sample_rate/2 * 1.01`) gave 27 / 21 / 28 / 19 for these
+        four framings; the current rule gives 27 / 21 / 27 / 18. The two disagree
+        AWAY from 48 kHz, and at 44.1 kHz that leaves 17959.4-22050 Hz in no band,
+        passed through `decode()` unshaped at scale 1.0. Pinned per sample rate so
+        the dependence is asserted rather than implied.
+        """
+        bank, _ = _build_third_octave_filters(
+            n_fft, sample_rate, reference_freq_hz=1000.0, bands_per_octave=3,
+            min_center_freq_hz=10.0, min_bins_per_band=1,
+        )
+        assert bank.shape[0] == expected_bands
+
     def test_bands_per_octave_actually_changes_the_ladder(self) -> None:
         """Not a decorative knob: 1 gives the ISO octave ladder."""
         cfg = tiny_config()
@@ -145,11 +193,79 @@ class TestUndeclaredPropertiesAreNowRecorded:
         d = production_rep.band_description
         ratios = np.diff(np.log2(d["center_freqs_hz"])) * 3.0
         assert not np.allclose(ratios, 1.0), "ladder unexpectedly regular"
-        assert [round(b["center_hz"], 1) for b in d["dropped_bands"]][-3:] == [31.2, 39.4, 62.5]
+        sub_minimum = [b for b in d["dropped_bands"] if "FFT bins" in b["reason"]]
+        assert [round(b["center_hz"], 1) for b in sub_minimum][-3:] == [31.2, 39.4, 62.5]
 
-    def test_power_outside_every_band_is_recorded(self, production_rep) -> None:
-        frac = production_rep.band_description["uncovered_power_fraction"]
+    def test_the_band_above_nyquist_is_recorded_as_dropped(self, production_rep) -> None:
+        """F-59: a candidate excluded by the Nyquist LOOP CONDITION never became a
+        candidate, so it could not appear in `dropped_bands` — meta.json
+        under-reported which bands were removed and why."""
+        d = production_rep.band_description
+        above = [b for b in d["dropped_bands"] if b["reason"] == "upper edge above Nyquist"]
+        assert len(above) == 1, f"expected exactly one Nyquist-excluded rung, got {above}"
+        assert above[0]["lo_hz"] == pytest.approx(d["represented_band_limit_hz"][1])
+
+    def test_bins_outside_every_band_are_recorded(self, production_rep) -> None:
+        """AC-31: this is a property of the BANK (bin count), not of any signal's
+        power — the two coincide only for a white spectrum. Named accordingly."""
+        frac = production_rep.band_description["uncovered_bin_fraction"]
         assert 0.05 < frac < 0.07, f"uncovered fraction moved: {frac}"
+
+
+def _decaying_ir(rep, t60: float = 0.05, seconds: float = 0.5) -> np.ndarray:
+    """An exponentially decaying noise IR long enough to span `min_db`.
+
+    Deliberately steep and long: a short or slowly-decaying record never reaches
+    the floor, so the clamp would be untested and every assertion below vacuous.
+    """
+    rng = np.random.default_rng(0)
+    n = int(seconds * rep.sample_rate)
+    t = np.arange(n) / rep.sample_rate
+    return (np.exp(-6.908 * t / t60) * rng.standard_normal(n)).astype(np.float32)
+
+
+class TestMinDbIsAnAbsoluteFloor:
+    """AC-33: `min_db` is an ABSOLUTE dB clamp (re 1.0 in STFT power of the
+    float32 IR), not a level below the per-scene peak.
+
+    The distinction is invisible today — at unit gain 131.7 dB is retained below
+    peak against the 35 dB T30 needs — but it changes silently if a second
+    backend or a different `source_power` lands, because the absolute scale of an
+    IR is the backend's to set. So the gain dependence is ASSERTED here: if a
+    future change makes the floor peak-relative, this test fails and the
+    disclosure has to move with it.
+    """
+
+    def _clamped_fraction(self, rep, gain: float) -> float:
+        return float(
+            (rep.encode(np.stack([_decaying_ir(rep) * gain])) <= rep.min_db + 1e-6)
+            .float().mean()
+        )
+
+    def test_the_clamped_fraction_tracks_absolute_gain(self, production_rep) -> None:
+        quiet = self._clamped_fraction(production_rep, 0.01)
+        loud = self._clamped_fraction(production_rep, 100.0)
+        assert quiet > loud, (
+            f"clamped fraction did not fall with gain ({quiet} → {loud}); if the "
+            f"floor was made peak-relative, update the AC-33 disclosure in "
+            f"configs/representations/spectrogram.yaml with it"
+        )
+
+    def test_the_floor_is_the_declared_value_not_a_peak_offset(
+        self, production_rep
+    ) -> None:
+        """A peak-relative floor would clamp at the same dB BELOW PEAK at every
+        gain; an absolute one clamps at the same ABSOLUTE dB while the peak moves
+        with the gain."""
+        ir = _decaying_ir(production_rep)
+        peaks = []
+        for gain in (0.01, 1.0, 100.0):
+            encoded = production_rep.encode(np.stack([ir * gain]))
+            assert float(encoded.min()) == pytest.approx(production_rep.min_db)
+            peaks.append(float(encoded.max()))
+        # 20 dB of gain moves the peak 40 dB in power, so the retained range below
+        # peak is NOT constant — the signature of an absolute floor.
+        assert peaks[2] - peaks[0] == pytest.approx(80.0, abs=0.1)
 
 
 class TestToneInBandKnownAnswer:
@@ -208,4 +324,4 @@ class TestBandDescriptionReachesTheArtifact:
         desc = meta["band_description"]
         assert desc["center_freqs_hz"] == meta["center_freqs"]
         assert len(desc["in_band_energy_fraction"]) == meta["n_bands"]
-        assert "uncovered_power_fraction" in desc
+        assert "uncovered_bin_fraction" in desc

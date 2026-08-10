@@ -108,12 +108,14 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             decoded_ir = np.load(decoded_ir_path)          # (C, T)
             high_ref_ir = np.load(high_ir_path)            # (C, T)
             low_ref_ir = np.load(low_ir_path)              # (C, T)
-            room_triples, room_reasons, room_window = compute_room_acoustic_metrics(
+            (
+                room_triples, room_reasons, room_window, band_accounting
+            ) = compute_room_acoustic_metrics(
                 decoded_ir, high_ref_ir, low_ref_ir,
                 sample_rate=config.sample_rate,
                 iso_eval_freqs=[float(f) for f in config.iso_eval_freqs],
                 onset_rel_db=config.metric_onset_rel_db,
-                min_measurable_t60_s=config.metric_min_measurable_t60_s,
+                band_resolvability_margin=config.metric_band_resolvability_margin,
             )
             all_metrics.update(room_triples)
             nan_reasons.update(room_reasons)
@@ -134,6 +136,7 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 float("nan"), float("nan"), float("nan"), kind="match_reference"
             )
             reason = "decoded/reference IR artifacts absent for this scene"
+            band_accounting = {}
             for key in ("T30", "C50", "EDT"):
                 all_metrics[key] = nan_triple
                 for leg in KIND_LEGS[nan_triple.kind]:
@@ -150,6 +153,22 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         # (F-20). improved is None where undefined (F-08).
         for metric_name, triple in all_metrics.items():
             improved, baseline_rel_ratio = metric_improvement(triple)
+            # Band accounting travels WITH the row (F-62). "N sc/att" could not tell
+            # a fully-scored scene from a partially-scored one: on the RI smoke run
+            # EDT/test_id read 4/4 while one scene's EDT was a ONE-BAND average and
+            # the other three were two-band averages, visible only in drops.csv. The
+            # split's CI then pools per-scene improvements computed over different
+            # band sets under a headline count that reads as complete.
+            acct = band_accounting.get(metric_name)
+            # EDT below this bound is variance-limited, not filter-limited (AC-27):
+            # measured sd 24-31 % of T60 against 6-10 % for T30. No threshold can
+            # remove that, so it is disclosed per scene and counted per split
+            # (RD-78) rather than suppressed.
+            edt_uncertain = (
+                metric_name == "EDT"
+                and not math.isnan(triple.high)
+                and triple.high < config.metric_edt_variance_limited_s
+            )
             rows.append({
                 "scene_id": scene_id,
                 "split": split,
@@ -160,6 +179,12 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 "high_ref": float(triple.high),
                 "baseline_rel_ratio": baseline_rel_ratio,
                 "improved": improved,
+                "n_bands_kept": None if acct is None else acct["n_bands_kept"],
+                "n_bands_total": None if acct is None else acct["n_bands"],
+                "n_bands_pred_unresolved": (
+                    None if acct is None else len(acct["pred_unresolved_hz"])
+                ),
+                "estimator_variance_limited": edt_uncertain,
             })
             # Drop sweep (F-21): every consumed-leg NaN must carry a reason; a
             # missing one is still logged, visibly attributed to the producer.

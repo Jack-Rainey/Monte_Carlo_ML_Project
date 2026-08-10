@@ -247,13 +247,13 @@ def _run_d0b(
             oracle_metrics, oracle_nan_reasons = channel_band_avg_metrics(
                 oracle_ir[0], sample_rate=config.sample_rate,
                 iso_eval_freqs=iso_eval_freqs, onset_rel_db=config.metric_onset_rel_db,
-                min_measurable_t60_s=config.metric_min_measurable_t60_s,
+                band_resolvability_margin=config.metric_band_resolvability_margin,
                 trunc_idx_per_band=shared_trunc,
             )
             ref_metrics, ref_nan_reasons = channel_band_avg_metrics(
                 high_ref_ir[0], sample_rate=config.sample_rate,
                 iso_eval_freqs=iso_eval_freqs, onset_rel_db=config.metric_onset_rel_db,
-                min_measurable_t60_s=config.metric_min_measurable_t60_s,
+                band_resolvability_margin=config.metric_band_resolvability_margin,
                 trunc_idx_per_band=shared_trunc,
             )
 

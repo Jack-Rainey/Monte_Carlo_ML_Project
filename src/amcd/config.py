@@ -27,7 +27,6 @@ import datetime
 import importlib.metadata
 import itertools
 import json
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,6 +35,7 @@ import yaml
 from numpy.random import SeedSequence
 from pydantic import BaseModel, PrivateAttr, model_validator
 
+from . import provenance
 from .acoustics import sabine_rt60
 
 
@@ -594,11 +594,22 @@ class Config(BaseModel):
     # Direct-arrival onset threshold (dB below peak) for metric integration start (§3)
     metric_onset_rel_db: float
 
-    # Shortest decay an octave band can honestly resolve (s). Below this the
-    # zero-phase 4th-order octave filter's own ringing is comparable to the decay,
-    # so a fitted T30/EDT measures the filter rather than the room (AC-23) — such a
-    # value is reported as unscored-with-reason, never as a small number.
-    metric_min_measurable_t60_s: float
+    # How many times the octave filter's OWN decay a room's decay must exceed to be
+    # resolvable in that band (dimensionless). The floor itself is measured per
+    # (metric, band) from the filter's impulse response, so this declares the SAFETY
+    # MARGIN, not the threshold — replacing a single absolute scalar that was
+    # compared against the fitted value and therefore censored its own estimator
+    # (AC-26/AC-27). Below the floor, T30/EDT is unscored-with-reason, never a small
+    # number.
+    metric_band_resolvability_margin: float
+
+    # Decay time (s) below which the EDT ESTIMATOR is variance-limited rather than
+    # filter-limited: measured sd 24-31 % of T60 below ~0.15 s, against 6-10 % for
+    # T30. Not a suppression threshold — no threshold can remove estimator variance
+    # — but a DISCLOSURE bound: eval counts, per split, how many scenes' EDT falls
+    # below it so a high-uncertainty population is never read as a point estimate
+    # (AC-27/RD-78).
+    metric_edt_variance_limited_s: float
 
     # Stats — bootstrap CI (design_spec §9)
     bootstrap_n_resamples: int
@@ -1121,13 +1132,16 @@ class Config(BaseModel):
                 versions[pkg] = importlib.metadata.version(pkg)
             except importlib.metadata.PackageNotFoundError:
                 versions[pkg] = "not-installed"
-        try:
-            sha = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], cwd=run_dir.parent, stderr=subprocess.DEVNULL
-            ).decode().strip()
-            versions["git_sha"] = sha
-        except Exception:
-            versions["git_sha"] = "unavailable"
+        # Resolved from the PACKAGE, not from run_dir (F-56): a --run-dir on a data
+        # volume is the normal case, and asking git about it stamped "unavailable"
+        # here while the same run's eval sentinel recorded a real sha. `git_dirty`
+        # is stated because a sha alone does not describe an edited tree — what the
+        # CACHE compares is provenance.code_version(), a content hash.
+        versions["git_sha"] = provenance.git_sha()
+        versions["git_dirty"] = provenance.git_is_dirty()
+        # Whole-package, unlike the per-stage scopes: this one is for a HUMAN
+        # asking "which code was this run made with", not a cache key.
+        versions["code_version"] = provenance.code_version(provenance.ALL_SOURCES)
         (run_dir / "versions.json").write_text(json.dumps(versions, indent=2))
 
 

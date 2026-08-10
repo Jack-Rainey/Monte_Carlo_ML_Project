@@ -91,7 +91,13 @@ Two consequences that must be stated wherever these numbers are reported:
    the E4 gate.
 
 A decay too short for a band to resolve is reported as **unscored with a reason**,
-never as a small number (`metric_min_measurable_t60_s`, AC-23).
+never as a small number. The floor is the octave filter's **own** decay in that
+band times `metric_band_resolvability_margin` — measured per (metric, band), and
+independent of the value being tested. Thresholding on the fitted value instead
+censors the estimator's low tail and biases the surviving mean (+31.2 % measured
+at true T60 = 0.06 s); AC-26/AC-27. EDT below `metric_edt_variance_limited_s` is
+variance-limited rather than filter-limited and is **disclosed and counted per
+split**, never suppressed.
 
 ## 4. Pre-training diagnostics (run BEFORE any training)
 

@@ -11,12 +11,12 @@ from amcd.evaluation.room_acoustic import channel_band_avg_metrics
 _SR = 48000
 _ISO = [500.0, 1000.0]
 _ONSET_DB = -20.0
-# Properties of the synthetic fixtures below, not experiment-governing values: these
-# probes assert what the ESTIMATOR does, so the AC-23 measurability floor is disabled
-# (0.0) — a known-answer test must see the raw value, including one too short to be
-# reported in a real run. `metric_min_measurable_t60_s` is config-declared for the
-# pipeline (configs/base.yaml); tests that exercise the floor itself set it explicitly.
-_MIN_T60 = 0.0
+# A margin of 0 disables the resolvability floor entirely. Not an experiment value:
+# these probes assert what the ESTIMATOR does, so a known-answer test must see the
+# raw fitted value, including one too short to be reported in a real run.
+# `metric_band_resolvability_margin` is config-declared for the pipeline
+# (configs/base.yaml); tests that exercise the floor itself set it explicitly.
+_NO_FLOOR = 0.0
 
 
 def _decaying_noise_ir(rt60: float, duration_s: float, seed: int) -> np.ndarray:
@@ -40,7 +40,7 @@ def _add_noise_floor(ir: np.ndarray, floor_db: float, seed: int) -> np.ndarray:
 def _metrics(ir_w: np.ndarray) -> dict:
     values, _reasons = channel_band_avg_metrics(
         ir_w, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        min_measurable_t60_s=_MIN_T60,
+        band_resolvability_margin=_NO_FLOOR,
     )
     return values
 
@@ -97,7 +97,7 @@ def test_c50_nan_carries_lundeby_truncation_reason() -> None:
                           floor_db=-25.0, seed=6)
     values, reasons = channel_band_avg_metrics(
         ir, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        min_measurable_t60_s=_MIN_T60,
+        band_resolvability_margin=_NO_FLOOR,
     )
     assert np.isnan(values["C50"]), "fixture must actually produce an unscored C50"
     assert "C50" in reasons
@@ -151,18 +151,21 @@ def test_paired_metrics_share_a_band_set_across_legs() -> None:
     # Fixture must bite: low's 1000 Hz band C50 is NaN, its 500 Hz band finite.
     low_bands = channel_per_band_metrics(
         low, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        min_measurable_t60_s=_MIN_T60)
+        band_resolvability_margin=_NO_FLOOR)
     assert np.isfinite(low_bands[0][0]["C50"]) and np.isnan(low_bands[1][0]["C50"])
 
-    triples, reasons, _window = compute_room_acoustic_metrics(
+    triples, reasons, _window, _acct = compute_room_acoustic_metrics(
         pred[None, :], high[None, :], low[None, :],
         sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        min_measurable_t60_s=_MIN_T60,
+        band_resolvability_margin=_NO_FLOOR,
     )
     c50 = triples["C50"]
     # The drop is attributed to the causing leg and marked as affecting all legs.
+    # `low` is a PHYSICAL leg, so it still sets the band set (AC-25 removed only
+    # pred's vote); the wording moved to "the physical legs" with it.
     assert ("C50", "low") in reasons
-    assert "EVERY leg" in reasons[("C50", "low")]
+    assert "excluded from every leg's average" in reasons[("C50", "low")]
+    assert "physical legs" in reasons[("C50", "low")]
 
     # Every leg is averaged over the intersected set ({500 Hz} only): the high
     # leg must equal its own single-band 500 Hz value, and that must genuinely
@@ -178,10 +181,10 @@ def test_paired_metrics_share_a_band_set_across_legs() -> None:
     )
     high_500 = channel_band_avg_metrics(
         high, sample_rate=_SR, iso_eval_freqs=[500.0], onset_rel_db=_ONSET_DB,
-        min_measurable_t60_s=_MIN_T60, trunc_idx_per_band=shared_500)[0]["C50"]
+        band_resolvability_margin=_NO_FLOOR, trunc_idx_per_band=shared_500)[0]["C50"]
     high_both = channel_band_avg_metrics(
         high, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        min_measurable_t60_s=_MIN_T60)[0]["C50"]
+        band_resolvability_margin=_NO_FLOOR)[0]["C50"]
     assert c50.high == pytest.approx(high_500)
     assert high_500 != pytest.approx(high_both)
     assert np.isfinite(c50.pred) and np.isfinite(c50.low)  # still scored, same band set
@@ -210,49 +213,60 @@ def test_t30_invariant_to_leg_noise_floor() -> None:
 
     n = int(3.0 * _SR)
     t = np.arange(n) / _SR
+    # AC-34: a SEED SWEEP asserting on the WORST realization, not one fixed pair.
+    #
+    # The shipped test used a single seed pair and passed comfortably. Measured
+    # independently over 24 seeds with independent noise per leg, the MEAN residual
+    # is 0.05-2.70 % — the fix works — but the per-scene WORST reaches +9.27 % at a
+    # -50→-40 dB floor and -10.32 % at -30 dB, up to 2x the declared
+    # `d0b_t30_jnd_frac` of 0.05. That matters because D0b's JND test is a PER-SCENE
+    # decision: a residual that averages down over a split does not average down
+    # inside one scene's verdict. Asserting on the worst case is what keeps the
+    # residual from growing unnoticed; the real closure is RD-55's Lundeby
+    # extrapolated-tail compensation, which removes it rather than bounding it.
+    seeds = range(8)
+    worst: dict[tuple[float, float], float] = {}
     for t60 in (0.5, 1.0, 2.0):
         for floor_db in (-80.0, -60.0, -50.0, -40.0, -30.0):
-            decay = np.random.default_rng(0).standard_normal(n) * np.exp(-6.9077 * t / t60)
-            # Same noise realization in both legs; only its LEVEL differs.
-            noise = np.random.default_rng(1).standard_normal(n)
-            amp = 10.0 ** (floor_db / 20.0)
-            legs = {
-                "high": (decay + amp * noise).astype(np.float32),
-                "low": (decay + amp * np.sqrt(40.0) * noise).astype(np.float32),
-            }
-            shared = _shared_truncation_per_band(
-                legs, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-            )
-            vals = {
-                leg: channel_band_avg_metrics(
-                    ir, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-                    min_measurable_t60_s=_MIN_T60, trunc_idx_per_band=shared,
-                )[0]["T30"]
-                for leg, ir in legs.items()
-            }
-            assert np.isfinite(vals["high"]) and np.isfinite(vals["low"])
-            rel = abs(vals["low"] - vals["high"]) / t60
-            # The bound is the project's declared T30 JND (`d0b_t30_jnd_frac` = 0.05),
-            # not a slack tolerance. MEASURED over this exact grid
-            # (scratchpad/p_residual.py), shared window vs per-leg truncation:
-            #
-            #   floor   -80    -60    -50     -40     -30
-            #   shared  0.09   1.20   1.41   +2.11   -4.92   (worst 4.92 %)
-            #   per-leg 0.12   5.03  17.96   27.69   66.77   (worst 66.8 %)
-            #
-            # What remains after the fix is not a truncation artifact: the noisier leg
-            # genuinely carries more energy INSIDE the common window, which is the real
-            # noise the denoiser exists to remove. The tell is the SIGN — pre-fix the
-            # residual was systematically negative (the noisy leg always read short,
-            # the signature of a shortened window); post-fix it scatters either side of
-            # zero. The -30 dB row is an extreme case (the low leg's floor sits at
-            # -14 dB after the sqrt(40) scaling), included so the bound is tested where
-            # it is tightest.
-            assert rel < 0.05, (
-                f"T30 differs by {100 * rel:.1f}% between legs at T60={t60}s, "
-                f"floor={floor_db}dB with IDENTICAL decay — the integration window "
-                f"is still noise-floor dependent (AC-17)."
-            )
+            for seed in seeds:
+                decay = (np.random.default_rng(100 + seed).standard_normal(n)
+                         * np.exp(-6.9077 * t / t60))
+                # Independent noise per leg — the realistic case. Sharing one
+                # realization and scaling it, as the original fixture did,
+                # understates the residual by construction.
+                amp = 10.0 ** (floor_db / 20.0)
+                legs = {
+                    "high": (decay + amp * np.random.default_rng(200 + seed)
+                             .standard_normal(n)).astype(np.float32),
+                    "low": (decay + amp * np.sqrt(40.0) * np.random.default_rng(300 + seed)
+                            .standard_normal(n)).astype(np.float32),
+                }
+                shared = _shared_truncation_per_band(
+                    legs, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
+                )
+                vals = {
+                    leg: channel_band_avg_metrics(
+                        ir, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
+                        band_resolvability_margin=_NO_FLOOR, trunc_idx_per_band=shared,
+                    )[0]["T30"]
+                    for leg, ir in legs.items()
+                }
+                assert np.isfinite(vals["high"]) and np.isfinite(vals["low"])
+                rel = abs(vals["low"] - vals["high"]) / t60
+                key = (t60, floor_db)
+                worst[key] = max(worst.get(key, 0.0), rel)
+
+    overall = max(worst.values())
+    # Pinned at the measured worst case, not at the JND: the residual is REAL
+    # in-window noise, and a bound set at the JND would hide it growing up to that
+    # point. Tightening this number is progress; loosening it is a regression that
+    # has to be argued for. Pre-fix, per-leg truncation reached 66.8 % on this grid.
+    assert overall < 0.12, (
+        f"worst-case cross-leg T30 residual is {100 * overall:.2f}% with IDENTICAL "
+        f"decay (per (T60, floor): "
+        f"{ {k: round(100 * v, 2) for k, v in sorted(worst.items())} }) — the "
+        f"integration window may be noise-floor dependent again (AC-17/AC-34)."
+    )
 
 
 def test_prediction_cannot_set_the_integration_window() -> None:
@@ -280,10 +294,10 @@ def test_prediction_cannot_set_the_integration_window() -> None:
 
     out = {}
     for label, pred in (("healthy", healthy), ("degenerate", degenerate)):
-        triples, _reasons, window = compute_room_acoustic_metrics(
+        triples, _reasons, window, _acct = compute_room_acoustic_metrics(
             pred[None, :], high[None, :], low[None, :],
             sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-            min_measurable_t60_s=_MIN_T60,
+            band_resolvability_margin=_NO_FLOOR,
         )
         out[label] = (triples, window)
 
@@ -305,3 +319,84 @@ def test_prediction_cannot_set_the_integration_window() -> None:
     for band in out["healthy"][1].values():
         idx, src = band
         assert isinstance(idx, int) and src in ("low", "high")
+
+
+def test_prediction_cannot_set_the_band_set() -> None:
+    """AC-25 kill test — the analogue of the window test above, for RD-43's SECOND
+    channel.
+
+    The resolvability floor was applied to each leg's own measured value INCLUDING
+    `pred`, and the band intersection then dropped that band from EVERY leg's
+    average. So a prediction that was unmeasurable in one band changed the reported
+    value of its own ground truth.
+
+    REPRODUCED before the fix on exactly this fixture: high and low both carry
+    identical 0.30 s decays, safely above the floor in both bands; replacing only
+    PRED's 500 Hz octave with a 0.015 s decay moved HIGH's reported EDT from
+    0.2926 s to 0.2498 s — a 14.6 % change with no change to high's waveform. Note
+    |pred - high| GREW there, so the bias is not even conservatively directed; that
+    is why it is closed rather than argued about.
+    """
+    import pytest
+    from scipy.signal import butter, sosfiltfilt
+
+    from amcd.evaluation.room_acoustic import compute_room_acoustic_metrics
+
+    margin = 2.0  # the shipped value: the floor must actually bite for pred
+    high = _add_noise_floor(_decaying_noise_ir(rt60=0.30, duration_s=1.0, seed=31),
+                            floor_db=-60.0, seed=32)
+    low = _add_noise_floor(_decaying_noise_ir(rt60=0.30, duration_s=1.0, seed=31),
+                           floor_db=-50.0, seed=33)
+    healthy = _add_noise_floor(_decaying_noise_ir(rt60=0.30, duration_s=1.0, seed=31),
+                               floor_db=-55.0, seed=34)
+
+    def _octave(fc: float, ir: np.ndarray) -> np.ndarray:
+        sos = butter(8, [fc / 2**0.5, fc * 2**0.5], btype="bandpass",
+                     fs=_SR, output="sos")
+        return sosfiltfilt(sos, ir)
+
+    # Sub-resolvable pred in the 500 Hz octave ONLY: a 12 ms decay there, the
+    # healthy decay at 1000 Hz. Built band-by-band rather than by substitution into
+    # a broadband IR — leakage from the surrounding content otherwise dominates the
+    # 500 Hz fit and the fixture measures nothing (its EDT read 0.0797 s, well above
+    # the floor). Constructed this way the 500 Hz EDT saturates at 0.0144 s, i.e.
+    # the filter's own response, which is exactly the condition being tested.
+    fast = _decaying_noise_ir(rt60=0.012, duration_s=1.0, seed=35)
+    fast_500 = _octave(500.0, fast)
+    degenerate = (
+        fast_500 / max(float(np.abs(fast_500).max()), 1e-30) * float(np.abs(healthy).max())
+        + _octave(1000.0, healthy)
+    )
+
+    out = {}
+    for label, pred in (("healthy", healthy), ("degenerate", degenerate)):
+        triples, reasons, _window, acct = compute_room_acoustic_metrics(
+            pred[None, :], high[None, :], low[None, :],
+            sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
+            band_resolvability_margin=margin,
+        )
+        out[label] = (triples, reasons, acct)
+
+    # The fixture must bite: pred is genuinely unresolvable in 500 Hz.
+    assert out["degenerate"][2]["EDT"]["pred_unresolved_hz"] == [500.0], (
+        "fixture did not produce a sub-resolvable pred band, so this proves nothing"
+    )
+
+    # THE ASSERTION: bit-identical physical legs.
+    for metric in ("T30", "EDT", "C50"):
+        for leg in ("high", "low"):
+            a = getattr(out["healthy"][0][metric], leg)
+            b = getattr(out["degenerate"][0][metric], leg)
+            assert (np.isnan(a) and np.isnan(b)) or a == b, (
+                f"{metric}.{leg} moved from {a} to {b} when only pred changed — a "
+                f"model output is setting the band set used to measure its own "
+                f"target (AC-25)."
+            )
+        # The band set itself is pred-independent.
+        assert (out["healthy"][2][metric]["kept_hz"]
+                == out["degenerate"][2][metric]["kept_hz"])
+
+    # And pred is UNSCORED rather than silently averaged over a different set.
+    assert np.isnan(out["degenerate"][0]["EDT"].pred)
+    assert "AC-25" in out["degenerate"][1][("EDT", "pred")]
+    assert np.isfinite(out["healthy"][0]["EDT"].pred)

@@ -9,18 +9,19 @@ STFT energy grid directly.
 Public API
 ----------
 compute_room_acoustic_metrics(pred_ir, high_ref_ir, low_ref_ir, *, sample_rate,
-                               iso_eval_freqs, onset_rel_db, min_measurable_t60_s)
+                               iso_eval_freqs, onset_rel_db, band_resolvability_margin)
     Standard ISO-3382 waveform path for the eval stage (pred/high/low in one
-    call) → (metric triples, NaN reasons, shared integration window); legs
-    band-averaged over the cross-leg-shared band set (AC-08) and integrated over
-    the cross-leg-shared Schroeder window (AC-17).
+    call) → (metric triples, NaN reasons, shared integration window, band
+    accounting); legs band-averaged over the band set the PHYSICAL legs resolve
+    (AC-08/AC-25) and integrated over the cross-leg-shared Schroeder window
+    (AC-17). Neither the band set nor the window is ever set by `pred` (RD-43).
 channel_band_avg_metrics(ir_w, *, sample_rate, iso_eval_freqs, onset_rel_db,
-                         min_measurable_t60_s, trunc_idx_per_band=None)
+                         band_resolvability_margin, trunc_idx_per_band=None)
     Single-IR onset-aligned band-averaged metrics → (values, NaN reasons); the
     D0b oracle probe's unit. Pass `trunc_idx_per_band` to join a paired
     comparison's shared window.
 channel_per_band_metrics(ir_w, *, sample_rate, iso_eval_freqs, onset_rel_db,
-                         min_measurable_t60_s, trunc_idx_per_band=None)
+                         band_resolvability_margin, trunc_idx_per_band=None)
     Per-band (values, reasons) — the shared unit under both of the above
     (identical alignment + truncation).
 _shared_truncation_per_band(reference_legs, *, sample_rate, iso_eval_freqs,
@@ -35,6 +36,8 @@ _schroeder_edr, _t30, _edt, _c50, _metrics_from_energy, _band_avg_metrics,
 _find_iso_bands
 """
 from __future__ import annotations
+
+from functools import lru_cache
 
 import numpy as np
 import torch
@@ -130,6 +133,66 @@ def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.ndarray:
     return _butter_octave_filter(ir_w, fc, sample_rate) ** 2
 
 
+def _decay_times_from_energy(
+    energy_trunc: np.ndarray, sample_rate: int
+) -> tuple[float, str | None, float, str | None]:
+    """T30 and EDT from an already-truncated band energy envelope.
+
+    Factored out so the RESOLVABILITY FLOOR is measured through the very path it
+    governs (AC-26/AC-27) rather than through a second implementation that could
+    drift from it — the AC-24 precedent. Returns (t30, t30_reason, edt, edt_reason).
+    """
+    edr = np.cumsum(energy_trunc[::-1])[::-1].copy()
+    edr = np.maximum(edr, 1e-30)
+    edr_db = 10.0 * np.log10(edr / edr[0])
+    t_s = np.arange(len(edr_db)) / sample_rate
+
+    def _slope_to_rt(lo_db: float, hi_db: float) -> tuple[float, str | None]:
+        mask = (edr_db >= hi_db) & (edr_db <= lo_db)
+        if mask.sum() < 2:
+            return float("nan"), f"<2 EDR points in the [{lo_db:g}, {hi_db:g}] dB regression window"
+        coeffs = np.polyfit(t_s[mask], edr_db[mask], 1)
+        slope = float(coeffs[0])
+        if slope >= 0.0:
+            return float("nan"), f"non-decaying EDR (slope ≥ 0) in the [{lo_db:g}, {hi_db:g}] dB window"
+        return float(-60.0 / slope), None
+
+    t30, t30_reason = _slope_to_rt(-5.0, -35.0)
+    edt, edt_reason = _slope_to_rt(0.0, -10.0)
+    return t30, t30_reason, edt, edt_reason
+
+
+@lru_cache(maxsize=None)
+def _band_resolvable_decay_s(fc: float, sample_rate: int) -> dict[str, float]:
+    """The shortest decay the `fc` octave band can resolve: the filter's OWN.
+
+    A unit impulse carries no decay at all, so whatever T30/EDT this returns is
+    manufactured entirely by the filter's ringing. A room decaying faster than
+    this is not being measured — the filter is.
+
+    MEASURED here rather than asserted, and the numbers scale exactly as 1/f
+    (48 kHz): 500 Hz → T30 21.965 ms, EDT 10.696 ms; 1000 Hz → 10.955 / 5.442 ms.
+    `sosfiltfilt` runs the 4th-order section forwards and backwards, which doubles
+    the effective order — the reason an earlier estimate of "~3 ms of ringing" from
+    the nominal 353 Hz bandwidth understated it by 3-7x (AC-27).
+
+    T30 and EDT get SEPARATE floors because they are separate questions: EDT fits
+    the first 10 dB, T30 the 5-35 dB span, and the filter's own response supports
+    the first for twice as long. A single scalar governing both was AC-27's open
+    question; this is the answer.
+    """
+    # Long enough that the filter's ringing decays fully inside the record at any
+    # band, and never shorter than the filter's own minimum.
+    n = max(int(0.5 * sample_rate), _MIN_FILTER_SAMPLES * 4)
+    impulse = np.zeros(n, dtype=np.float32)
+    impulse[0] = 1.0
+    energy = _band_energy(impulse, fc, sample_rate)
+    t30, _, edt, _ = _decay_times_from_energy(
+        energy[: _lundeby_truncate(energy, sample_rate)], sample_rate
+    )
+    return {"T30": t30, "EDT": edt}
+
+
 def _shared_truncation_per_band(
     reference_legs: dict[str, np.ndarray],  # leg name → (T,) W-channel waveform
     *,
@@ -189,7 +252,7 @@ def _iso3382_band_metrics(
     fc: float,
     sample_rate: int,
     *,
-    min_measurable_t60_s: float,
+    band_resolvability_margin: float,
     trunc_idx: int | None = None,
     trunc_source: str | None = None,
 ) -> tuple[dict[str, float], dict[str, str]]:
@@ -228,41 +291,44 @@ def _iso3382_band_metrics(
         return {m: float("nan") for m in all_metrics}, {m: reason for m in all_metrics}
 
     # Schroeder backward integration on truncated portion
-    edr = np.cumsum(energy_trunc[::-1])[::-1].copy()
-    edr = np.maximum(edr, 1e-30)
-    edr_db = 10.0 * np.log10(edr / edr[0])
+    t30, t30_reason, edt, edt_reason = _decay_times_from_energy(energy_trunc, sample_rate)
 
-    t_s = np.arange(len(edr_db)) / sample_rate
-
-    def _slope_to_rt(lo_db: float, hi_db: float) -> tuple[float, str | None]:
-        mask = (edr_db >= hi_db) & (edr_db <= lo_db)
-        if mask.sum() < 2:
-            return float("nan"), f"<2 EDR points in the [{lo_db:g}, {hi_db:g}] dB regression window"
-        coeffs = np.polyfit(t_s[mask], edr_db[mask], 1)
-        slope = float(coeffs[0])
-        if slope >= 0.0:
-            return float("nan"), f"non-decaying EDR (slope ≥ 0) in the [{lo_db:g}, {hi_db:g}] dB window"
-        return float(-60.0 / slope), None
-
-    t30, t30_reason = _slope_to_rt(-5.0, -35.0)
-    edt, edt_reason = _slope_to_rt(0.0, -10.0)
-
-    # Measurability floor (AC-23). Below a few tens of ms the zero-phase 4th-order
-    # octave filter's own ringing is comparable to the decay itself, so the fitted
-    # slope measures the FILTER, not the room: at a true T60 of 0.06 s the 500/1000 Hz
-    # bands read EDT +89 %, and +21 % at 0.10 s. `test_material_shift` is exactly this
-    # regime (Eyring T60 median 0.059 s), so an unflagged number there would be an
-    # estimator artifact reported as a physical quantity. Suppress rather than report
-    # — a decay time the band cannot resolve is unscored, not small.
-    for _name, _val, _set in (("T30", t30, "t30"), ("EDT", edt, "edt")):
-        if not np.isnan(_val) and _val < min_measurable_t60_s:
+    # ── Resolvability floor (AC-26/AC-27, replacing AC-23's scalar) ────────────
+    #
+    # A decay the band physically cannot resolve is unscored, not small. The floor
+    # is the FILTER'S OWN decay in this band times a declared margin — a per-(metric,
+    # band) constant, measured through this same path, and INDEPENDENT of the value
+    # being tested.
+    #
+    # The independence is the whole correction. The previous floor was one scalar
+    # (0.05 s) compared against the FITTED value, which censors the low tail of the
+    # estimator and biases the surviving mean upward. MEASURED, 200 realizations at
+    # 500+1000 Hz, noise-free, true T60 = 0.06 s — the Eyring median of the split the
+    # threshold was written for:
+    #
+    #     floor 0.05 s  : 53.0 % of EDT realizations suppressed,
+    #                     survivor mean 0.0639 s vs 0.0487 s → +31.2 % bias
+    #     filter floor  :  1.0 % suppressed, 0.0491 s → +0.8 %
+    #
+    # It also refuted base.yaml's own claim that 0.05 s was "a degenerate-case guard,
+    # not an active suppression threshold": for that split it suppressed the majority.
+    #
+    # What the floor does NOT fix, and must not pretend to: EDT below ~0.15 s is
+    # VARIANCE-limited, not ringing-limited (sd 24-31 % of T60 vs 6-10 % for T30, and
+    # biased ~19 % low at 0.06 s). That is an estimator property to DISCLOSE — see
+    # `metric_edt_variance_limited_s` and the per-split counts in the eval output —
+    # not something a threshold can remove.
+    floors = _band_resolvable_decay_s(float(fc), sample_rate)
+    for _name, _val in (("T30", t30), ("EDT", edt)):
+        floor = band_resolvability_margin * floors[_name]
+        if not np.isnan(_val) and _val < floor:
             reason = (
-                f"{_name} {_val:.4f} s is below the {min_measurable_t60_s:g} s "
-                f"minimum measurable decay for the {fc:g} Hz octave band — at this "
-                f"decay the filter's own ringing dominates the fitted slope"
-                f"{window_note}"
+                f"{_name} {_val:.4f} s is below the {floor:.4f} s the {fc:g} Hz "
+                f"octave band can resolve ({band_resolvability_margin:g} x the "
+                f"filter's own {_name} of {floors[_name]:.4f} s) — at this decay the "
+                f"fitted slope measures the filter, not the room{window_note}"
             )
-            if _set == "t30":
+            if _name == "T30":
                 t30, t30_reason = float("nan"), reason
             else:
                 edt, edt_reason = float("nan"), reason
@@ -303,7 +369,7 @@ def channel_band_avg_metrics(
     sample_rate: int,
     iso_eval_freqs: list[float],  # config.iso_eval_freqs (§7)
     onset_rel_db: float,          # config.metric_onset_rel_db (§3 metric path)
-    min_measurable_t60_s: float,  # config.metric_min_measurable_t60_s (§3, AC-23)
+    band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-23)
     trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> tuple[dict[str, float], dict[str, str]]:
     """Onset-align a W-channel IR to its direct arrival, then average ISO-3382 band
@@ -329,7 +395,7 @@ def channel_band_avg_metrics(
     per_band = channel_per_band_metrics(
         ir_w, sample_rate=sample_rate,
         iso_eval_freqs=iso_eval_freqs, onset_rel_db=onset_rel_db,
-        min_measurable_t60_s=min_measurable_t60_s,
+        band_resolvability_margin=band_resolvability_margin,
         trunc_idx_per_band=trunc_idx_per_band,
     )
     out: dict[str, float] = {}
@@ -355,7 +421,7 @@ def channel_per_band_metrics(
     sample_rate: int,
     iso_eval_freqs: list[float],  # config.iso_eval_freqs (§7)
     onset_rel_db: float,          # config.metric_onset_rel_db (§3 metric path)
-    min_measurable_t60_s: float,  # config.metric_min_measurable_t60_s (§3, AC-23)
+    band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-23)
     trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> list[tuple[dict[str, float], dict[str, str]]]:
     """Onset-align a W-channel IR (AC-02), then compute per-eval-band ISO-3382
@@ -376,7 +442,7 @@ def channel_per_band_metrics(
     return [
         _iso3382_band_metrics(
             ir_w, float(fc), sample_rate,
-            min_measurable_t60_s=min_measurable_t60_s,
+            band_resolvability_margin=band_resolvability_margin,
             trunc_idx=None if trunc_idx_per_band is None else trunc_idx_per_band[b][0],
             trunc_source=None if trunc_idx_per_band is None else trunc_idx_per_band[b][1],
         )
@@ -392,8 +458,13 @@ def compute_room_acoustic_metrics(
     sample_rate: int,
     iso_eval_freqs: list[float],  # from config.iso_eval_freqs (§7)
     onset_rel_db: float,          # from config.metric_onset_rel_db (§3 metric path)
-    min_measurable_t60_s: float,  # from config.metric_min_measurable_t60_s (§3, AC-23)
-) -> tuple[dict[str, MetricTriple], dict[tuple[str, str], str], dict[str, tuple[int, str]]]:
+    band_resolvability_margin: float,  # from config.metric_band_resolvability_margin (§3, AC-23)
+) -> tuple[
+    dict[str, MetricTriple],
+    dict[tuple[str, str], str],
+    dict[str, tuple[int, str]],
+    dict[str, dict],
+]:
     """
     Standard ISO-3382 room-acoustic metrics (T30, C50, EDT) from decoded waveforms.
 
@@ -402,20 +473,32 @@ def compute_room_acoustic_metrics(
     per metric, kind = match_reference (pred should match the high reference's
     value), plus (metric, leg) → reason for everything dropped (F-21).
 
-    Each leg is band-averaged over the SAME band set — the bands finite in all
-    three legs — because ISO-3382 band-averaged metrics are only comparable over
-    a common band set (AC-08: averaging each leg over its own surviving bands
-    let a pred-only band drop produce a scored comparison that mixed acoustic
-    difference with band-composition difference). No shared band → all legs NaN
-    (unscored), with the excluded bands and their causes in nan_reasons.
+    Every leg is band-averaged over the SAME band set, because ISO-3382
+    band-averaged metrics are only comparable over a common one (AC-08: averaging
+    each leg over its own surviving bands let a pred-only band drop produce a
+    scored comparison mixing acoustic difference with band-composition difference).
 
-    All three legs also share ONE Schroeder integration window per band (AC-17),
-    derived from the PHYSICAL legs only — `low` and `high`, the two whose noise
-    floor is the study's independent variable. `pred` consumes that window but never
-    sets it (RD-43): a degenerate prediction must not be able to shorten the window
-    used to measure its own ground truth. Returns the per-band window alongside the
-    triples so every scored row can record it (RD-44), not just the dropped ones.
+    That band set is derived from the PHYSICAL LEGS ONLY — `low` and `high` — for
+    the same reason the integration window is (AC-25, closing the second of RD-43's
+    two channels). Intersecting all three legs meant a `pred` band failing the
+    resolvability floor was dropped from EVERY leg's average, so a model output
+    changed the reported value of its own ground truth. REPRODUCED: with high and
+    low both carrying identical 0.30 s decays safely above the floor in both bands,
+    replacing only PRED's 500 Hz octave with a 0.015 s decay moved HIGH's reported
+    EDT from 0.2926 s to 0.2498 s — a 14.6 % change with no change to high's
+    waveform. The direction is not guaranteed either way (there |pred - high| GREW),
+    which is exactly why it is closed rather than argued about.
+
+    A `pred` that is NaN in a physically-kept band is itself unscored, with a
+    reason — the honest reading is "the model produced nothing measurable in a band
+    the physics resolves", not "this band does not count". `low` and `high` stay
+    scored over the physical band set regardless.
+
+    All legs also share ONE Schroeder integration window per band (AC-17), likewise
+    derived from the physical legs (RD-43). Returned alongside the triples so every
+    scored row can record it (RD-44), not just the dropped ones.
     """
+    physical_legs = ("low", "high")
     shared_trunc = _shared_truncation_per_band(
         {"low": low_ref_ir[0], "high": high_ref_ir[0]},
         sample_rate=sample_rate,
@@ -426,7 +509,7 @@ def compute_room_acoustic_metrics(
         leg: channel_per_band_metrics(
             ir[0], sample_rate=sample_rate,
             iso_eval_freqs=iso_eval_freqs, onset_rel_db=onset_rel_db,
-            min_measurable_t60_s=min_measurable_t60_s,
+            band_resolvability_margin=band_resolvability_margin,
             trunc_idx_per_band=shared_trunc,
         )
         for leg, ir in [("pred", pred_ir), ("high", high_ref_ir), ("low", low_ref_ir)]
@@ -434,24 +517,41 @@ def compute_room_acoustic_metrics(
     n_bands = len(iso_eval_freqs)
     triples: dict[str, MetricTriple] = {}
     nan_reasons: dict[tuple[str, str], str] = {}
+    band_accounting: dict[str, dict] = {}
     for metric in ("T30", "EDT", "C50"):
         finite = {
             leg: [not np.isnan(bands[b][0][metric]) for b in range(n_bands)]
             for leg, bands in per_leg.items()
         }
-        kept = [b for b in range(n_bands) if all(finite[leg][b] for leg in per_leg)]
-        leg_vals = {
-            leg: float(np.mean([per_leg[leg][b][0][metric] for b in kept])) if kept
-            else float("nan")
-            for leg in per_leg
-        }
+        # The band set is the physical legs' — pred never votes (AC-25).
+        kept = [b for b in range(n_bands) if all(finite[leg][b] for leg in physical_legs)]
         excluded = [b for b in range(n_bands) if b not in kept]
+
+        leg_vals: dict[str, float] = {}
+        for leg in per_leg:
+            if not kept or not all(finite[leg][b] for b in kept):
+                # pred reaches this branch when it is unmeasurable in a band the
+                # physics resolves; low/high only when their own bands failed.
+                leg_vals[leg] = float("nan")
+            else:
+                leg_vals[leg] = float(np.mean([per_leg[leg][b][0][metric] for b in kept]))
+
+        band_accounting[metric] = {
+            "n_bands": n_bands,
+            "n_bands_kept": len(kept),
+            "kept_hz": [float(iso_eval_freqs[b]) for b in kept],
+            # Recorded as a DISCLOSURE, never as a band exclusion (AC-25).
+            "pred_unresolved_hz": [
+                float(iso_eval_freqs[b]) for b in kept if not finite["pred"][b]
+            ],
+        }
+
         if excluded:
             scope = (
-                f"partial: {len(kept)}/{n_bands} bands kept across all legs — " if kept
-                else f"no eval band finite in all legs — "
+                f"partial: {len(kept)}/{n_bands} bands kept from the physical legs — "
+                if kept else "no eval band finite in both physical legs — "
             )
-            for leg in per_leg:
+            for leg in physical_legs:
                 causes = [b for b in excluded if not finite[leg][b]]
                 if causes:
                     cause_str = "; ".join(
@@ -459,19 +559,33 @@ def compute_room_acoustic_metrics(
                         for b in causes
                     )
                     nan_reasons[(metric, leg)] = (
-                        scope + f"this leg's NaN bands are excluded from EVERY "
+                        scope + f"this leg's NaN bands are excluded from every "
                         f"leg's average ({cause_str})"
                     )
                 elif not kept:
-                    # Leg is NaN purely because other legs' bands failed — it
-                    # still needs a logged reason (its consumed value is NaN).
-                    culprits = ", ".join(sorted(
-                        l for l in per_leg if any(not finite[l][b] for b in excluded)
-                    ))
+                    culprits = ", ".join(
+                        l for l in physical_legs if any(not finite[l][b] for b in excluded)
+                    )
                     nan_reasons[(metric, leg)] = (
                         scope + f"this leg's bands were finite; excluded by the "
-                        f"other legs' failures ({culprits})"
+                        f"other physical leg's failures ({culprits})"
                     )
+        if not kept:
+            nan_reasons[(metric, "pred")] = (
+                "no eval band finite in both physical legs — nothing to compare against"
+            )
+        elif np.isnan(leg_vals["pred"]):
+            unresolved = "; ".join(
+                f"{iso_eval_freqs[b]:g} Hz: {per_leg['pred'][b][1][metric]}"
+                for b in kept if not finite["pred"][b]
+            )
+            nan_reasons[(metric, "pred")] = (
+                f"pred is unmeasurable in {len(band_accounting[metric]['pred_unresolved_hz'])}"
+                f"/{len(kept)} of the bands the physical legs resolve, so pred is "
+                f"unscored — the physical legs keep their own values, since a model "
+                f"output must not change the reported value of its ground truth "
+                f"(AC-25) ({unresolved})"
+            )
         triples[metric] = MetricTriple(
             low=leg_vals["low"], pred=leg_vals["pred"], high=leg_vals["high"],
             kind="match_reference",
@@ -480,7 +594,7 @@ def compute_room_acoustic_metrics(
         f"{fc:g}": (idx, src)
         for fc, (idx, src) in zip(iso_eval_freqs, shared_trunc)
     }
-    return triples, nan_reasons, window
+    return triples, nan_reasons, window, band_accounting
 
 
 # ---------------------------------------------------------------------------

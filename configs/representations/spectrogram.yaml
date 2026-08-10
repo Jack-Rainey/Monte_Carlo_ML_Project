@@ -8,6 +8,13 @@
 #   - §7: band resolution (n_fft) is a tuned-capable / sweepable axis.
 n_fft: 2048
 hop_length: 512
+# ABSOLUTE floor, in dB re 1.0 in STFT power of the float32 IR — NOT a level below
+# the per-scene peak (AC-33). Stated because the IR's absolute scale is set by the
+# backend (`normalize_ir: false`, `source_power: 1.0 W`, the 1/d direct term), so
+# the effective dB-below-peak floor is scene-dependent: measured, encoding the same
+# IR at gains 0.01 … 100 moves the clamped fraction 0.760 → 0.513. Absolute is
+# deliberate — DRR and C50 are level ratios against the direct term, so a
+# peak-relative floor would normalize away part of what test_placement_shift tests.
 min_db: -80.0
 
 # ── The fractional-octave ladder (AC-19) ──────────────────────────────────────
@@ -20,8 +27,12 @@ min_center_freq_hz: 10.0     # lower bound of the ladder (the upper is derived
 
 # Fewest FFT bins a band must contain to be KEPT.
 #
-# 1 preserves today's behaviour exactly, and that is deliberate. At the production
-# framing (48 kHz, n_fft 2048 → 23.44 Hz bins) a third-octave band at 125 Hz is
+# 1 preserves today's behaviour, and that is deliberate. (Behaviour-preserving AT
+# 48 kHz FRAMING — the Nyquist admission rule that landed alongside it is not
+# framing-independent: 8 kHz/256 gives 18 bands where the old rule gave 19, and
+# 44.1 kHz/2048 gives 27 where it gave 28. See `_build_third_octave_filters`,
+# F-59.) At the production framing (48 kHz, n_fft 2048 → 23.44 Hz bins) a
+# third-octave band at 125 Hz is
 # only ~29 Hz wide, so the five lowest bands hold ONE bin each and measure Hann
 # leakage rather than band content: a 63 Hz tone peaks in the WRONG band (57.7 %
 # in the 78.7 Hz band vs 35.6 % in the 49.6 Hz band). In-band fraction is 99.4 %

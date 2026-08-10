@@ -45,15 +45,25 @@
 #      Dropping asymmetric_walls weakens the shift; the scalar-on-all-surfaces
 #      implementation overshoots it by far more. The split is not comparable to
 #      RI's, and the E1 report must state the direction as measured here.
-#    ⇒ Consequences that follow (AC-21, AC-23): the diffuse-field model this
-#      characterization relies on has failed for 100 % of this split (Sabine/
-#      Eyring ratio median 2.51; critical distance exceeds the largest room
-#      dimension in 23 % of scenes), and at these decay times the reported
-#      ABSOLUTE ISO metrics approach the octave filter's own resolution. The
-#      split is therefore retained for the PAIRED comparison — a near-anechoic
-#      room is still a room the model must denoise — while absolute T30/EDT below
-#      `metric_min_measurable_t60_s` are reported unscored rather than as numbers.
-#      Treat this split's absolutes as diagnostic, never as physical values.
+#    ⇒ Consequences that follow (AC-21, AC-26/AC-27, RD-46): the diffuse-field
+#      model this characterization relies on has failed for 100 % of this split
+#      (Sabine/Eyring ratio median 2.51; critical distance exceeds the largest
+#      room dimension in 23 % of scenes). The split is retained for the PAIRED
+#      comparison — a near-anechoic room is still a room the model must denoise —
+#      and its absolutes are DIAGNOSTIC ONLY.
+#
+#      That diagnostic-only status now rests on THIS DISCLOSURE, not on
+#      suppression, and the change is deliberate. The old wording said absolutes
+#      below `metric_min_measurable_t60_s` (0.05 s) were "reported unscored"; this
+#      split's Eyring median T60 is 0.059 s, so that threshold suppressed the
+#      MAJORITY of its EDT realizations and biased the surviving mean +31.2 %
+#      (measured, 200 realizations at true T60 = 0.06 s). Censoring an estimator
+#      on its own value is not a disclosure, it is a distortion. The floor is now
+#      the filter's own resolvable decay (~0.011-0.021 s here), which these decays
+#      clear — so the numbers ARE reported, and are labelled instead: eval counts
+#      per split how many scenes fall below `metric_edt_variance_limited_s`, where
+#      the EDT estimator carries 24-31 % sd. Read this split's absolutes as
+#      high-variance diagnostics, never as physical values.
 #
 # 3. (RD-29) RI's placement regimes carry `+mid_pair` / `+far_pair` pairing
 #    sub-regimes whose distance sub-ranges the paper NEVER states numerically —

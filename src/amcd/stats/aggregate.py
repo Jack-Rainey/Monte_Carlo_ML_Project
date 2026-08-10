@@ -151,6 +151,19 @@ def _substream_rng(bootstrap_seed: int, *key_parts: str) -> np.random.Generator:
     return np.random.default_rng(np.random.SeedSequence([bootstrap_seed, stream_key]))
 
 
+def _count_true(mask) -> int:
+    """Count of True in a boolean column, and 0 when the column is absent.
+
+    Absent rather than zero is the case that matters: the band-accounting columns
+    exist only for the ISO-3382 metrics, so a spatial or perceptual metric has no
+    band composition to report and must read 0, never NaN — a NaN here would
+    propagate into a count a reader takes as a scene tally.
+    """
+    if mask is None:
+        return 0
+    return int(mask.fillna(False).astype(bool).sum())
+
+
 def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     metrics_path = run_dir / "metrics" / "metrics.parquet"
     if not metrics_path.exists():
@@ -250,6 +263,23 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             "improvement_mdes": mdes_val,
             "n_improved": n_improved,
             "pct_improved": float(n_improved) / n_scored * 100 if n_scored > 0 else float("nan"),
+            # ── Composition of the scored population (F-62 / AC-25 / RD-78) ──
+            # "N sc/att" cannot distinguish a fully-scored scene from a partially
+            # scored one, and this split's CI pools per-scene improvements computed
+            # over DIFFERENT band sets while `pred_mean` averages absolutes over
+            # different bands. These three columns make that visible in the artifact
+            # a reader consults, not only in drops.csv.
+            "n_partial_band": _count_true(
+                group.get("n_bands_kept") < group.get("n_bands_total")
+                if "n_bands_kept" in group else None
+            ),
+            "n_pred_band_unresolved": _count_true(
+                group.get("n_bands_pred_unresolved") > 0
+                if "n_bands_pred_unresolved" in group else None
+            ),
+            "n_estimator_variance_limited": _count_true(
+                group.get("estimator_variance_limited")
+            ),
         }
         summary.append(row)
 
@@ -285,6 +315,9 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 "improvement_mdes": float("nan"),
                 "n_improved": 0,
                 "pct_improved": float("nan"),
+                "n_partial_band": 0,
+                "n_pred_band_unresolved": 0,
+                "n_estimator_variance_limited": 0,
             })
 
     summary_df = pd.DataFrame(summary)
