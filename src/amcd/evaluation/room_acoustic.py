@@ -168,30 +168,47 @@ def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.ndarray:
     to Lundeby truncation and to Schroeder integration. Factored out so a truncation
     index can be derived WITHOUT computing metrics (AC-17)."""
     filtered, guard = _butter_octave_filter(ir_w, fc, sample_rate)
-    energy = (filtered.astype(np.float64) ** 2)
-    # FOLD THE ACAUSAL PRE-RINGING BACK IN (AC-36). `filtfilt` is zero-phase, so a
-    # sample at the onset index produces a response symmetric about it; the half
-    # lying in the guard belongs to that arrival. Discarding it threw away 50.9 % of
-    # a direct arrival's in-band energy — measured 0.006728 at 500 Hz against the
-    # 0.013228 that both an interior impulse and the analytic bandwidth integral
-    # give — so C50's numerator was not the ISO integral.
-    #
-    # This is not a cosmetic correction: the bias is a monotone function of DRR
-    # (measured -3.71 dB at d = 0.5 m, -2.68 at 1 m, -0.34 at 4 m, -0.00 at 8 m), so
-    # it is common-mode across LEGS but NOT across SCENES — `test_placement_shift`
-    # and `test_id` would carry different biases in their absolute C50.
-    #
-    # Folding rather than keeping the guard preserves the ISO requirement that t=0 is
-    # the direct arrival, and conserves energy exactly.
-    #
-    # BOTH ends are folded. The trailing one is not symmetry for its own sake: a
-    # record truncated mid-decay — exactly what AC-22's record-length gate is about
-    # — has real signal at its last sample, whose acausal response extends past the
-    # end. Leaving it out cost that sample half its band energy, which lands in the
-    # C50 LATE window and in the Lundeby estimate.
+    energy = filtered.astype(np.float64) ** 2
     n_record = len(energy) - 2 * guard
-    energy[guard] += energy[:guard].sum()
-    energy[guard + n_record - 1] += energy[guard + n_record:].sum()
+
+    # FOLD THE ACAUSAL RINGING BACK IN, ONTO ITS MIRRORED SUPPORT (AC-36, F-67).
+    #
+    # `filtfilt` is zero-phase, so a sample at index i produces a response
+    # SYMMETRIC about i. The half lying outside the record belongs to that arrival,
+    # and simply trimming it discarded 50.9 % of a direct arrival's in-band energy —
+    # measured 0.006728 at 500 Hz against the 0.013228 that both an interior impulse
+    # and the analytic bandwidth integral give — so C50's numerator was not the ISO
+    # integral. The deficit is a monotone function of DRR (-3.71 dB at d = 0.5 m,
+    # -0.00 at 8 m), i.e. common-mode across LEGS but NOT across SCENES.
+    #
+    # WHERE the energy goes matters as much as that it is kept (F-67). Lumping it
+    # all into the first sample put it on the EDR's normalization anchor, which
+    # manufactured an instantaneous step at t=0 of up to -2.95 dB — inside the
+    # 0-to-(-10) dB window EDT is fitted over. Measured consequence of the lump:
+    # paired EDT improvement moved 77 %, `test_material_shift` EDT fell from n=3 to
+    # n=2 and its MDES became N/A, and the dropped scene was attributed to filter
+    # ringing when the cause was the fold's own step.
+    #
+    # Reflecting each guard sample onto its mirror image about the boundary is where
+    # the energy actually came from, so it conserves energy AND leaves the EDR
+    # smooth. Both ends are folded: the trailing one is not symmetry for its own
+    # sake — a record truncated mid-decay (AC-22's subject) has real signal at its
+    # last sample whose response extends past the end, and that energy lands in the
+    # C50 late window and the Lundeby estimate.
+    if guard > 0:
+        head = min(guard, n_record - 1)
+        if head > 0:
+            # energy[guard - k] reflects onto energy[guard + k], k = 1..head
+            energy[guard + 1:guard + 1 + head] += energy[guard - 1::-1][:head]
+            energy[guard] += energy[0]
+        tail_start = guard + n_record
+        tail = min(guard, n_record - 1)
+        if tail > 0:
+            # energy[tail_start - 1 + k] reflects onto energy[tail_start - 1 - k]
+            energy[tail_start - 1 - tail:tail_start - 1] += (
+                energy[tail_start:tail_start + tail][::-1]
+            )
+            energy[tail_start - 1] += energy[-1] if len(energy) > tail_start else 0.0
     return energy[guard:guard + n_record].astype(np.float32)
 
 
