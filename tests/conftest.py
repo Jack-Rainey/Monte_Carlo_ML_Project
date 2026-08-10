@@ -16,7 +16,29 @@ from amcd.runtime import Verbosity
 from amcd.simulators.base import SceneSpec
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-TEST_TINY = _REPO_ROOT / "configs" / "test_tiny.yaml"
+_OVERLAYS = _REPO_ROOT / "configs" / "overlays"
+#: The suite composes the same layers a dry-run invocation does, in the same
+#: order, so the backend is declared in exactly one file repo-wide (RD-51) and
+#: tests cannot pass against a switch that has drifted from the real one.
+SIMULATOR_DRY_RUN = _OVERLAYS / "simulator_dry_run.yaml"
+TEST_TINY = _OVERLAYS / "test_tiny.yaml"
+
+#: The canonical dry-run invocation as a layer list, so a test that means "the
+#: documented dry run" says so once instead of restating three paths that could
+#: fall out of step with the README and the F-51 error message.
+CANONICAL_DRY_RUN = (_BASE_YAML, SIMULATOR_DRY_RUN, _OVERLAYS / "dry_run.yaml")
+
+#: The layers `tiny_config()` composes, for tests that must go through the real
+#: `Config.load` or the CLI rather than the in-process merge.
+TINY_LAYERS = (SIMULATOR_DRY_RUN, TEST_TINY)
+
+
+def tiny_cli_args() -> list[str]:
+    """`-c <layer>` arguments for the tiny config, in composition order."""
+    args: list[str] = []
+    for path in (_BASE_YAML, *TINY_LAYERS):
+        args += ["-c", str(path)]
+    return args
 
 # Stage functions require an explicit Verbosity (no default outside the CLI
 # layer — RD-09). Verbosity is a runtime output level, never an
@@ -33,7 +55,7 @@ def tiny_config(**overrides) -> Config:
     Overrides mirror YAML structure, e.g. tiny_config(scenes={"n_id": 5}).
     """
     merged: dict = {}
-    for path in (_BASE_YAML, TEST_TINY):
+    for path in (_BASE_YAML, SIMULATOR_DRY_RUN, TEST_TINY):
         with open(path) as f:
             _merge_layer(merged, yaml.safe_load(f) or {})
     _merge_layer(merged, overrides)

@@ -50,6 +50,24 @@ def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
 
     scenes = [SceneSpec.from_json(p) for p in scene_paths]
 
+    # `carrier/` is excluded from the rmtree above because it is keyed by scene id
+    # rather than by split, so it needs the same pruning gen-scenes gives
+    # `scene_*.json` and render now gives `renders/` (F-47, widening F-38).
+    # Measured before this: shrinking a run_dir from 29 scenes to 14 left 15 orphan
+    # .npy here. Inert only because infer/eval look carriers up BY scene_id — an
+    # invariant nothing stated or tested — and scene ids are POSITIONAL, so the
+    # orphans occupy ids a later config reuses under different geometry.
+    carrier_dir = out_dir / "carrier"
+    carrier_dir.mkdir(parents=True, exist_ok=True)
+    current_ids = {s.scene_id for s in scenes}
+    pruned = 0
+    for stale in carrier_dir.glob("*.npy"):
+        if stale.stem not in current_ids:
+            stale.unlink()
+            pruned += 1
+    if pruned:
+        emit(verbosity, "progress", f"  Pruned {pruned} orphan carrier file(s) from {carrier_dir}")
+
     # Assign splits deterministically from scene spec hashes (config-declared set)
     splits: dict[str, str] = {
         s.scene_id: assign_split(s.to_dict(), config)
@@ -117,9 +135,8 @@ def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         torch.save(norm_low, split_dir / f"{scene.scene_id}_low.pt")
         torch.save(norm_high, split_dir / f"{scene.scene_id}_high.pt")
 
-        # Save carrier (raw low-ray IR for D3 reconstruction)
-        carrier_dir = out_dir / "carrier"
-        carrier_dir.mkdir(parents=True, exist_ok=True)
+        # Save carrier (raw low-ray IR for D3 reconstruction). The directory is
+        # created and pruned once, above.
         np.save(carrier_dir / f"{scene.scene_id}.npy", low_ir)
 
     # Save metadata. Counts are keyed on the CONFIG-DECLARED split set, defaulting
@@ -133,6 +150,16 @@ def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         "n_bands": n_bands,
         "n_frames": n_frames,
         "center_freqs": rep.center_freqs,
+        # What a "band" actually IS for this run — edges, bin counts, the covered
+        # range, the power that reaches no band, and (for banded reps that can
+        # measure it) the per-band in-band energy fraction (AC-19). Recorded
+        # rather than implied: `center_freqs` alone is an IRREGULAR series once
+        # under-resolved bands are dropped, and reads as a third-octave ladder
+        # when it is not one. Reps that expose no band structure omit the key.
+        **(
+            {"band_description": rep.describe_bands()}
+            if hasattr(rep, "describe_bands") else {}
+        ),
         # Declared domain of the saved tensors ("db" | "amplitude"); dB-assuming
         # eval consumers key on this stamp, never on the rep class (F-19).
         "value_domain": rep.value_domain,

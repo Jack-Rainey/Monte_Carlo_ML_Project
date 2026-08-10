@@ -18,6 +18,8 @@ import torch
 from amcd.evaluation.signal import compute_signal_metrics
 from amcd.representations import build_representation
 
+from tests.conftest import tiny_config
+
 
 def _fake_tensors(seed: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     rng = np.random.default_rng(seed)
@@ -53,8 +55,13 @@ def test_energy_snr_finite_for_db_domain_rep() -> None:
     """The dB path (spectrogram/EDR declare "db") scores SNR as a `maximize`
     metric (F-20): finite pred AND low legs (improvement = SNR(pred) − SNR(low)),
     high leg structurally absent — and nothing to log as dropped."""
+    # Params come from the config layer, never from literals here: the rep's own
+    # schema forbids extras and requires every field, so a hardcoded dict silently
+    # goes stale the moment the rep declares a new one (CLAUDE.md: no
+    # experiment-governing values in test fixtures).
+    cfg = tiny_config()
     rep = build_representation(
-        "spectrogram", {"n_fft": 64, "hop_length": 32, "min_db": -80.0}, sample_rate=8000
+        cfg.representation.name, cfg.representation.params, sample_rate=cfg.sample_rate
     )
     assert rep.value_domain == "db"
 

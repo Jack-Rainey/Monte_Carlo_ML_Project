@@ -15,8 +15,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from amcd.config import Config
-from amcd.scenes.generator import _generation_plan, run_gen_scenes
+from amcd.config import Config, PlacementRegime
+from amcd.scenes.generator import (
+    _generation_plan,
+    _placement_bounds,
+    _sample_positions,
+    run_gen_scenes,
+)
 from amcd.simulators.base import SceneSpec
 
 from tests.conftest import QUIET, tiny_config
@@ -215,12 +220,14 @@ class TestPlacementConstraints:
             })
 
     def test_height_range_outside_margins_raises(self, tmp_path: Path) -> None:
+        # `distance_range` must still clear the backend floor here (F-48), or this
+        # would fail on the separation pre-flight and never reach the height check.
         with pytest.raises(ValueError, match="does not fit inside the admissible"):
             self._gen(tmp_path, scenes={
                 "n_id": 2,
                 "placement_regimes": {"interior_random": {
                     "type": "interior", "corner_frac": None,
-                    "height_range": [1.2, 90.0], "distance_range": None,
+                    "height_range": [1.2, 90.0], "distance_range": [1.0, None],
                 }},
             })
 
@@ -245,32 +252,68 @@ class TestPlacementConstraints:
 
 
 class TestRngStreamPreserved:
-    """RD-36: adding the constraint machinery must not perturb configs that
-    declare no constraints, or every existing dry-run dataset silently changes."""
+    """RD-36: the constraint machinery must not perturb the unconstrained path.
 
-    def test_unconstrained_generation_is_unchanged_by_a_null_distance_range(
-        self, tmp_path: Path
-    ) -> None:
-        base = tiny_config(scenes={"n_id": 8})
-        run_gen_scenes(base, tmp_path / "a", QUIET)
+    Asserted directly on `_sample_positions` rather than end-to-end, because
+    base.yaml itself is no longer unconstrained — F-48 gave both of its regimes a
+    1.0 m minimum, so a whole-pipeline comparison would compare two constrained
+    configs and prove nothing about the null path. The property RD-36 needs is
+    narrower and is exactly this: with `distance_range: null` the loop body runs
+    once and issues the same two 3-vector `uniform` calls, in the same order, as
+    before the constraint existed. Switching those to per-axis scalar draws would
+    change the stream and silently re-dataset every unconstrained config.
+    """
 
-        # Same config, but the null constraints spelled out rather than inherited.
-        explicit = tiny_config(scenes={"n_id": 8, "placement_regimes": {
-            "interior_random": {"type": "interior", "corner_frac": None,
-                                "height_range": None, "distance_range": None},
-        }})
-        run_gen_scenes(explicit, tmp_path / "b", QUIET)
+    @staticmethod
+    def _regime(distance_range):
+        return PlacementRegime(
+            type="interior", corner_frac=None,
+            height_range=None, distance_range=distance_range,
+        )
 
-        def load(d: Path) -> list[dict]:
-            return [json.loads(p.read_text())
-                    for p in sorted((d / "scenes").glob("scene_*.json"))]
+    def test_null_distance_range_keeps_the_pre_constraint_call_sequence(self) -> None:
+        cfg = tiny_config()
+        margins, dims = cfg.scenes.margins, (6.0, 5.0, 3.0)
+        regimes = {"r": self._regime(None)}
 
-        assert load(tmp_path / "a") == load(tmp_path / "b")
+        # The reference stream, as it was before rejection sampling existed:
+        # exactly two 3-vector uniform draws over the admissible box.
+        lo, hi = _placement_bounds(dims, margins, None)
+        ref_rng = np.random.default_rng(7)
+        expected_src = tuple(float(v) for v in ref_rng.uniform(lo, hi))
+        expected_rcv = tuple(float(v) for v in ref_rng.uniform(lo, hi))
+        # A draw AFTER the pair must also line up, or the stream has been consumed
+        # at a different rate and every later scene shifts.
+        expected_next = float(ref_rng.random())
 
-    def test_single_attempt_when_unconstrained(self, tmp_path: Path) -> None:
-        run_gen_scenes(tiny_config(scenes={"n_id": 8}), tmp_path, QUIET)
+        rng = np.random.default_rng(7)
+        src, rcv, stats = _sample_positions("r", dims, rng, regimes, margins, 1000)
+        assert (src, rcv) == (expected_src, expected_rcv)
+        assert stats["attempts"] == 1
+        assert float(rng.random()) == expected_next
+
+    def test_single_attempt_when_unconstrained(self) -> None:
+        """The null path never enters the rejection loop a second time."""
+        cfg = tiny_config()
+        regimes = {"r": self._regime(None)}
+        for seed in range(20):
+            _, _, stats = _sample_positions(
+                "r", (6.0, 5.0, 3.0), np.random.default_rng(seed),
+                regimes, cfg.scenes.margins, 1000,
+            )
+            assert stats == {"attempts": 1, "below_min": 0, "above_max": 0,
+                             "max_reachable_m": stats["max_reachable_m"]}
+
+    def test_the_declared_floor_is_what_does_the_rejecting(self, tmp_path: Path) -> None:
+        """F-48's floor is live, not decorative: draws below it ARE discarded, and
+        the discard is accounted for on the correct side (AC-14)."""
+        run_gen_scenes(tiny_config(scenes={"n_id": 60}), tmp_path, QUIET)
         report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
-        assert report["id"]["acceptance_rate"] == 1.0
+        entry = report["id"]
+        assert entry["distance_range_declared"][0] > 0
+        assert entry["rejected_below_min"] > 0, "the 1.0 m floor rejected nothing"
+        assert entry["rejected_above_max"] == 0, "no maximum is declared"
+        assert entry["source_receiver_distance_m"]["min"] >= entry["distance_range_declared"][0]
 
 
 class TestCornerBiasIsHorizontal:
@@ -288,7 +331,7 @@ class TestCornerBiasIsHorizontal:
                 "n_id": 4,
                 "placement_regimes": {"near_corner": {
                     "type": "corner", "corner_frac": 0.2,
-                    "height_range": [1.2, 1.8], "distance_range": None,
+                    "height_range": [1.2, 1.8], "distance_range": [1.0, None],
                 }},
             },
             splits={"test_placement_shift": {

@@ -4,7 +4,7 @@ Pipeline invariants (design_spec §10).
 These tests exercise the invariants that guard against silent bugs: leakage,
 normalization source, split disjointness, loss inertness, controlled-shift
 integrity, etc. Split names and scene sampling ranges come from the config
-(configs/test_tiny.yaml) — nothing about the split set is hardcoded here.
+(configs/overlays/test_tiny.yaml) — nothing about the split set is hardcoded here.
 Most tests run the full preprocess stage on a tiny dataset.
 """
 from __future__ import annotations
@@ -22,14 +22,12 @@ from amcd.data.normalization import compute_stats
 from amcd.data.splits import assign_split
 from amcd.simulators.base import SceneSpec
 
-from tests.conftest import QUIET, dry_run_simulator
-
-_TEST_TINY = Path(__file__).resolve().parent.parent / "configs" / "test_tiny.yaml"
+from tests.conftest import QUIET, TINY_LAYERS, dry_run_simulator
 
 
 def _make_minimal_config() -> Config:
     """The tiny test config: 4 channels, 8 kHz, 0.1 s, all six splits n≥2."""
-    return Config.load(_TEST_TINY)
+    return Config.load(*TINY_LAYERS)
 
 
 def _run_through_preprocess(tmp_path: Path, cfg: Config) -> dict:

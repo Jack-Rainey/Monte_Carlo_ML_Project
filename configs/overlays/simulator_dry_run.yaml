@@ -1,0 +1,16 @@
+# ── Backend switch: use the dry_run scaffold instead of the real raytracer ────
+#
+# The SINGLE declaration of "render with the scaffold" in this repo. Every dry-run
+# invocation composes this file rather than restating the switch, so there is no
+# second place for the two to disagree about which backend a run used.
+#
+# It contains ONLY the switch. Sizing, record length and training budget belong to
+# whichever overlay is stacked on top (overlays/dry_run.yaml for base's frac-mode
+# structure, overlays/research_i_smoke.yaml for research_i.yaml's count mode), so
+# this composes with any root config without silently changing its scene set.
+#
+# `simulator.params` come from configs/simulators/dry_run.yaml via the plugin seam,
+# and base.yaml's gsound_sir params drop out on the name change (config.py's F-11
+# name-change scoping) rather than leaking into a backend that never declared them.
+simulator:
+  name: dry_run

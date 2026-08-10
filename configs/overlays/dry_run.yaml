@@ -1,0 +1,40 @@
+# ── Sizing overlay: base.yaml's structure, small and fast ─────────────────────
+# Proves the pipeline end-to-end without waiting for a real render. Counts are
+# chosen so all six splits populate with n>=2 (stats/CI/MDES non-degenerate) —
+# unrelated to the base.yaml Research-I sizes.
+#
+# SIZING ONLY. The backend switch lives in overlays/simulator_dry_run.yaml and is
+# composed alongside this file, so "which backend" is declared in exactly one
+# place (ledger RD-51). Canonical invocation:
+#
+#   amcd all -c configs/base.yaml \
+#            -c configs/overlays/simulator_dry_run.yaml \
+#            -c configs/overlays/dry_run.yaml
+#
+# This assumes base.yaml's FRAC-mode id pool. research_i.yaml uses count mode, so
+# it has its own sizing overlay (overlays/research_i_smoke.yaml).
+
+scenes:
+  n_id: 20            # → ~12/4/4 train/valid/test_id after hash-bucketing
+  # 0.25 s against base.yaml's full geometry ranges: every scene's Sabine T60
+  # exceeds it. Declared at 1.0 (no constraint) rather than fixed — this overlay
+  # exists to exercise PLUMBING at speed and claims no acoustic fidelity, so the
+  # record-length rule does not apply to it (AC-22). base.yaml declares 0.0.
+  max_t60_over_ir_duration_frac: 1.0
+
+splits:
+  test_material_shift:  { role: test, count: 3, axes: { material: ceiling_absorptive } }
+  test_placement_shift: { role: test, count: 3, axes: { placement: near_corner } }
+  test_geometry_shift:  { role: test, count: 3, axes: { geometry: corridor } }
+
+ir_duration: 0.25
+n_epochs: 2
+batch_size: 4
+early_stopping_patience: 10
+report_format: text
+
+model:
+  name: vanilla_cnn
+  params:
+    hidden_channels: 8
+    n_layers: 2

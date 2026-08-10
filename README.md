@@ -34,11 +34,22 @@ pytest tests/ -q           # 40+ invariant/config/shape tests should pass
 The pipeline is a linear DAG of cached stages. Run the whole thing, or one stage:
 
 ```bash
-# full pipeline on the synthetic dry_run backend (no real renderer needed)
-amcd all --config configs/base.yaml --config configs/dry_run.yaml
+# THE canonical dry run: full pipeline on the synthetic backend, no real renderer.
+# Three layers — the root config, the backend switch, the sizing overlay.
+amcd all -c configs/base.yaml \
+         -c configs/overlays/simulator_dry_run.yaml \
+         -c configs/overlays/dry_run.yaml
 
 # a single stage against an existing run directory
-amcd <stage> --config configs/base.yaml --config configs/dry_run.yaml --run-dir experiments/<run_id>
+amcd <stage> -c configs/base.yaml \
+             -c configs/overlays/simulator_dry_run.yaml \
+             -c configs/overlays/dry_run.yaml \
+             --run-dir experiments/<run_id>
+
+# the Research I instantiation, scaled down to prove the RI methodology end-to-end
+amcd all -c configs/base.yaml -c configs/research_i.yaml \
+         -c configs/overlays/simulator_dry_run.yaml \
+         -c configs/overlays/research_i_smoke.yaml
 ```
 
 **Stage DAG** (`src/amcd/pipeline.py`):
@@ -61,12 +72,29 @@ gen-scenes → render → preprocess → diagnostics → train → infer → eva
 ## Configuration is the source of truth
 
 No behavioral value is hardcoded in Python — it is a CLI argument, a config value,
-or the code raises. Config lives in `configs/`:
+or the code raises. `configs/` has **three kinds of file**, and which kind a file
+is determines whether you ever pass it to `-c`:
 
-- `base.yaml` — the Research-I reference instantiation (all defaults).
-- `dry_run.yaml` — small synthetic overlay for plumbing/CI.
-- `test_tiny.yaml` — the tiny config the test suite loads.
-- `models/<name>.yaml` — per-model parameter blocks; `model.name` selects one.
+**1. Root configs** — a complete experiment definition. Always the first `-c`.
+
+- `base.yaml` — the reference instantiation; the merge floor for everything else.
+- `research_i.yaml` — the Research I reproduction, pinning Figure 5/6 verbatim.
+
+**2. `overlays/`** — composable partial configs, always passed with `-c` *on top of*
+a root config. Each does one job, so they stack without arguing:
+
+- `simulator_dry_run.yaml` — **only** the backend switch. The single place in the
+  repo that declares "use the scaffold", so no two invocations can disagree about
+  which backend produced a run.
+- `dry_run.yaml` — sizing/speed for `base.yaml`'s frac-mode split structure.
+- `research_i_smoke.yaml` — sizing/speed for `research_i.yaml`'s count mode,
+  preserving its per-split seeds, regimes and single-axis shift structure.
+- `test_tiny.yaml` — the tiny sizing the test suite composes (`tests/conftest.py`).
+
+**3. Plugin parameter blocks** — `models/`, `representations/`, `simulators/`.
+Selected **by name** from a root config's `model` / `representation` / `simulator`
+block, and **never** passed to `-c`. `simulator: {name: dry_run}` is what pulls in
+`simulators/dry_run.yaml`; changing the name swaps the whole params block.
 
 **Parameter roles** (`docs/design_spec.md` §7). Any config leaf may be:
 

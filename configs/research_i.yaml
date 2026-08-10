@@ -116,10 +116,26 @@ scenes:
     floor: 0.5
     ceiling: 0.3
 
-  # Bound on distance-constraint rejection sampling. Needed here because this is
-  # the first config to declare a distance_range; it never binds in shoeboxes
+  # Bound on distance-constraint rejection sampling. It never binds in shoeboxes
   # (see below) but does real work in long corridors.
   max_placement_attempts: 1000
+
+  # ── Deviation 4: the record does not cover the declared support ─────────────
+  # RI's declared geometry x absorption support reaches Sabine T60 4.09 s (the
+  # 14 x 10 x 4.5 m shoebox at alpha = 0.05) while `ir_duration` is 3.0 s.
+  #
+  # This is STRUCTURAL, not a research choice: 3.0 s is an RI-pinned Figure 5
+  # value and lengthening it would stop this config being a reproduction. It is
+  # therefore declared and quantified rather than fixed. base.yaml, which is free
+  # to choose, went the other way — ir_duration 4.25 s and a tolerance of 0.0.
+  #
+  # MEASURED on this config: 4 of 720 scenes (0.56 %) exceed 3.0 s, worst ~3.56 s
+  # (~-2 % T30 bias by the project's own probe — inside the 5 % T30 JND). The
+  # tolerance below is set just above that realized rate, so it discloses the
+  # known deviation without licensing a materially worse one: at 720 scenes it
+  # permits 7, and the run fails loudly if the ranges or the record ever move
+  # enough to exceed that.
+  max_t60_over_ir_duration_frac: 0.01
 
   # Figure 5: shoebox L 4.0-14.0 / W 3.0-10.0 / H 2.4-4.5 m;
   #           corridor L 8.0-24.0 / W 1.8-4.0 / H 2.4-4.0 m.

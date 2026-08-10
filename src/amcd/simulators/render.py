@@ -2,13 +2,54 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
 
 from ..config import Config
 from ..runtime import Verbosity, emit
-from .base import IRResult, SceneSpec, build_simulator, validate_provenance
+from .base import (
+    IRResult,
+    SceneSpec,
+    build_simulator,
+    simulator_min_separation,
+    validate_provenance,
+)
+
+
+def _preflight_separations(config: Config, scenes: list[SceneSpec]) -> None:
+    """Reject the whole batch before rendering any of it, listing every offender.
+
+    The realized-scene backstop to the generator's declared-config check
+    (AC-13/F-48/RD-45): scenes on disk may have been generated under a different
+    backend, or under an older config, so the floor is re-checked against the
+    actual separations here. Failing per-scene mid-loop would abort an emulated
+    batch hours in with the sentinel unwritten — the cost this whole check exists
+    to avoid — so all offenders are collected and reported at once.
+    """
+    floor = simulator_min_separation(config)
+    if floor <= 0.0:
+        return
+    offenders = []
+    for scene in scenes:
+        d = float(
+            np.linalg.norm(
+                np.asarray(scene.source_pos, dtype=np.float64)
+                - np.asarray(scene.receiver_pos, dtype=np.float64)
+            )
+        )
+        if d < floor:
+            offenders.append((scene.scene_id, d))
+    if offenders:
+        lines = "\n".join(f"    {sid}: {d:.4f} m" for sid, d in offenders)
+        raise ValueError(
+            f"{len(offenders)} of {len(scenes)} scenes have a source-receiver "
+            f"separation below simulator {config.simulator.name!r}'s floor of "
+            f"{floor} m, so none were rendered:\n{lines}\n"
+            f"Raise the `distance_range` lower bound on the offending placement "
+            f"regime(s) and regenerate scenes."
+        )
 
 
 def _canonical_meta(
@@ -62,8 +103,27 @@ def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     if not scene_paths:
         raise RuntimeError(f"No scene specs found in {scenes_dir}. Run gen-scenes first.")
 
-    for scene_path in scene_paths:
-        scene = SceneSpec.from_json(scene_path)
+    scenes = [SceneSpec.from_json(p) for p in scene_paths]
+
+    # Validate the whole batch before rendering any of it (AC-13/F-48/RD-45).
+    _preflight_separations(config, scenes)
+
+    # Drop renders belonging to a previous, larger scene set before adding to this
+    # one (F-47, widening F-38). Scene ids are POSITIONAL, so regenerating with
+    # fewer scenes leaves high-numbered orphans that a later config silently
+    # reuses under a different geometry. gen-scenes gives `scene_*.json` the same
+    # treatment; renders are the expensive artifact, so leaving them unpruned was
+    # the more costly half of the gap.
+    current_ids = {scene.scene_id for scene in scenes}
+    pruned = 0
+    for stale in renders_dir.iterdir():
+        if stale.is_dir() and stale.name not in current_ids:
+            shutil.rmtree(stale)
+            pruned += 1
+    if pruned:
+        emit(verbosity, "progress", f"  Pruned {pruned} orphan render dir(s) from {renders_dir}")
+
+    for scene in scenes:
         out_dir = renders_dir / scene.scene_id
         out_dir.mkdir(parents=True, exist_ok=True)
 

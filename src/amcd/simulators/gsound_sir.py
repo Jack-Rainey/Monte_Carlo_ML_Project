@@ -108,11 +108,28 @@ class GsoundSirSimulator:
         self.sample_rate = sample_rate
         self.params = params
 
+    @classmethod
+    def min_source_receiver_distance_m(cls, params: dict) -> float:
+        """Required pre-render declaration (`Simulator`).
+
+        DERIVED, never separately declared: below `source_radius + listener_radius`
+        gsound's source and listener spheres physically overlap, so the floor is
+        already implied by two values the config states. A third config field
+        holding the same fact could disagree with the geometry it describes —
+        the divergence AC-24 was raised about.
+        """
+        return float(params["source_radius"]) + float(params["listener_radius"])
+
     def render(self, scene: SceneSpec, ray_budget: int) -> IRResult:
         raise NotImplementedError(
             "GSound-SIR rendering lands in Step 3 (subprocess worker). The config "
-            "contract is in place; use --simulator dry_run for pipeline testing. "
-            "Env setup: docs/gsound_sir_setup.md."
+            "contract is in place. To exercise the pipeline meanwhile, compose the "
+            "scaffold backend (there is no --simulator flag; the CLI takes only "
+            "-c/--config):\n"
+            "    amcd all -c configs/base.yaml \\\n"
+            "             -c configs/overlays/simulator_dry_run.yaml \\\n"
+            "             -c configs/overlays/dry_run.yaml\n"
+            "Env setup for the real backend: docs/gsound_sir_setup.md."
         )
 
 

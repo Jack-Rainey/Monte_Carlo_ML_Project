@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import time
 from pathlib import Path
 from typing import Callable
@@ -42,10 +43,21 @@ def _gen_scenes_fingerprint(config: Config) -> dict:
     counts, and their scenes are generated here) and every seed that feeds scene
     sampling. Change any of them and the scenes on disk are for a different
     experiment.
+
+    Only the GENERATION-relevant split fields are included (F-50). A `SplitSpec`
+    also carries `frac` and `role`, which are consumed at preprocess and cannot
+    change a single generated scene — dumping the whole spec meant editing
+    `train.frac` refused the cached `render` and forced a complete re-render of a
+    dataset that provably had not changed. Failing safe, but the cost it imposed is
+    precisely the cost RD-16/RD-30 built this machinery to avoid. `frac`/`role`
+    still reach `_preprocess_fingerprint`, which carries the full dump.
     """
     return {
         "scenes": config.scenes.model_dump(),
-        "splits": {name: sp.model_dump() for name, sp in config.splits.items()},
+        "splits": {
+            name: {"count": sp.count, "seed": sp.seed, "axes": sp.axes}
+            for name, sp in config.splits.items()
+        },
         "seed_scene_generation": config.seed("scene_generation"),
     }
 
@@ -88,6 +100,64 @@ def _preprocess_fingerprint(config: Config) -> dict:
     }
 
 
+def _eval_fingerprint(config: Config) -> dict:
+    """Config inputs — AND the code version — that determine the reported metrics.
+
+    RD-54 promoted this out of RD-41's DEFERRED set because the metric path is
+    actively in flux. RD-59 then established that config keys ALONE would close
+    RD-54 with a mechanism that cannot see its own trigger case: the AC-17 shared
+    Schroeder window (`f3c3543`) was a CODE change in
+    `evaluation/room_acoustic.py`, and no config key moved with it. So the commit
+    sha is part of this fingerprint — a cached `metrics.parquet` written under a
+    different revision of the metric code is refused, not silently reported.
+
+    Coarse on purpose: any commit invalidates eval, including commits that touch
+    nothing relevant. That is the correct direction to err for the one stage whose
+    output IS the research claim, and eval is cheap next to render.
+    """
+    return {
+        "iso_eval_freqs": list(config.iso_eval_freqs),
+        "metric_onset_rel_db": config.metric_onset_rel_db,
+        "metric_min_measurable_t60_s": config.metric_min_measurable_t60_s,
+        "representation": {
+            "name": config.representation.name,
+            "params": config.representation.params,
+        },
+        "sample_rate": config.sample_rate,
+        "code_version": _code_version(),
+    }
+
+
+def _stats_fingerprint(config: Config) -> dict:
+    """Config inputs that determine the CIs and MDES, chained to eval's."""
+    return {
+        "bootstrap_n_resamples": config.bootstrap_n_resamples,
+        "bootstrap_alpha": config.bootstrap_alpha,
+        "bootstrap_power": config.bootstrap_power,
+        "seed_bootstrap": config.seed("bootstrap"),
+        "upstream_eval": _fingerprint_sha(_eval_fingerprint(config)),
+    }
+
+
+def _code_version() -> str:
+    """Current commit sha, or a sentinel when git cannot answer.
+
+    An unavailable sha must not silently weaken the check into a config-only
+    fingerprint, so the sentinel is a distinct VALUE that itself participates in
+    the hash — moving between a git checkout and an exported tree invalidates
+    eval rather than quietly matching it.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unavailable"
+    return out.stdout.strip() if out.returncode == 0 else "unavailable"
+
+
 #: Per-stage declaration of the config inputs a cached artifact depends on.
 #:
 #: `None` means "no fingerprint declared yet" — the stage caches on the bare
@@ -95,8 +165,14 @@ def _preprocess_fingerprint(config: Config) -> dict:
 #: `None`s, so an unwired stage is DECLARED rather than silently absent (the same
 #: rule docs/verbosity.md applies to verbosity wiring).
 #:
-#: The remaining `None`s are a live gap, not a design (ledger RD-41): train/eval
-#: reuse is the same hazard further down the chain.
+#: SCOPE, stated because the mechanism looks stronger than it is: a fingerprint
+#: built from config keys sees CONFIG changes only. A code change to a stage —
+#: a redefined metric, a different sampling rule — moves nothing in these payloads
+#: and a cached artifact is served under the new code (RD-59). `eval` carries a
+#: commit sha for exactly that reason; the other stages do not, so the remedy for
+#: a code change upstream of them is a fresh run_dir or `--force`.
+#:
+#: The remaining `None`s are a live gap, not a design (ledger RD-41).
 STAGE_FINGERPRINT: dict[str, Callable[[Config], dict] | None] = {
     "gen-scenes": _gen_scenes_fingerprint,
     "render": _render_fingerprint,
@@ -104,8 +180,8 @@ STAGE_FINGERPRINT: dict[str, Callable[[Config], dict] | None] = {
     "diagnostics": None,
     "train": None,
     "infer": None,
-    "eval": None,
-    "stats": None,
+    "eval": _eval_fingerprint,
+    "stats": _stats_fingerprint,
     "report": None,
 }
 
@@ -149,19 +225,41 @@ def _fingerprint_sha(payload: dict) -> str:
     ).hexdigest()
 
 
-def _diff_fingerprints(old: dict, new: dict) -> list[str]:
-    """Field-level differences, so the error says WHAT changed (RD-35).
+def _diff_fingerprints(old: dict, new: dict, prefix: str = "") -> list[str]:
+    """Leaf-level differences, so the error says WHAT changed (RD-35).
 
     A bare sha mismatch forces the operator to decide blind whether an expensive
     renders/ directory is salvageable; naming the changed field is the difference
     between a five-second judgement and a re-render under emulation.
+
+    RECURSES into nested dicts and reports dotted paths (F-49). A top-level-only
+    comparison degenerated on exactly the two fields most likely to change —
+    `scenes` and `splits`, the only nested payloads — printing the whole ~700
+    character dict twice with the single changed value buried inside, which fails
+    the stated purpose above in the one case it was written for.
     """
     lines = []
     for key in sorted(set(old) | set(new)):
-        before, after = old.get(key, "<absent>"), new.get(key, "<absent>")
-        if before != after:
-            lines.append(f"    {key}: {before!r} → {after!r}")
+        before, after = old.get(key, _ABSENT), new.get(key, _ABSENT)
+        if before == after:
+            continue
+        path = f"{prefix}{key}"
+        if isinstance(before, dict) and isinstance(after, dict):
+            lines.extend(_diff_fingerprints(before, after, prefix=f"{path}."))
+        else:
+            lines.append(
+                f"    {path}: {_render_leaf(before)} → {_render_leaf(after)}"
+            )
     return lines
+
+
+#: Distinguishes "key absent" from a key whose value happens to be the string
+#: "<absent>", so a diff cannot misreport which side a key is missing from.
+_ABSENT = object()
+
+
+def _render_leaf(value) -> str:
+    return "<absent>" if value is _ABSENT else repr(value)
 
 
 def _dispatch(stage: str) -> Callable[[Config, Path, Verbosity], None]:

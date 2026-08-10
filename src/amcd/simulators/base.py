@@ -126,9 +126,38 @@ class Simulator(Protocol):
     — and must populate `REQUIRED_PROVENANCE_KEYS` in each `IRResult.meta`.
     Neither is expressible in a `runtime_checkable` Protocol, so both are
     enforced at construction and at render time respectively, not by isinstance.
+
+    A third required member, `min_source_receiver_distance_m`, is declared below.
+    Implementation constraint that goes with it: **no simulator `__init__` may
+    require the render environment.** The floor is consulted at gen-scenes, which
+    runs in the native pipeline env, while the render backend may live in a
+    separate x86 env (docs/gsound_sir_setup.md); an `__init__` that imported a
+    native dependency would make scene generation unavailable off the render host.
     """
 
     def render(self, scene: SceneSpec, ray_budget: int) -> IRResult: ...
+
+    @classmethod
+    def min_source_receiver_distance_m(cls, params: dict) -> float:
+        """Smallest source-receiver separation this backend can render, in metres.
+
+        A CLASSMETHOD over validated params, not an instance attribute, because it
+        is needed BEFORE any render — gen-scenes must reject a placement regime
+        that would emit unrenderable scenes, and doing that by constructing the
+        backend would couple scene generation to the render environment (RD-60).
+
+        This is deliberately NOT a `REQUIRED_PROVENANCE_KEYS` member: those
+        validate an `IRResult`, i.e. after a render has already happened, which is
+        far too late for a floor whose whole job is to prevent one (RD-49). Left
+        optional, a second raytracer would omit it and the pre-flight would
+        silently degrade to a 0.0 floor — the silent-contract failure RD-31 closed
+        on the post-render side.
+
+        Derive it where it is already implied (gsound_sir: source_radius +
+        listener_radius) rather than declaring a second number that can disagree
+        with the geometry it describes.
+        """
+        ...
 
 
 def build_simulator(
@@ -150,9 +179,50 @@ def build_simulator(
 
     SimClass = simulator_registry.get(name)
     validated = SimClass.Params(**params).model_dump()
+    # Fail here, not at render: a backend missing the pre-render half of the
+    # contract must be caught at construction, the same way validate_provenance
+    # catches the post-render half (RD-49).
+    _validate_min_separation_declared(SimClass, name, validated)
     return SimClass(
         n_channels=n_channels,
         n_samples=n_samples,
         sample_rate=sample_rate,
         **validated,
     )
+
+
+def _validate_min_separation_declared(SimClass, name: str, validated: dict) -> float:
+    """Raise unless `SimClass` declares a usable `min_source_receiver_distance_m`."""
+    getter = getattr(SimClass, "min_source_receiver_distance_m", None)
+    if not callable(getter):
+        raise TypeError(
+            f"simulator {name!r} does not declare the required classmethod "
+            f"`min_source_receiver_distance_m(params) -> float`. Every backend must "
+            f"state the smallest source-receiver separation it can render, so scene "
+            f"generation can reject unrenderable placements BEFORE a render "
+            f"(amcd.simulators.base.Simulator)."
+        )
+    floor = getter(validated)
+    if not isinstance(floor, (int, float)) or isinstance(floor, bool) or floor < 0:
+        raise ValueError(
+            f"simulator {name!r} declared min_source_receiver_distance_m="
+            f"{floor!r}; expected a non-negative number of metres."
+        )
+    return float(floor)
+
+
+def simulator_min_separation(config) -> float:
+    """The active backend's minimum source-receiver separation, in metres.
+
+    Registry lookup → the backend's own `Params` validation → the classmethod.
+    Deliberately does NOT instantiate the simulator: gen-scenes calls this, and
+    scene generation must stay runnable on a host with no render environment
+    (RD-60). One helper, so no stage outside `simulators/` names a backend or
+    touches `build_simulator` itself.
+    """
+    from ..registry import simulator_registry
+
+    name = config.simulator.name
+    SimClass = simulator_registry.get(name)
+    validated = SimClass.Params(**config.simulator.params).model_dump()
+    return _validate_min_separation_declared(SimClass, name, validated)

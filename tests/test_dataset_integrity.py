@@ -18,7 +18,7 @@ from amcd.data.dataset import EnergyDataset
 from amcd.pipeline import Pipeline
 from amcd.scenes.generator import run_gen_scenes
 
-from tests.conftest import QUIET, tiny_config
+from tests.conftest import CANONICAL_DRY_RUN, QUIET, tiny_config
 
 
 def _pipeline(cfg: Config, run_dir: Path, force: bool = False) -> Pipeline:
@@ -234,7 +234,7 @@ class TestDeclaredButEmptySplitIsReported:
         overlay = tmp_path / "starve.yaml"
         overlay.write_text("seeds:\n  split_assignment: 104\nscenes:\n  n_id: 6\n")
         cfg = Config.load(
-            Path("configs/base.yaml"), Path("configs/dry_run.yaml"), overlay
+            *CANONICAL_DRY_RUN, overlay
         )
         run_dir = tmp_path / "run"
         Pipeline(cfg, run_dir, Verbosity(1, 0)).run_all()

@@ -25,7 +25,13 @@ from amcd.simulators.base import (
     validate_provenance,
 )
 
-from tests.conftest import QUIET, TEST_TINY, dry_run_simulator, tiny_config
+from tests.conftest import (
+    CANONICAL_DRY_RUN,
+    QUIET,
+    TEST_TINY,
+    dry_run_simulator,
+    tiny_config,
+)
 
 
 def _merged(*layers: dict) -> dict:
@@ -62,7 +68,7 @@ class TestSimulatorBlock:
     def test_name_change_drops_prior_params(self) -> None:
         """F-11: gsound_sir's params must not bleed onto dry_run, whose schema
         would reject every one of them."""
-        cfg = Config.load(Path("configs/base.yaml"), Path("configs/dry_run.yaml"))
+        cfg = Config.load(*CANONICAL_DRY_RUN)
         assert cfg.simulator.name == "dry_run"
         # dry_run gets its OWN params file; none of gsound's keys survive the switch
         # (its schema forbids extras, so any that did would fail loudly here).
@@ -191,7 +197,7 @@ class TestRayBudgetsStayTopLevel:
     """RD-40: the swept research axis must survive a simulator name change."""
 
     def test_budgets_survive_simulator_switch(self) -> None:
-        cfg = Config.load(Path("configs/base.yaml"), Path("configs/dry_run.yaml"))
+        cfg = Config.load(*CANONICAL_DRY_RUN)
         assert cfg.simulator.name == "dry_run"
         assert cfg.low_ray_budget == 5000
         assert cfg.high_ray_budget == 200000
@@ -265,15 +271,17 @@ class TestStageFingerprint:
             self._pipeline(cfg, tmp_path).run_stage("gen-scenes")
 
     def test_undeclared_stage_still_caches_on_bare_sentinel(self, tmp_path: Path) -> None:
-        """The eight `None` entries are a declared gap, not a silent one: they must
-        keep working exactly as before until they are wired."""
+        """The remaining `None` entries are a declared gap, not a silent one: they
+        must keep working exactly as before until they are wired (RD-41)."""
         # Every stage is listed, so an unwired one is declared rather than absent.
         assert set(STAGE_FINGERPRINT) == set(STAGES)
-        assert STAGE_FINGERPRINT["stats"] is None
+        # `eval`/`stats` were promoted out of the gap by RD-54; `report` remains in
+        # it, so it is the standing example of the unwired path.
+        assert STAGE_FINGERPRINT["report"] is None
         cfg = tiny_config(scenes={"n_id": 4})
         pipe = self._pipeline(cfg, tmp_path)
-        pipe._mark_done("stats")
-        assert pipe._is_done("stats")
+        pipe._mark_done("report")
+        assert pipe._is_done("report")
 
 
 class TestDryRunTailIsUnbiased:

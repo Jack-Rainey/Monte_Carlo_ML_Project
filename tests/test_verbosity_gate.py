@@ -19,9 +19,7 @@ from click.testing import CliRunner
 
 from amcd.cli import main
 
-from tests.conftest import TEST_TINY, _REPO_ROOT
-
-_BASE = _REPO_ROOT / "configs" / "base.yaml"
+from tests.conftest import tiny_cli_args
 
 # Artifacts that must exist at EVERY save level (F-23): canonical results,
 # inter-stage inputs, and stage sentinels. Globs are relative to the run dir;
@@ -72,7 +70,7 @@ GATED_GLOBS: list[str] = []
 def _run_all(run_dir: Path, *flags: str) -> "click.testing.Result":
     result = CliRunner().invoke(
         main,
-        ["all", "-c", str(_BASE), "-c", str(TEST_TINY), "-r", str(run_dir), *flags],
+        ["all", *tiny_cli_args(), "-r", str(run_dir), *flags],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.output
@@ -147,7 +145,7 @@ def test_f24_out_of_range_levels_rejected() -> None:
     """F-24: IntRange(0,5) — out-of-range is a usage error, never a clamp."""
     for flag in ("--save-verbosity", "--show-verbosity"):
         result = CliRunner().invoke(
-            main, ["all", "-c", str(_BASE), "-c", str(TEST_TINY), flag, "6"]
+            main, ["all", *tiny_cli_args(), flag, "6"]
         )
         assert result.exit_code != 0
         assert "is not in the range" in result.output or "Invalid value" in result.output
@@ -158,7 +156,7 @@ def test_f24_failures_reach_stderr_at_show_zero(tmp_path: Path) -> None:
     `render` on a run dir with no scenes fails; show=0 must not swallow it."""
     result = CliRunner().invoke(
         main,
-        ["render", "-c", str(_BASE), "-c", str(TEST_TINY), "-r", str(tmp_path),
+        ["render", *tiny_cli_args(), "-r", str(tmp_path),
          "--save-verbosity", "0", "--show-verbosity", "0"],
     )
     assert result.exit_code != 0
@@ -173,7 +171,7 @@ def test_rd09_default_run_writes_provenance(tmp_path: Path) -> None:
     default_dir = tmp_path / "default"
     result = CliRunner().invoke(
         main,
-        ["gen-scenes", "-c", str(_BASE), "-c", str(TEST_TINY), "-r", str(default_dir)],
+        ["gen-scenes", *tiny_cli_args(), "-r", str(default_dir)],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.output
@@ -186,7 +184,7 @@ def test_rd09_default_run_writes_provenance(tmp_path: Path) -> None:
     bare_dir = tmp_path / "save0"
     result = CliRunner().invoke(
         main,
-        ["gen-scenes", "-c", str(_BASE), "-c", str(TEST_TINY), "-r", str(bare_dir),
+        ["gen-scenes", *tiny_cli_args(), "-r", str(bare_dir),
          "--save-verbosity", "0"],
         catch_exceptions=False,
     )

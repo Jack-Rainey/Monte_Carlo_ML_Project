@@ -36,6 +36,8 @@ import yaml
 from numpy.random import SeedSequence
 from pydantic import BaseModel, PrivateAttr, model_validator
 
+from .acoustics import sabine_rt60
+
 
 _CONFIGS_DIR = Path(__file__).parent.parent.parent / "configs"
 _BASE_YAML = _CONFIGS_DIR / "base.yaml"
@@ -378,9 +380,19 @@ class PlacementRegime(BaseModel):
     #: admissible height. Research I pins 1.2-1.8 m (seated/standing ear height).
     height_range: list[float] | None
 
-    #: (lo, hi) metres for the source-receiver separation, enforced by rejection
-    #: sampling, or null for no constraint. Research I pins 1.0-10.0 m.
-    distance_range: list[float] | None
+    #: Metres for the source-receiver separation, enforced by rejection sampling.
+    #: Research I pins 1.0-10.0 m. Unlike `height_range`, an ELEMENT may be null,
+    #: because a backend imposes a MINIMUM separation with no corresponding maximum
+    #: (AC-13/F-48) and `[lo, hi]`-only could not express that. Legal spellings:
+    #:
+    #:   null          no constraint at all
+    #:   [lo, null]    minimum only
+    #:   [null, hi]    maximum only
+    #:   [lo, hi]      both, lo < hi
+    #:
+    #: `[null, null]` is REJECTED: a nullable element is a new sub-convention and
+    #: must not become a second way to spell the existing whole-range null (RD-48).
+    distance_range: list[float | None] | None
 
     @model_validator(mode="after")
     def _check(self) -> "PlacementRegime":
@@ -396,14 +408,40 @@ class PlacementRegime(BaseModel):
                 f"corner_frac is meaningless for placement type {self.type!r} "
                 f"(set it null) — a value here would be silently ignored"
             )
-        for name in ("height_range", "distance_range"):
-            rng = getattr(self, name)
-            if rng is None:
-                continue
+        # height_range takes both bounds or nothing — no backend constrains one
+        # side of it, so it keeps the simpler contract.
+        if self.height_range is not None:
+            rng = self.height_range
             if len(rng) != 2 or rng[0] >= rng[1]:
-                raise ValueError(f"{name} must be [lo, hi] with lo < hi; got {rng}")
+                raise ValueError(f"height_range must be [lo, hi] with lo < hi; got {rng}")
             if rng[0] < 0:
-                raise ValueError(f"{name} must be non-negative; got {rng}")
+                raise ValueError(f"height_range must be non-negative; got {rng}")
+
+        if self.distance_range is not None:
+            rng = self.distance_range
+            if len(rng) != 2:
+                raise ValueError(
+                    f"distance_range must be a two-element [lo, hi]; got {rng}. "
+                    f"Either bound may be null (see the field comment for the four "
+                    f"legal spellings)."
+                )
+            lo, hi = rng
+            if lo is None and hi is None:
+                raise ValueError(
+                    "distance_range [null, null] is not a legal spelling — write "
+                    "`distance_range: null` to declare no constraint. A nullable "
+                    "bound exists so a MINIMUM can be declared without a maximum, "
+                    "not to give 'no constraint' a second spelling."
+                )
+            for bound, value in (("lower", lo), ("upper", hi)):
+                if value is not None and value < 0:
+                    raise ValueError(
+                        f"distance_range {bound} bound must be non-negative; got {value}"
+                    )
+            if lo is not None and hi is not None and lo >= hi:
+                raise ValueError(
+                    f"distance_range must have lo < hi when both bounds are given; got {rng}"
+                )
         return self
 
 
@@ -425,6 +463,25 @@ class Scenes(BaseModel):
     #: declares one; exceeding it raises rather than silently emitting a scene
     #: that violates the constraint.
     max_placement_attempts: int
+
+    #: Largest fraction of generated scenes whose Sabine T60 may exceed
+    #: `ir_duration` (AC-22). Nothing previously checked that the declared record
+    #: length could support the decay the declared geometry x absorption ranges
+    #: admit, and a T30/EDT fitted over a truncated record measures the truncation,
+    #: not the room. The gate binds on the REALIZED set rather than on the support
+    #: corner, because the corner has near-zero draw probability while the realized
+    #: rate is what actually reaches the metrics; the corner is disclosed
+    #: separately (`Config.worst_case_t60`), never used as a threshold.
+    #: Sabine, not Eyring: it is the longer of the two, so the check errs toward
+    #: declaring a scene unsupported rather than silently truncating it.
+    max_t60_over_ir_duration_frac: float
+
+    #: Absorption above which the diffuse-field assumptions behind Sabine/Eyring,
+    #: the critical distance and DRR stop holding well (AC-21). Textbook guidance
+    #: puts the practical limit near alpha = 0.3; beyond it those closed forms are
+    #: extrapolations, so scenes are FLAGGED (never dropped, never recomputed) and
+    #: the flag is summarized per split in scenes/placement_report.json.
+    diffuse_field_alpha_limit: float
 
 
 class ModelSpec(BaseModel):
@@ -564,6 +621,47 @@ class Config(BaseModel):
     def n_samples(self) -> int:
         return int(self.sample_rate * self.ir_duration)
 
+    def worst_case_t60(self) -> dict:
+        """The longest Sabine T60 this config's DECLARED scene support admits (AC-22).
+
+        A disclosure, not a threshold. Nothing previously stated the relationship
+        between `ir_duration` and the decay the declared ranges allow, and the two
+        can disagree badly: base's largest shoebox at its lowest absorption gives
+        4.20 s, and Research I's declared support gives 4.09 s against an RI-pinned
+        3.0 s record. A T30 fitted over a truncated record measures the truncation.
+
+        This is deliberately NOT used as a gate. The corner is the product of two
+        independent extremes and has near-zero probability of being drawn, so
+        gating on it would reject configs whose realized scenes are all fine. The
+        gate is `scenes.max_t60_over_ir_duration_frac`, applied to the REALIZED set
+        at gen-scenes (RD-56). The E1 write-up needs this number either way, so it
+        is computed here and stamped into resolved.yaml.
+
+        Returns the corner and the geometry/material that produced it, so the
+        number is never reported without saying which corner it came from.
+        """
+        alpha_min = min(m.absorption[0] for m in self.scenes.material_regimes.values())
+        alpha_regime = min(
+            self.scenes.material_regimes.items(), key=lambda kv: kv[1].absorption[0]
+        )[0]
+        worst = None
+        for family, spec in self.scenes.geometry_families.items():
+            lx, ly, lz = (axis[1] for axis in spec.dims)  # upper bound of each axis
+            volume = lx * ly * lz
+            surface = 2.0 * (lx * ly + ly * lz + lx * lz)
+            t60 = sabine_rt60(volume, surface, alpha_min)
+            if worst is None or t60 > worst["t60_sabine_s"]:
+                worst = {
+                    "t60_sabine_s": float(t60),
+                    "geometry_family": family,
+                    "dims_m": [float(lx), float(ly), float(lz)],
+                    "material_regime": alpha_regime,
+                    "absorption": float(alpha_min),
+                }
+        worst["ir_duration_s"] = float(self.ir_duration)
+        worst["covered_by_record"] = bool(self.ir_duration >= worst["t60_sabine_s"])
+        return worst
+
     def seed(self, name: str) -> int:
         """Concrete seed for a named pipeline aspect (see SEED_NAMES)."""
         if name not in SEED_NAMES:
@@ -670,6 +768,7 @@ class Config(BaseModel):
         self._check_id_pool_sizing()
         self._check_split_seeds()
         self._check_inert_split_fields()
+        self._check_split_counts_positive()
 
         # Shift splits: each needs a count and exactly one axis, over a known regime
         # value that differs from the id baseline (controlled single-axis shift).
@@ -718,6 +817,24 @@ class Config(BaseModel):
         `_check_id_pool_sizing`, so this single predicate is safe to branch on
         downstream (the generator and split assignment both do)."""
         return any(sp.count is not None for sp in self.id_pool_splits.values())
+
+    def _check_split_counts_positive(self) -> None:
+        """A declared `count` must be a real number of scenes (F-46).
+
+        Count validation was asymmetric: id-pool counts had to be `> 0`, while a
+        shift split's count only had to be non-None — so `count: 0` was legal
+        under the declared schema and gen-scenes then died inside `_summarize`
+        with a bare `zero-size array to reduction operation minimum which has no
+        identity`, naming neither the split nor the count. A value the schema
+        admits must not be a value the pipeline mishandles.
+        """
+        for name, sp in self.splits.items():
+            if sp.count is not None and sp.count <= 0:
+                raise ValueError(
+                    f"split {name!r}: count must be > 0; got {sp.count}. A split "
+                    f"that should not be generated is removed from `splits`, not "
+                    f"declared with zero scenes."
+                )
 
     def _check_split_roles(self) -> None:
         """Every split declares a role the spine understands, and the roles the
@@ -986,6 +1103,11 @@ class Config(BaseModel):
             "n_channels": self.n_channels,
             "n_samples": self.n_samples,
             "test_split_names": list(self.test_split_names),
+            # The longest decay the DECLARED ranges admit, against the record
+            # length. Disclosure, never a gate (AC-22/RD-56) — the E1 write-up
+            # needs it, and a config whose record does not cover its own support
+            # should say so in its own provenance rather than in a comment.
+            "worst_case_t60": self.worst_case_t60(),
         }
         (run_dir / "resolved.yaml").write_text(yaml.dump(resolved, default_flow_style=False, sort_keys=False))
 

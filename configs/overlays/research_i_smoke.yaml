@@ -1,0 +1,52 @@
+# ── Sizing overlay: research_i.yaml's structure, small and fast ───────────────
+# The count-mode sibling of overlays/dry_run.yaml. It exists to make the RD-33
+# gate's own evidence obtainable (ledger F-52): `-c base -c research_i -c dry_run`
+# RAISES, because overlays/dry_run.yaml re-sets `n_id: 20` over research_i's
+# explicit `null` and the all-frac/all-count validator refuses the mixture. Even
+# fixed, that path resolves to 629 scenes at 3 s (~11.6 GB) — not a smoke test.
+#
+# SIZING ONLY. Compose with the backend switch:
+#
+#   amcd all -c configs/base.yaml -c configs/research_i.yaml \
+#            -c configs/overlays/simulator_dry_run.yaml \
+#            -c configs/overlays/research_i_smoke.yaml
+#
+# WHAT IS PRESERVED, because this overlay must exercise the RI *methodology* and
+# not merely the stage sequence:
+#   - count mode (n_id stays null; every id-pool split keeps its own count+seed)
+#   - the per-split seeds 1001-1006, so split independence is really tested
+#   - every geometry family, placement regime and material regime, unchanged
+#   - the single-axis shift structure of all three shift splits
+#
+# WHAT IS SCALED: only counts, record length and training budget. Counts keep
+# every split at n>=3 so stats/CI/MDES stay non-degenerate.
+#
+# A run under this overlay is a PLUMBING proof, never a result: the scaffold's
+# synthetic IRs are not ray tracing (ledger RD-07).
+
+scenes:
+  # 0.25 s against RI's geometry ranges: every scene's Sabine T60 exceeds it.
+  # 1.0 (no constraint), like the other plumbing overlays — this file claims no
+  # acoustic fidelity, so the record-length rule does not apply (AC-22).
+  # research_i.yaml itself declares 0.01 and means it.
+  max_t60_over_ir_duration_frac: 1.0
+
+splits:
+  train:                { role: train, frac: null, count: 12, seed: 1001 }
+  valid:                { role: valid, frac: null, count: 4,  seed: 1002 }
+  test_id:              { role: test,  frac: null, count: 4,  seed: 1003 }
+  test_material_shift:  { role: test, count: 3, seed: 1004, axes: { material: ceiling_absorptive } }
+  test_placement_shift: { role: test, count: 3, seed: 1005, axes: { placement: near_corner } }
+  test_geometry_shift:  { role: test, count: 3, seed: 1006, axes: { geometry: corridor } }
+
+ir_duration: 0.25
+n_epochs: 2
+batch_size: 4
+early_stopping_patience: 10
+report_format: text
+
+model:
+  name: vanilla_cnn
+  params:
+    hidden_channels: 8
+    n_layers: 2

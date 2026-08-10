@@ -21,7 +21,7 @@ import numpy as np
 from ..acoustics import eyring_rt60, sabine_rt60
 from ..config import Config, Margins, PlacementRegime
 from ..runtime import Verbosity, emit
-from ..simulators.base import SceneSpec
+from ..simulators.base import SceneSpec, simulator_min_separation
 
 
 def _sample_dims(
@@ -119,11 +119,13 @@ def _sample_positions(
         rcv = tuple(float(v) for v in rng.uniform(lo, rcv_hi))
         if regime.distance_range is None:
             return src, rcv, stats
+        # Either bound may be null (RD-48): a backend imposes a minimum with no
+        # matching maximum, so each side is tested only when it is declared.
         d_lo, d_hi = regime.distance_range
         d = float(np.linalg.norm(np.subtract(src, rcv)))
-        if d < d_lo:
+        if d_lo is not None and d < d_lo:
             stats["below_min"] += 1
-        elif d > d_hi:
+        elif d_hi is not None and d > d_hi:
             stats["above_max"] += 1
         else:
             return src, rcv, stats
@@ -137,6 +139,49 @@ def _sample_positions(
         f"{stats['above_max']} above the maximum) — widen distance_range, adjust "
         f"the geometry range, or raise scenes.max_placement_attempts."
     )
+
+
+def _check_regimes_clear_backend_floor(config: Config) -> float:
+    """Reject any placement regime that could emit a scene the backend cannot render.
+
+    The declared-config half of AC-13/F-48, checked before a single scene exists.
+    Without it, base.yaml's unconstrained regimes emitted separations below every
+    shipped backend's floor (measured P(d < 0.3 m) = 0.186 %/scene → ~67 % chance a
+    600-scene run aborts), and the only guard fired INSIDE render — mid-batch,
+    hours into an emulated render, with the stage sentinel never written.
+
+    EVERY declared regime is checked, not just the one the id baseline names
+    (RD-45): `near_corner` is the regime behind `test_placement_shift`, and a
+    regime that is unused today is a trap for the config that selects it tomorrow.
+
+    The backend floor is a LOWER LIMIT on the researcher's choice, never its
+    source (RD-57) — the message therefore says to raise the config value, and
+    the scientifically motivated minimum stays in the config where it belongs.
+    """
+    floor = simulator_min_separation(config)
+    if floor <= 0.0:
+        return floor
+    offenders = []
+    for name, regime in config.scenes.placement_regimes.items():
+        rng = regime.distance_range
+        declared_min = None if rng is None else rng[0]
+        if declared_min is None or declared_min < floor:
+            offenders.append((name, declared_min))
+    if offenders:
+        lines = "\n".join(
+            f"    {name}: distance_range lower bound = "
+            + ("null (no minimum declared)" if lo is None else f"{lo} m")
+            for name, lo in offenders
+        )
+        raise ValueError(
+            f"simulator {config.simulator.name!r} cannot render a source-receiver "
+            f"separation below {floor} m, but these placement regimes admit closer "
+            f"pairs:\n{lines}\n"
+            f"Declare a `distance_range` lower bound of at least {floor} m on each. "
+            f"That bound is a research choice about the scene distribution — the "
+            f"backend floor is only a lower limit on it, not a recommended value."
+        )
+    return floor
 
 
 def _sample_material(
@@ -172,7 +217,12 @@ def _generation_plan(config: Config) -> list[tuple[str, int, dict[str, str], int
 
 
 def _room_acoustics(
-    dims: tuple[float, float, float], absorption: float, distance: float
+    dims: tuple[float, float, float],
+    absorption: float,
+    distance: float,
+    *,
+    alpha_limit: float,
+    ir_duration_s: float,
 ) -> dict:
     """Closed-form acoustic descriptors of one scene, from geometry alone.
 
@@ -185,6 +235,14 @@ def _room_acoustics(
     Estimates, not measurements: diffuse-field formulae over a shoebox, reported
     so the E1 write-up can characterize the dataset it generated. The rendered
     IRs remain the source of truth for every reported metric.
+
+    VALIDITY (AC-21). The estimates above are reported with no indication of when
+    their own premise has failed — and for `test_material_shift`, the very split
+    this artifact was built to characterize, it has failed for 100 % of scenes
+    (alpha median 0.894, Sabine/Eyring ratio median 2.51, 23 % with r_c larger than
+    the room's longest dimension). So each scene now also carries three flags. No
+    formula changes and nothing is dropped: a +4.9 dB DRR from a formula outside
+    its domain is still reported, but it is reported AS an extrapolation.
     """
     if not distance > 0.0:
         # DRR divides by d²; a coincident pair would silently report +inf into a
@@ -221,7 +279,95 @@ def _room_acoustics(
         "d_over_rc": distance / r_c if r_c > 0 else float("inf"),
         # Diffuse-field DRR: direct 1/(4πd²) against the reverberant field 4/R.
         "drr_db": float(10.0 * np.log10(room_constant / (16.0 * np.pi * distance**2))),
+        # ── Validity indicators (AC-21) ──────────────────────────────────────
+        # Sabine and Eyring agree only for small α; the ratio is a direct,
+        # assumption-free readout of how far the diffuse-field model is being
+        # stretched (median 2.51 on test_material_shift, max 3.90).
+        "sabine_eyring_ratio": float(t60_sabine / t60_eyring),
+        "alpha_above_diffuse_limit": bool(alpha > alpha_limit),
+        # A critical distance larger than the room means the "reverberant field"
+        # the DRR formula divides by does not exist inside this room at all.
+        "rc_exceeds_max_dim": bool(r_c > max(dims)),
+        # AC-22's realized gate: this scene's decay against the record length.
+        # Sabine (the longer estimate) so the flag errs toward declaring a scene
+        # unsupported rather than silently truncating it.
+        "t60_exceeds_ir_duration": bool(t60_sabine > ir_duration_s),
     }
+
+
+def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) -> None:
+    """Disclose the declared-support corner; gate on the REALIZED over-limit rate.
+
+    AC-22 in the shape RD-56 settled. The two halves are deliberately different in
+    kind:
+
+      * The CORNER (`Config.worst_case_t60`) is the product of two independent
+        extremes — largest room, lowest absorption — and has near-zero probability
+        of being drawn, so gating on it would reject configs whose realized scenes
+        are all fine. It is printed and stamped, never used as a threshold.
+      * The GATE is `scenes.max_t60_over_ir_duration_frac` applied to the scenes
+        that actually exist. That is the population the metrics are computed over.
+
+    The gate is the OVERALL fraction, while the disclosure is per split. Gating
+    per split would let the smallest split set the threshold for every other one:
+    a single over-limit scene in a 30-scene shift split is 3.3 %, and a tolerance
+    declared to permit that would silently also permit 16 scenes in a 500-scene
+    train split. The per-split counts still appear in the report and in this
+    error, because the shift splits are exactly where the decay distribution
+    departs from the id baseline.
+    """
+    corner = config.worst_case_t60()
+    emit(
+        verbosity, "progress",
+        f"  Declared-support corner: Sabine T60 {corner['t60_sabine_s']:.2f} s "
+        f"({corner['geometry_family']} {corner['dims_m']} m at alpha "
+        f"{corner['absorption']}) vs ir_duration {corner['ir_duration_s']:.2f} s"
+        + ("" if corner["covered_by_record"] else "  — NOT covered by the record"),
+    )
+
+    limit = config.scenes.max_t60_over_ir_duration_frac
+    per_split = {
+        name: (entry["t60_over_ir_duration"]["t60_exceeds_ir_duration"]["count"],
+               entry["n_scenes"])
+        for name, entry in report.items()
+    }
+    over = sum(count for count, _ in per_split.values())
+    total = sum(n for _, n in per_split.values())
+    if total and (over / total) > limit:
+        lines = "\n".join(
+            f"    {name}: {count}/{n} scenes"
+            for name, (count, n) in per_split.items() if count
+        )
+        raise ValueError(
+            f"ir_duration is {config.ir_duration} s, but {over} of {total} scenes "
+            f"({over / total:.3%}) exceed it — more than "
+            f"scenes.max_t60_over_ir_duration_frac ({limit}) allows:\n{lines}\n"
+            f"A T30/EDT fitted over a truncated record measures the truncation, not "
+            f"the room. Lengthen ir_duration, narrow the geometry/absorption ranges, "
+            f"or raise the declared tolerance and say why. For reference the declared "
+            f"support reaches Sabine T60 {corner['t60_sabine_s']:.2f} s "
+            f"({corner['geometry_family']} {corner['dims_m']} m at alpha "
+            f"{corner['absorption']})."
+        )
+
+
+def _flag_counts(room_stats: list[dict], flags: tuple[str, ...], **context) -> dict:
+    """Count and fraction for each named per-scene boolean, plus its context.
+
+    Reported as counts rather than a bare boolean so a reader sees how much of a
+    split is affected: "100 % of test_material_shift is outside the diffuse-field
+    domain" and "one scene is" are very different disclosures, and the flag alone
+    cannot tell them apart (AC-21/AC-22).
+    """
+    n = len(room_stats)
+    out: dict = {"n_scenes": n, **context}
+    for flag in flags:
+        count = sum(1 for r in room_stats if r[flag])
+        out[flag] = {
+            "count": count,
+            "fraction": (count / n) if n else None,
+        }
+    return out
 
 
 def _summarize(values: list[float]) -> dict:
@@ -247,6 +393,10 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # while placement_report.json declared the smaller set.
     for stale in out_dir.glob("scene_*.json"):
         stale.unlink()
+
+    # Config-level pre-flight: no scene is generated under a placement regime the
+    # active backend could not render (AC-13/F-48/RD-45).
+    _check_regimes_clear_backend_floor(config)
 
     scenes_cfg = config.scenes
     id_axes = dict(scenes_cfg.id_regime)  # {geometry, placement, material}
@@ -287,13 +437,18 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             attempts_total += stats["attempts"]
             rejected["below_min"] += stats["below_min"]
             rejected["above_max"] += stats["above_max"]
-            if regime.distance_range is not None and stats["max_reachable_m"] < regime.distance_range[1]:
+            declared_max = None if regime.distance_range is None else regime.distance_range[1]
+            if declared_max is not None and stats["max_reachable_m"] < declared_max:
                 unreachable_max += 1
             distance = float(np.linalg.norm(np.subtract(src, rcv)))
             distances.append(distance)
             src_heights.append(src[2])
             rcv_heights.append(rcv[2])
-            room_stats.append(_room_acoustics(dims, absorption, distance))
+            room_stats.append(_room_acoustics(
+                dims, absorption, distance,
+                alpha_limit=scenes_cfg.diffuse_field_alpha_limit,
+                ir_duration_s=config.ir_duration,
+            ))
 
             spec = SceneSpec(
                 scene_id=f"scene_{scene_idx:04d}",
@@ -333,12 +488,31 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             # corner-bias bug that collapsed only the receiver height band.
             "source_height_m": _summarize(src_heights) if src_heights else None,
             "receiver_height_m": _summarize(rcv_heights) if rcv_heights else None,
-            # The DRR-relevant descriptors (AC-09) — see _room_acoustics.
+            # The DRR-relevant descriptors (AC-09) — see _room_acoustics. Guarded
+            # like the three siblings above (F-46): `_summarize` reduces over the
+            # list, so an empty split reached numpy's bare "zero-size array to
+            # reduction operation minimum" instead of a named, readable summary.
             **{
-                f"{key}": _summarize([r[key] for r in room_stats])
+                f"{key}": (
+                    _summarize([r[key] for r in room_stats]) if room_stats else None
+                )
                 for key in ("volume_m3", "t60_sabine_s", "t60_eyring_s",
-                            "critical_distance_m", "d_over_rc", "drr_db")
+                            "critical_distance_m", "d_over_rc", "drr_db",
+                            "sabine_eyring_ratio")
             },
+            # Validity of the estimates directly above (AC-21) and of the record
+            # length against them (AC-22). Counts, not just a flag, so the reader
+            # sees HOW MUCH of a split is outside the diffuse-field domain rather
+            # than only that some of it is.
+            "diffuse_field_validity": _flag_counts(
+                room_stats,
+                ("alpha_above_diffuse_limit", "rc_exceeds_max_dim"),
+                alpha_limit=scenes_cfg.diffuse_field_alpha_limit,
+            ),
+            "t60_over_ir_duration": _flag_counts(
+                room_stats, ("t60_exceeds_ir_duration",),
+                ir_duration_s=config.ir_duration,
+            ),
         }
 
     # Canonical, not verbosity-gated. Two jobs: it is the rejection-sampling
@@ -348,6 +522,8 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # E1 report state exactly which distance distribution stood in for Research
     # I's unspecified mid_pair/far_pair sub-ranges (RD-29).
     (out_dir / "placement_report.json").write_text(json.dumps(report, indent=2))
+
+    _disclose_and_gate_record_length(config, report, verbosity)
 
     n_shift = sum(sp.count for sp in config.shift_splits.values())
     emit(

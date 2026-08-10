@@ -5,7 +5,12 @@ import pytest
 
 from amcd.config import Config
 
-from tests.conftest import QUIET, dry_run_simulator, tiny_config
+from tests.conftest import (
+    CANONICAL_DRY_RUN,
+    QUIET,
+    dry_run_simulator,
+    tiny_config,
+)
 
 
 class TestConfigLoad:
@@ -19,7 +24,7 @@ class TestConfigLoad:
         assert cfg.model.name == "vanilla_cnn"
 
     def test_load_dry_run_overrides_base(self) -> None:
-        cfg = Config.load(Path("configs/base.yaml"), Path("configs/dry_run.yaml"))
+        cfg = Config.load(*CANONICAL_DRY_RUN)
         assert cfg.simulator.name == "dry_run"
         # F-11 scoping: switching the simulator name must not leave gsound_sir's
         # params attached to dry_run — dry_run gets ITS OWN params file, and none

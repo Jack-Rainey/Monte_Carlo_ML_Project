@@ -31,7 +31,18 @@ model:
 
 # ── Audio ─────────────────────────────────────────────────────────────────────
 sample_rate: 48000
-ir_duration: 3.0
+# The record must be long enough for the longest decay this config's own declared
+# scene support admits, or T30/EDT measure the truncation rather than the room
+# (AC-22). The worst corner here is the largest shoebox at the lowest absorption —
+# 12 x 10 x 5 m (V = 600 m3, S = 460 m2) at alpha = 0.05 → Sabine T60 = 4.20 s —
+# so 3.0 s (the Research I value) did NOT cover base's support. 4.25 s covers it
+# with margin rather than by equality. Config load recomputes this corner from the
+# declared ranges and records it; gen-scenes hard-gates on the REALIZED over-limit
+# fraction (scenes.max_t60_over_ir_duration_frac), which base declares as 0.0.
+#
+# configs/research_i.yaml deliberately stays at 3.0 s — that is an RI-pinned value,
+# not a research choice, so its 4.09 s corner is a structural deviation it discloses.
+ir_duration: 4.25
 ambisonics_order: 3
 
 # ── Simulation ray budgets ────────────────────────────────────────────────────
@@ -69,6 +80,18 @@ scenes:
   # Rejection-sampling bound, consumed only by regimes declaring a distance_range.
   # Exceeding it raises with the geometry that made the constraint unreachable.
   max_placement_attempts: 1000
+  # Largest fraction of generated scenes whose Sabine T60 may exceed ir_duration
+  # (AC-22). ZERO here: ir_duration 4.25 s was chosen above specifically to cover
+  # this config's worst declared corner (4.20 s), so "the record covers the scene"
+  # is enforced rather than merely asserted. A run that trips this has either
+  # widened the geometry/absorption ranges or shortened the record.
+  max_t60_over_ir_duration_frac: 0.0
+  # Absorption above which the diffuse-field closed forms (Sabine, Eyring, critical
+  # distance, DRR) become extrapolations rather than estimates (AC-21). ~0.3 is the
+  # usual textbook limit. Scenes above it are FLAGGED in placement_report.json and
+  # summarized per split — never dropped, and no formula changes — so the E1 reader
+  # can see when a reported DRR comes from a model whose premise has failed.
+  diffuse_field_alpha_limit: 0.3
   geometry_families:
     # dims: per-axis (lo, hi) metre ranges. corridor's long axis is DISJOINT from
     # shoebox's so geometry_shift is a genuine held-out region.
@@ -77,13 +100,35 @@ scenes:
   placement_regimes:
     # `height_range` and `distance_range` are REQUIRED KEYS that may be null:
     # presence is mandatory so a constraint is never silently defaulted, and null
-    # explicitly declares "no constraint". base.yaml declares none of them — the
-    # Research I values (heights 1.2-1.8 m, separation 1.0-10.0 m) are pinned in
-    # configs/research_i.yaml, which is the config that claims RI faithfulness.
+    # explicitly declares "no constraint". `height_range` is left unconstrained
+    # here — Research I's 1.2-1.8 m is pinned in configs/research_i.yaml, the
+    # config that claims RI faithfulness.
+    #
+    # `distance_range` is NOT left unconstrained (F-48/AC-13). Both regimes
+    # declare a 1.0 m MINIMUM with no maximum ([lo, null]). Three reasons, in
+    # order of weight:
+    #   1. Acoustics. At d = 0.3 m in a mid-sized base room (S ~ 200 m2, alpha 0.2
+    #      → critical distance r_c ~ 1.0 m) the direct-to-reverberant ratio is
+    #      20*log10(r_c/d) = +10.5 dB: direct-dominated, C50/D50 saturating, and
+    #      the diffuse tail this study is about buried 10 dB down. That is a
+    #      near-field sub-population where the denoising task is trivially easy.
+    #      1.0 m sits near DRR ~ 0 dB.
+    #   2. It is inside the ISO 3382-1 5.3 minimum-distance band d_min =
+    #      2*sqrt(V/(c*T)) evaluated over the support declared above: 0.41 m at the
+    #      smallest room's alpha = 0.05 corner, 1.65 m at its alpha = 0.80 corner,
+    #      ~2.6 m at the largest. A single global constant cannot satisfy a
+    #      per-scene criterion; 1.0 m sits inside the band (per-scene form is a
+    #      DEFERRED ledger row — the per-regime schema cannot express it today).
+    #   3. It matches Research I's minimum, so base and research_i.yaml share a
+    #      separation floor and stay comparable on this axis.
+    # This is a RESEARCH choice. The backend's own floor (dry_run 0.3 m;
+    # gsound_sir source_radius + listener_radius = 0.2 m) is only a lower limit on
+    # it, checked at gen-scenes — never the source of the number (RD-57).
+    # Satisfiable: the smallest base room's admissible box admits 3.16 m.
     interior_random:
-      { type: interior, corner_frac: null, height_range: null, distance_range: null }
+      { type: interior, corner_frac: null, height_range: null, distance_range: [1.0, null] }
     near_corner:
-      { type: corner, corner_frac: 0.2, height_range: null, distance_range: null }
+      { type: corner, corner_frac: 0.2, height_range: null, distance_range: [1.0, null] }
   material_regimes:
     # absorption: (lo, hi). ceiling_absorptive is DISJOINT from mixed so
     # material_shift is a genuine held-out region.

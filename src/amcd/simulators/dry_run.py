@@ -57,7 +57,15 @@ class DryRunSimulator:
         self.n_samples = n_samples
         self.sample_rate = sample_rate
         self.speed_of_sound_m_s = speed_of_sound_m_s
-        self.min_source_receiver_distance_m = min_source_receiver_distance_m
+        self._min_separation_m = min_source_receiver_distance_m
+
+    @classmethod
+    def min_source_receiver_distance_m(cls, params: dict) -> float:
+        """Required pre-render declaration (`Simulator`). Config-governed here:
+        the scaffold's floor is a stated policy, not derivable from anything else
+        it declares — unlike gsound_sir, whose floor follows from its sphere radii.
+        """
+        return float(params["min_source_receiver_distance_m"])
 
     def render(self, scene: SceneSpec, ray_budget: int) -> IRResult:
         # Separate RNG for scene structure vs noise — structure fixed, noise varies with budget
@@ -83,7 +91,7 @@ class DryRunSimulator:
         src = np.asarray(scene.source_pos, dtype=np.float64)
         rcv = np.asarray(scene.receiver_pos, dtype=np.float64)
         distance = float(np.linalg.norm(src - rcv))
-        if distance < self.min_source_receiver_distance_m:
+        if distance < self._min_separation_m:
             # Was a silent `np.clip(..., 0.3, None)`. That made the scaffold report
             # the onset of a 0.3 m path for any closer pair — contradicting the
             # speed of sound it now declares into canonical provenance — and it
@@ -91,10 +99,10 @@ class DryRunSimulator:
             # would be overlapping at such a separation (F-43 / AC-13).
             raise ValueError(
                 f"scene {scene.scene_id!r}: source-receiver separation "
-                f"{distance:.4f} m is below {self.min_source_receiver_distance_m} m. At that range the "
+                f"{distance:.4f} m is below {self._min_separation_m} m. At that range the "
                 f"direct term 1/d diverges and a real backend's source/listener "
                 f"spheres overlap. Declare a placement `distance_range` with a "
-                f"lower bound of at least {self.min_source_receiver_distance_m} m."
+                f"lower bound of at least {self._min_separation_m} m."
             )
         direct_gain = 1.0 / distance
 
