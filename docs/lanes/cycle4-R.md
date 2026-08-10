@@ -58,19 +58,12 @@ the ownership hook will refuse the write; record status changes in
    `speed_of_sound_m_s`.
 4. **RD-21** is the truncation half of the above and lands with it.
 
-## What you must not do
+## Build against the seam
 
-**No 720-scene render.** RD-33a has not lifted and this lane does not lift it.
-
-RD-17 carries a standing permission for a real gsound render of **≤ 4 scenes**
-into a throwaway run dir, and that permission is *not* gated on RD-33a — but
-RD-17 is a Step-6 row and is not assigned to you. If your work reaches the point
-where a ≤ 4-scene render is the natural next evidence, **stop and say so in your
-inbox**; that is a decision for the user and the integrator, not a lane.
-
-Build against the seam: everything goes through `build_simulator`, never pygsound
-directly. That is what makes the eventual probe an engineering-feasibility
-artifact rather than an accidental result.
+Everything goes through `build_simulator`, never pygsound directly. That is what
+keeps the eventual RD-17 probe an engineering-feasibility artifact rather than an
+accidental result — and it is a binding condition of your render permission,
+stated in full under Pass condition below.
 
 ## Pass condition
 
@@ -85,8 +78,30 @@ Steps 2+3 are structural, so most of the evidence is a shape, not a number:
   scaffolding rule, and a downstream `isinstance` check would be a defect.
 
 **Plus the step-0 condition, which is the one that matters:** `render()` returns
-a real `IRResult`. How that is evidenced is set by the render-evidence decision
-recorded at the top of `docs/lanes/cycle4.yaml` — do not decide it mid-lane.
+a real `IRResult` from a **1-scene smoke render**, and you are permitted to run
+it — see below. Do not re-open this mid-lane; it is already decided.
+
+## Your render permission, and its exact edges
+
+RD-17 carries a standing ≤4-scene render permission that is **not** gated on
+RD-33a. Cycle 4 sub-grants **exactly ONE** of those scenes to this lane, for a
+smoke render whose only purpose is to show the worker returns a real `IRResult`.
+
+Binding bounds — all of them:
+
+- **one scene**, into a **throwaway `run_dir`**;
+- through **`build_simulator`**, never pygsound directly;
+- **not** a dataset render, **not** an E4 result, and it produces **no reported
+  number** — nothing from it may reach `ci_table.csv` or an E1/E4 claim;
+- it does **not** lift RD-33a, and you must not describe it as having done so;
+- the remaining ≤3 scenes belong to the Step-6 probe (RD-17), which is **not
+  yours** this cycle.
+
+**If you want more than one scene, or any render beyond this smoke test: STOP and
+write it in your inbox.** The grant does not stretch, and a lane that quietly
+widens it is the failure the whole ownership scheme exists to prevent.
+
+**No 720-scene render under any circumstances.**
 
 ## Evidence
 

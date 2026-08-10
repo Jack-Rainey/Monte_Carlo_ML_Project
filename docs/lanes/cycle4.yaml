@@ -149,7 +149,11 @@ lanes:
       `IRResult` through `build_simulator`. RD-24/08/67/21 are requirements ON
       that render, not substitutes for it — a pass condition satisfiable with
       synthetic PathData while `render()` still raises `NotImplementedError`
-      would be this cycle's whole point missed (RD-89).
+      would be this cycle's whole point missed (RD-89). RENDER PERMISSION
+      (RD-89b, decided 2026-08-10): exactly ONE scene of RD-17's standing
+      ≤4-scene grant, throwaway run_dir, via build_simulator, no reported
+      number, does NOT lift RD-33a. Bounds in full in the brief; the grant does
+      not stretch — more than one scene means STOP and ask.
     owns:
       - src/amcd/simulators/base.py
       - src/amcd/simulators/render.py
