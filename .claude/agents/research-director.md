@@ -112,3 +112,14 @@ code review. State:
 - The one thing most likely to waste effort if left unchanged.
 If on-track, say so plainly and name the gate this advances — do not invent
 problems, and do not flag forward-looking design that serves the roadmap.
+
+**Where the row goes, and how it must be anchored.** If `LANE.md` exists at the
+repo root this is a lane worktree: write to that lane's
+`docs/ledger_inbox/<id>.md` instead of the ledger, which has one writer — the
+integrator (`docs/parallel_protocol.md`). Either way, anchor every concern with
+concrete repo-relative FILE PATHS (or plan steps, for a plan review), never a
+description alone: those paths are what assign the concern to a lane next cycle.
+
+When reviewing a PLAN that partitions work into lanes, judge the partition too:
+a lane that can move `ci_table.csv` while another lane also can is a methodology
+defect, not a scheduling detail.

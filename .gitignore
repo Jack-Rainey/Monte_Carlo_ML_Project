@@ -18,3 +18,9 @@ __pycache__/
 
 # Claude Code user-local settings (project agents in .claude/agents/ ARE tracked)
 .claude/settings.local.json
+
+# Per-worktree lane identity, written by scripts/new_lane.py (docs/parallel_protocol.md).
+# Never committed: each lane worktree carries a DIFFERENT one, and a committed copy
+# would follow a merge into the main tree and tell the integrator it is a lane.
+LANE.md
+.claude/lane.json

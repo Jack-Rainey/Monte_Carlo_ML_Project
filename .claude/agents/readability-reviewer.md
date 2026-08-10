@@ -123,3 +123,11 @@ For each finding, name the file and line and give a concrete suggested change. B
 
 If the code is already clear, say so and raise nothing. Do not manufacture findings to look
 busy — inventing clutter is the exact failure mode you exist to prevent.
+
+**Where the row goes, and how it must be anchored.** If `LANE.md` exists at the
+repo root this is a lane worktree: write to that lane's
+`docs/ledger_inbox/<id>.md` instead of the ledger, which has one writer — the
+integrator (`docs/parallel_protocol.md`). Either way, anchor every finding with
+concrete repo-relative FILE PATHS, never a description alone: those paths are
+what assign the finding to a lane next cycle, and a finding anchored only in
+prose cannot be assigned without re-deriving your work.

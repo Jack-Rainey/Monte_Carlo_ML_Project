@@ -68,3 +68,11 @@ SEVERITY (blocker | major | minor); WHAT'S WRONG; STANDARD/DEFINITION violated;
 EVIDENCE (file:line or probe output); CONFIRMING TEST. End with the single most
 consequential correctness risk and the synthetic signal that would confirm or
 kill it. If the physics is right, say so — do not manufacture findings.
+
+**Where the row goes, and how it must be anchored.** If `LANE.md` exists at the
+repo root this is a lane worktree: write to that lane's
+`docs/ledger_inbox/<id>.md` instead of the ledger, which has one writer — the
+integrator (`docs/parallel_protocol.md`). Either way, anchor every finding with
+concrete repo-relative FILE PATHS, never a description alone: those paths are
+what assign the finding to a lane next cycle, and a finding anchored only in
+prose cannot be assigned without re-deriving your work.

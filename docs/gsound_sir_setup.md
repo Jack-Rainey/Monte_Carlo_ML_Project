@@ -138,9 +138,11 @@ the pinned upstream, not review findings, and the ledger holds only unresolved
 findings. Verified against SHA `608ea30f6dc4cda149c18947f9cae48bd379fa27` on
 2026-08-01 by calling into the built render env.
 
-**Pinned SHA** `608ea30f6dc4cda149c18947f9cae48bd379fa27` (yongyizang/GSound-SIR
-main HEAD). The clone lives at `external/GSound-SIR`, gitignored — it is a build
-artifact, not vendored source (CLAUDE.md forbids a modified local copy).
+**Upstream** https://github.com/yongyizang/GSound-SIR — declared once, as
+`UPSTREAM_URL` in `scripts/setup_gsound_sir.py`. **Pinned SHA**
+`608ea30f6dc4cda149c18947f9cae48bd379fa27` (main HEAD at the time). The clone
+lives at `external/GSound-SIR`, gitignored — it is a build artifact, not vendored
+source (CLAUDE.md forbids a modified local copy).
 
 ### `generate_ambisonic_ir` — there is no `path_types` argument
 

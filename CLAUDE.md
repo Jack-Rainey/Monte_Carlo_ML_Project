@@ -6,6 +6,9 @@
 
 ## Operating rules
 
+- **Read `LANE.md` at the repo root before anything else.** It declares which
+  parallel lane this session is and which files it may edit. If it is absent, you
+  are the integrator and own everything. See Parallel lanes below.
 - **Plan Mode** for any stage implementation or methodology change. Every plan
   must cite the `docs/design_spec.md` section and the invariants it touches, and
   name which files/functions change, in what order.
@@ -80,6 +83,31 @@ name → write findings to the ledger → address OPEN findings → repeat.
 - Never end the loop because you are near a token/time limit — use the Stopping
   rule instead.
 
+## Parallel lanes
+
+Several sessions may work this repo at once, one per git worktree. Full protocol:
+`docs/parallel_protocol.md`. Five rules govern it:
+
+1. **Ownership is by file and exclusive** — a lane edits only its declared files,
+   so textual merge conflicts are impossible. `scripts/lane_guard.py` enforces it.
+2. **The metric COMPUTATION path is always ONE lane** (`evaluation/`,
+   `representations/`, `acoustics.py`, `simulators/dry_run.py`): each lane's pass
+   condition is a fixed-seed `ci_table.csv` A/B, and two lanes moving that table
+   invalidate both. But the files that WRITE the reported artifacts —
+   `stats/aggregate.py`, `reporting/tables.py` — sit with the cache/provenance
+   lane, so a fix that adds a reported COLUMN spans two lanes however
+   metric-shaped it looks (RD-82).
+3. **Lanes never edit `docs/review_ledger.md`, `CLAUDE.md`, `docs/design_spec.md`**
+   — one writer, the integrator. Lanes write to `docs/ledger_inbox/<lane>.md`.
+4. **A finding spanning two lanes' files is not parallelized** — it goes to the
+   integrator's serial queue, declared in the cycle's partition file.
+5. **Reviewers count only on the integrated tree.** A lane-branch review is a
+   self-check, never a clean pass.
+
+In a lane, prefix every command with `PYTHONPATH=<worktree>/src`: the editable
+install pins the MAIN checkout, so a bare `pytest`/`amcd` measures the wrong
+tree. `tests/test_source_tree_isolation.py` fails if you forget.
+
 ## Reporting and stopping
 
 - Report findings quantitatively: "resolved X of Y falsifier findings; Z OPEN."
@@ -109,15 +137,11 @@ allow-list (`.claude/settings.json`) pre-approves the safe, repeated commands
 (running the pipeline, inspecting rows, tests, read-only git). Only ask the user
 to run something if it needs a privilege the allow-list deliberately withholds.
 
-- **Prefer uncompounded commands.** A compound command (`;`, `&&`, `|` chaining
-  multiple tools) forces a permission prompt whenever ANY sub-command is not
-  pre-approved, even if every piece would be allowed on its own. Before running a
-  compound line that would prompt, split it into separate single-tool calls that
-  each match an existing allow-list entry (e.g. run `ls`, then `grep`, then
-  `cat` as three calls rather than `ls … | grep …; cat …`). Batch the independent
-  calls in one message. Only compound when the pipe is essential to the result
-  (e.g. `grep` filtering another command's live output) or the whole line is
-  already pre-approved. This dramatically reduces approval friction.
+- **Prefer uncompounded commands.** A compound line (`;`, `&&`, `|`) prompts
+  whenever ANY sub-command is unapproved, even if each piece would pass alone —
+  so split it into single-tool calls that each match an allow-list entry, and
+  batch the independent ones in a single message. Compound only when the pipe is
+  essential to the result or the whole line is already pre-approved.
 
 ## Parameters and configuration
 
@@ -155,14 +179,10 @@ to run something if it needs a privilege the allow-list deliberately withholds.
 
 ## Cross-platform portability (project requirement)
 
-The pipeline — including the real `gsound_sir` render backend — must run in two
-host configurations, and code is written for both from day one:
-
-- **This machine (macOS / Apple Silicon):** the x86-only render step runs under
-  emulation (Rosetta 2 via an `osx-64` conda env); every other stage runs native
-  arm64 + MPS.
-- **A native x86_64 machine (Ubuntu or Windows desktop):** the same code runs
-  with no emulation and no edits.
+The pipeline — including the real `gsound_sir` render backend — must run both on
+this macOS/Apple-Silicon machine (where the x86-only render step is emulated) and
+on a native x86_64 Ubuntu or Windows desktop, from the same code with no edits.
+How each host is set up: `docs/gsound_sir_setup.md`.
 
 Rules that follow:
 
@@ -174,9 +194,9 @@ Rules that follow:
 - **Portable path/device handling.** Use `pathlib` (no hardcoded `/Volumes/...`
   or POSIX-only strings in package code); torch device selection must fall back
   cleanly (MPS → CUDA → CPU) rather than assume MPS exists.
-- **GSound-SIR is pulled from upstream GitHub at a config-pinned version**
-  (https://github.com/yongyizang/GSound-SIR, pinned by commit SHA in config for
-  reproducibility) — never vendored with local modifications.
+- **GSound-SIR is pulled from upstream GitHub at a version pinned by commit SHA
+  in config** — never vendored with local modifications. Repository URL and
+  installer: `docs/gsound_sir_setup.md`.
 - Reviewers treat a platform-coupled branch or hardcoded host path in package
   code as a defect (same class as scaffold coupling).
 

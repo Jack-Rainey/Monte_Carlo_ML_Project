@@ -1,0 +1,161 @@
+"""A lane partition must be a partition — no path owned twice.
+
+Parallel lanes are safe because ownership is exclusive: if no two lanes can
+write the same file, textual merge conflicts cannot occur and the
+shared-authority files keep exactly one writer (`docs/parallel_protocol.md`,
+rules 1 and 3). That guarantee rests entirely on the declaration in
+`docs/lanes/<cycle>.yaml` being disjoint, and a duplicated path removes it
+silently — the worktrees are still created, the guard still allows both lanes,
+and the collision surfaces only as a conflict at the merge, after the parallel
+work is already spent.
+
+So the partition is checked here rather than trusted. These tests run over every
+partition file in `docs/lanes/`, so a future cycle's declaration is covered the
+moment it is written.
+"""
+from pathlib import Path
+
+import pytest
+import yaml
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+#: `._`-prefixed entries are AppleDouble resource forks the host filesystem
+#: creates beside every file on this exFAT volume; they are not partitions. The
+#: package filters them the same way wherever it globs artifacts (evaluator.py,
+#: data/dataset.py) — see F-69, which is the same sidecar reaching a cache key.
+_PARTITIONS = sorted(
+    p for p in (_REPO_ROOT / "docs" / "lanes").glob("*.yaml")
+    if not p.name.startswith("._")
+)
+
+#: One writer each, by rule 3. The ledger is working memory for the loop, and
+#: CLAUDE.md and the design spec are the authorities a lane's plan cites — a
+#: lane editing the authority it is being judged against defeats the review.
+SHARED_AUTHORITY = ("docs/review_ledger.md", "CLAUDE.md", "docs/design_spec.md")
+
+
+def _partitions():
+    assert _PARTITIONS, "no partition file in docs/lanes/ — did the directory move?"
+    return [(p, yaml.safe_load(p.read_text())) for p in _PARTITIONS]
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_no_path_is_owned_by_two_lanes(path: Path, spec: dict) -> None:
+    owners: dict[str, str] = {}
+    for lane in spec["lanes"]:
+        for owned in lane["owns"]:
+            if owned in owners:
+                pytest.fail(
+                    f"{path.name}: '{owned}' is owned by BOTH lane {owners[owned]} "
+                    f"and lane {lane['id']}. Exclusive ownership is what makes the "
+                    "merge conflict-free; give the path to one lane and route the "
+                    "other's finding to the integrator queue (rule 4)."
+                )
+            owners[owned] = lane["id"]
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_no_lane_owns_a_shared_authority_file(path: Path, spec: dict) -> None:
+    for lane in spec["lanes"]:
+        for owned in lane["owns"]:
+            assert owned not in SHARED_AUTHORITY, (
+                f"{path.name}: lane {lane['id']} claims '{owned}', which has exactly "
+                "one writer — the integrator. Lanes report through their inbox."
+            )
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_lane_ids_and_inboxes_are_distinct(path: Path, spec: dict) -> None:
+    ids = [lane["id"] for lane in spec["lanes"]]
+    inboxes = [lane["inbox"] for lane in spec["lanes"]]
+    assert len(set(ids)) == len(ids), f"{path.name}: duplicate lane id in {ids}"
+    assert len(set(inboxes)) == len(inboxes), (
+        f"{path.name}: two lanes share an inbox in {inboxes} — distinct filenames "
+        "are what let the inboxes merge without conflict resolution."
+    )
+    for inbox in inboxes:
+        assert inbox.startswith("docs/ledger_inbox/"), (
+            f"{path.name}: inbox '{inbox}' is outside docs/ledger_inbox/, where the "
+            "integrator looks when folding closures into the ledger."
+        )
+
+
+def _owns(rel: str, patterns: list[str]) -> bool:
+    """Same matching rule `scripts/lane_guard.py` applies at edit time.
+
+    Kept in step with the guard deliberately: a row that passes this check and
+    is then refused by the hook would be the worst of both, so the two must
+    agree on what `dir/**` means.
+    """
+    for pattern in patterns:
+        if pattern.endswith("/**"):
+            prefix = pattern[: -len("/**")]
+            if rel == prefix or rel.startswith(prefix + "/"):
+                return True
+        elif rel == pattern:
+            return True
+    return False
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_every_row_is_fixable_inside_its_own_lane(path: Path, spec: dict) -> None:
+    """A row must be finishable without touching another lane's files.
+
+    Non-overlap alone does not give this. A row can be assigned to the lane that
+    owns the code it describes while its FIX or its TEST lands somewhere else —
+    F-72 was assigned to lane S with its test class in a file lane P owns, and
+    the ownership hook would have refused the edit halfway through the session
+    (RD-83). Declaring `fix:` and `test:` per row turns that into a failure at
+    declaration time, which costs seconds instead of a session.
+
+    A row that genuinely spans two lanes is not a partition bug — it belongs in
+    `integrator_queue:` with a reason (rule 4).
+    """
+    for lane in spec["lanes"]:
+        for row in lane["rows"]:
+            for kind in ("fix", "test"):
+                for target in row.get(kind, []):
+                    assert _owns(target, lane["owns"]), (
+                        f"{path.name}: row {row['id']} is assigned to lane "
+                        f"{lane['id']}, but its {kind} path '{target}' is outside "
+                        f"that lane's owned set. Either give the path to lane "
+                        f"{lane['id']}, or move the row to integrator_queue: with "
+                        "a reason (rule 4)."
+                    )
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_no_row_id_appears_in_two_places(path: Path, spec: dict) -> None:
+    """Every row is assigned exactly once, across all four lists.
+
+    The four lists (lane rows, integrator_queue, awaiting_re_review, and any
+    raised against the partition itself) are the partition's coverage claim. A
+    row in two of them means two different plans for it; a row in none is the
+    silent omission RD-73 exists to prevent.
+    """
+    seen: dict[str, str] = {}
+    buckets = [
+        *((lane["id"], [row["id"] for row in lane["rows"]]) for lane in spec["lanes"]),
+        ("integrator_queue", [row["id"] for row in spec.get("integrator_queue", [])]),
+        ("awaiting_re_review", spec.get("awaiting_re_review", [])),
+        ("raised_against_this_partition", spec.get("raised_against_this_partition", [])),
+    ]
+    for bucket, ids in buckets:
+        for row_id in ids:
+            assert row_id not in seen, (
+                f"{path.name}: row {row_id} appears in both '{seen[row_id]}' and "
+                f"'{bucket}'. Each row gets exactly one plan."
+            )
+            seen[row_id] = bucket
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_every_declared_brief_exists(path: Path, spec: dict) -> None:
+    """LANE.md sends the session to its brief; a missing one strands it."""
+    for lane in spec["lanes"]:
+        brief = _REPO_ROOT / lane["brief"]
+        assert brief.exists(), (
+            f"{path.name}: lane {lane['id']} points at '{lane['brief']}', which does "
+            "not exist. The brief is the session's actual instruction set."
+        )
