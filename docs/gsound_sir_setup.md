@@ -130,3 +130,86 @@ the likely cause — re-run with `--rebuild`. Sidecars inside `.git` cause the r
 
 **Auralizer build fails fetching pybind11.** Its CMake uses `FetchContent` to pull pybind11
 v2.11.1, so the build needs network access.
+
+## 4. Upstream API reference (verified by introspection, not from docs)
+
+Relocated here from `docs/review_ledger.md` (RR-30): these are durable facts about
+the pinned upstream, not review findings, and the ledger holds only unresolved
+findings. Verified against SHA `608ea30f6dc4cda149c18947f9cae48bd379fa27` on
+2026-08-01 by calling into the built render env.
+
+**Pinned SHA** `608ea30f6dc4cda149c18947f9cae48bd379fa27` (yongyizang/GSound-SIR
+main HEAD). The clone lives at `external/GSound-SIR`, gitignored — it is a build
+artifact, not vendored source (CLAUDE.md forbids a modified local copy).
+
+### `generate_ambisonic_ir` — there is no `path_types` argument
+
+```
+sh.generate_ambisonic_ir(order, listener_directions, intensities, distances,
+                         speeds, frequency_points, sample_rate,
+                         precise_early_reflections=False, normalize=True,
+                         early_reflection_threshold=0.01)
+```
+
+Upstream's own `auralizer/test.py` passes a `path_types` argument; it does not
+exist in the built module.
+
+### `frequency_points` are band EDGES, not centres
+
+They are `n_bands - 1` CROSSOVER frequencies, consumed as
+`CrossoverFilter crossover(sample_rate, freq_points)`
+(`auralizer/src/cpp/binding.cpp:304,334`), with a hard runtime check
+("Number of frequency points must be number of bands - 1").
+
+Traced end to end: `pygsound::Context()`
+(`ray_generator/src/pygsound/src/Context.cpp:8`) overrides GSound's log-spaced
+defaults with octave band **centres** `{63,125,250,500,1000,2000,4000,8000}` Hz,
+and `gs::FrequencyBands` derives crossovers as the geometric mean of adjacent
+centres (`gsFrequencyBands.cpp:83-88`). The correct values, as pinned in
+`configs/simulators/gsound_sir.yaml`, are therefore
+
+```
+[88.4, 176.8, 353.6, 707.1, 1414.2, 2828.4, 5656.9] Hz
+```
+
+⚠️ **Upstream `auralizer/test.py` is wrong here** — it passes
+`[125,250,500,1000,2000,4000,8000]`, i.e. the band centres used as if they were
+edges, which shifts every band edge ~½ octave high and misassigns the simulated
+per-band energies during SH synthesis. Do not copy it.
+
+### `getPathData` returns a dict wrapper, not a list
+
+```
+scene.getPathData(..., energy_percentage=100.0, max_rays=0, use_gpu=False)
+  -> {"path_data": [<per-source-listener-pair dict>, ...]}
+```
+
+The per-pair dict is `result["path_data"][i]`; `result[0]` raises `KeyError: 0`.
+Path retention is native upstream, so `path_retention {mode: all|top_percent|top_k,
+value}` maps directly onto `energy_percentage` / `max_rays` with no custom trimming.
+
+### PathData schema (pinned by the actual keys of `path_data[i]`)
+
+Arrays: `distances` (N,) f32 · `intensities` (N,8) f32 ·
+`listener_directions` (N,3) f32 · `source_directions` (N,3) f32 ·
+`path_types` (N,) uint32 · `speeds_of_sound` (N,) f32 ·
+`relative_speeds` (N,) f32 · `source_indices` (N,) uint64.
+Scalars: `num_paths` i64 · `num_bands` i64 · `total_energy` f64 ·
+`kept_energy_percentage` f64.
+
+### Other confirmed facts
+
+- `ps.Context` exposes `diffuse_count`, `specular_count`, `diffuse_depth`,
+  `specular_depth`, `threads_count`, `channel_type`, `sample_rate`, `normalize` —
+  confirming the diffuse/specular split the ray-budget axis rests on.
+- `createbox(width, length, height, absorp, scatter)` takes absorption as a scalar
+  **or a per-band sequence**, but **not per-surface** — the constraint behind the
+  deferred per-surface-materials decision.
+- The simulator uses **344 m/s**, not 343. It is compiled into C++ and can only be
+  DECLARED into provenance, never configured.
+
+### Observed smoke-test numbers (for comparison when re-verifying)
+
+A 5×4×3 m box at diffuse 5000 / specular 2000 gave 1,001,014 paths over 8 bands;
+IR shape **(16, 92859)** float32 (order 3 → 16 channels); onset 6.50 ms observed
+vs 6.52 ms predicted for the 2.236 m direct path at 344 m/s.
