@@ -24,7 +24,8 @@ class TestConfigLoad:
         # F-11 scoping: switching the simulator name must not leave gsound_sir's
         # params attached to dry_run — dry_run gets ITS OWN params file, and none
         # of gsound's keys (which its schema would reject) come along.
-        assert set(cfg.simulator.params) == {"speed_of_sound_m_s"}
+        assert set(cfg.simulator.params) == {
+            "speed_of_sound_m_s", "min_source_receiver_distance_m"}
         assert cfg.scenes.n_id == 20
         assert cfg.ir_duration == 0.25
         # dry_run declares its own small shift counts, overriding the base R1 defaults.

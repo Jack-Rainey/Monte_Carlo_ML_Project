@@ -58,6 +58,18 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 f"refusing to guess its split (config-as-source-of-truth)."
             )
         split = splits[scene_id]
+        # infer only ever writes predictions for TEST splits, so a prediction whose
+        # scene now sits in train/valid is residue from an earlier run under a
+        # different split assignment — a different model's output, which would
+        # otherwise be scored and reported as if it belonged here (F-37).
+        if split not in config.test_split_names:
+            raise RuntimeError(
+                f"scene {scene_id!r} has a prediction but splits.json assigns it to "
+                f"{split!r}, which is not a test split. Predictions are only produced "
+                f"for test splits, so this file is left over from a previous run "
+                f"under a different split assignment. Re-run infer (it now clears "
+                f"stale predictions) or use a fresh --run-dir."
+            )
 
         # Energy tensors for signal metrics
         pred_norm = torch.load(pred_path, weights_only=False)  # (C, n_bands, n_frames)

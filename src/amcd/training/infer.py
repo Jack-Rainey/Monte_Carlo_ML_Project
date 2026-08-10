@@ -30,6 +30,15 @@ def run_infer(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     predictions_dir = run_dir / "predictions"
     predictions_dir.mkdir(parents=True, exist_ok=True)
 
+    # Clear previous predictions before writing this model's (F-37). Predictions
+    # are keyed by scene_id, not by model or split assignment, so a re-run that
+    # moves a scene out of a test split — or simply trains a different model —
+    # leaves the OLD model's prediction on disk under a name the eval stage globs.
+    # Same residue pattern as F-25, one stage downstream.
+    for stale in (*predictions_dir.glob("*_pred.pt"),
+                  *predictions_dir.glob("*_decoded_ir.npy")):
+        stale.unlink()
+
     best_ckpt = checkpoint_dir / "best.pt"
     if not best_ckpt.exists():
         raise FileNotFoundError(f"No checkpoint found at {best_ckpt}. Run train first.")

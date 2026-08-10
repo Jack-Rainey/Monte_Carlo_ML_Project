@@ -134,13 +134,73 @@ class TestUpstreamChain:
             _pipeline(second, tmp_path).run_stage("preprocess")
 
 
-class TestReservedIdTag:
-    """F-28: `id` is the generator's pool tag, not an available split name."""
+class TestPredictionResidue:
+    """F-37: the F-25 residue pattern, one stage downstream.
+
+    `predictions/` was never cleared and eval GLOBS it, so a scene that moved out
+    of a test split kept a prediction made by a DIFFERENT model under a DIFFERENT
+    split assignment — and it was scored. Reproduced: 2 stale predictions reached
+    metrics.parquet under `train`.
+    """
+
+    def test_stale_predictions_do_not_survive_a_rerun(self, tmp_path: Path) -> None:
+        first = tiny_config(scenes={"n_id": 20}, seeds={"master": 0, "split_assignment": 111})
+        Pipeline(first, tmp_path, QUIET).run_all()
+
+        second = tiny_config(scenes={"n_id": 20}, seeds={"master": 0, "split_assignment": 222})
+        Pipeline(second, tmp_path, QUIET, force=True).run_all()
+
+        manifest = json.loads((tmp_path / "preprocessed" / "splits.json").read_text())
+        stale = [p.stem.replace("_pred", "") for p in (tmp_path / "predictions").glob("*_pred.pt")
+                 if manifest.get(p.stem.replace("_pred", "")) not in second.test_split_names]
+        assert not stale, f"predictions survive for scenes no longer in a test split: {stale}"
+
+    def test_eval_refuses_a_prediction_for_a_non_test_split(self, tmp_path: Path) -> None:
+        """Defence in depth: even if a stale file appears, it must not be scored."""
+        from amcd.evaluation.evaluator import run_eval
+
+        cfg = tiny_config(scenes={"n_id": 20})
+        Pipeline(cfg, tmp_path, QUIET).run_all()
+
+        manifest = json.loads((tmp_path / "preprocessed" / "splits.json").read_text())
+        train_scene = next(s for s, sp in manifest.items() if sp == "train")
+        sample = next((tmp_path / "predictions").glob("*_pred.pt"))
+        (tmp_path / "predictions" / f"{train_scene}_pred.pt").write_bytes(sample.read_bytes())
+
+        with pytest.raises(RuntimeError, match="not a test split"):
+            run_eval(cfg, tmp_path, QUIET)
+
+
+class TestReservedSplitNames:
+    """F-28 / F-38: names that collide with pipeline sentinels or directories."""
 
     def test_split_named_id_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="reserved"):
             tiny_config(splits={"id": {"role": "test", "count": 2,
                                        "axes": {"geometry": "corridor"}}})
+
+    def test_split_named_carrier_is_rejected(self) -> None:
+        """`carrier` is exempted from the stale-split sweep, so a split of that
+        name would be permanently exempt from clearing — reinstating F-25 for
+        itself (F-38)."""
+        with pytest.raises(ValueError, match="reserved"):
+            tiny_config(splits={"carrier": {"role": "test", "count": 2,
+                                            "axes": {"geometry": "corridor"}}})
+
+
+class TestOrphanHighTensor:
+    """F-39: the orphan backstop must scan both suffixes, as its docstring claims."""
+
+    def test_orphan_high_tensor_is_refused(self, tmp_path: Path) -> None:
+        cfg = tiny_config(scenes={"n_id": 12})
+        _through_preprocess(cfg, tmp_path)
+
+        train_dir = tmp_path / "preprocessed" / "train"
+        sample = next(train_dir.glob("*_high.pt"))
+        (train_dir / "scene_9999_high.pt").write_bytes(sample.read_bytes())
+
+        with pytest.raises(RuntimeError, match="absent from the manifest"):
+            EnergyDataset(tmp_path / "preprocessed", "train")
 
 
 class TestEmptySplitVisibility:

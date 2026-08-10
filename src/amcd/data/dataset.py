@@ -53,7 +53,10 @@ class EnergyDataset(Dataset):
         # is the residue that caused the leak, and silently skipping it would hide
         # that the run_dir holds two datasets. (Resource-fork files that appear on
         # exFAT volumes are not residue.)
-        on_disk = {p.stem[: -len("_low")] for p in split_dir.glob("*_low.pt")
+        # Both suffixes, not just `_low` — the check claims "any tensor not in the
+        # manifest", and an orphan `_high` with no `_low` partner would otherwise
+        # be invisible to the backstop guarding the F-25 blocker (F-39).
+        on_disk = {p.stem.rsplit("_", 1)[0] for p in split_dir.glob("*.pt")
                    if not p.name.startswith("._")}
         orphans = sorted(on_disk - set(scene_ids))
         if orphans:

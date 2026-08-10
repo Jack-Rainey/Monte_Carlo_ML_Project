@@ -189,6 +189,16 @@ def _room_acoustics(
     so the E1 write-up can characterize the dataset it generated. The rendered
     IRs remain the source of truth for every reported metric.
     """
+    if not distance > 0.0:
+        # DRR divides by d²; a coincident pair would silently report +inf into a
+        # canonical artifact. Geometrically degenerate anyway — guarded rather
+        # than clamped, so it cannot be reported as if it were a real scene
+        # (F-42; same family as the AC-13 minimum-separation gap).
+        raise ValueError(
+            f"source-receiver distance must be > 0 to characterize a scene; got "
+            f"{distance}. Declare a placement `distance_range` with a positive "
+            f"lower bound."
+        )
     lx, ly, lz = dims
     volume = lx * ly * lz
     surface = 2.0 * (lx * ly + ly * lz + lx * lz)

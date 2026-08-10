@@ -225,13 +225,25 @@ class Pipeline:
         upstream = STAGE_UPSTREAM.get(stage)
         if upstream is None:
             return own
+        # An upstream that declares no fingerprint cannot anchor a chain: its
+        # sentinel records `null`, which is indistinguishable from "never ran".
+        # No STAGE_UPSTREAM value points at such a stage today, but RD-41 exists to
+        # wire the remaining seven, and the first chain to cross one would
+        # otherwise report "has not completed" for a stage that did (F-41).
+        if STAGE_FINGERPRINT[upstream] is None:
+            raise RuntimeError(
+                f"Stage {stage!r} declares {upstream!r} as its upstream, but "
+                f"{upstream!r} has no fingerprint in STAGE_FINGERPRINT, so its "
+                f"sentinel cannot say WHICH config its artifacts belong to. Give "
+                f"{upstream!r} a fingerprint before chaining to it."
+            )
         recorded = self._recorded_fingerprint(upstream)
         if recorded is None:
             raise RuntimeError(
                 f"Stage {stage!r} depends on {upstream!r}, which has not completed "
-                f"in {self.run_dir} (no fingerprinted sentinel). Run {upstream!r} "
-                f"first — running {stage!r} now would record a provenance chain for "
-                f"artifacts that do not exist."
+                f"in {self.run_dir} (no readable fingerprinted sentinel). Run "
+                f"{upstream!r} first — running {stage!r} now would record a "
+                f"provenance chain for artifacts that do not exist."
             )
         # The upstream artifacts must ALSO be current for this config. Recursing
         # here (rather than only comparing our own inputs) is what catches a stale

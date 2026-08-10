@@ -36,6 +36,12 @@ def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     for stale in out_dir.iterdir():
         if stale.is_dir() and stale.name != "carrier":
             shutil.rmtree(stale)
+    # Create a directory for EVERY declared split, including ones that end up
+    # empty (F-40). Otherwise a split that receives no scenes has no directory and
+    # EnergyDataset raises "Split directory not found", pointing at the filesystem
+    # instead of at the empty split that `split_counts` now reports as 0.
+    for split_name in config.splits:
+        (out_dir / split_name).mkdir(parents=True, exist_ok=True)
 
     # Load scene specs
     scene_paths = sorted(scenes_dir.glob("scene_*.json"))

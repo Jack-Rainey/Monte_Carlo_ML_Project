@@ -14,3 +14,11 @@
 # and the onset QC is a paired low-vs-high check within ONE backend, so a constant
 # speed offset cancels exactly.
 speed_of_sound_m_s: 343.0
+
+# Smallest source-receiver separation this backend will render; closer pairs are
+# rejected loudly rather than clamped. 0.3 m matches the old silent clip, which
+# hid two things: the 1/d direct term diverging, and the fact that GSound's source
+# and listener spheres (radius 0.1 m each) would be OVERLAPPING at that range.
+# The real backend's floor is source_radius + listener_radius, a different number,
+# which is why this is per-simulator config rather than one shared constant.
+min_source_receiver_distance_m: 0.3

@@ -37,17 +37,26 @@ class DryRunSimulator:
         #: config-governed rather than a Python literal.
         speed_of_sound_m_s: float
 
+        #: Smallest source-receiver separation this backend will render. Below it
+        #: the 1/d direct term diverges and a real backend's source and listener
+        #: spheres overlap, so the scene is geometrically degenerate rather than
+        #: merely extreme. Declared, not hardcoded: the real backend's floor is
+        #: source_radius + listener_radius, a different number (AC-13).
+        min_source_receiver_distance_m: float
+
     def __init__(
         self,
         n_channels: int,
         n_samples: int,
         sample_rate: int,
         speed_of_sound_m_s: float,
+        min_source_receiver_distance_m: float,
     ) -> None:
         self.n_channels = n_channels
         self.n_samples = n_samples
         self.sample_rate = sample_rate
         self.speed_of_sound_m_s = speed_of_sound_m_s
+        self.min_source_receiver_distance_m = min_source_receiver_distance_m
 
     def render(self, scene: SceneSpec, ray_budget: int) -> IRResult:
         # Separate RNG for scene structure vs noise — structure fixed, noise varies with budget
@@ -66,7 +75,20 @@ class DryRunSimulator:
         # --- Direct-to-reverberant ratio from source↔receiver distance (placement shift) ---
         src = np.asarray(scene.source_pos, dtype=np.float64)
         rcv = np.asarray(scene.receiver_pos, dtype=np.float64)
-        distance = float(np.clip(np.linalg.norm(src - rcv), 0.3, None))
+        distance = float(np.linalg.norm(src - rcv))
+        if distance < self.min_source_receiver_distance_m:
+            # Was a silent `np.clip(..., 0.3, None)`. That made the scaffold report
+            # the onset of a 0.3 m path for any closer pair — contradicting the
+            # speed of sound it now declares into canonical provenance — and it
+            # masked the fact that a real backend's source and listener spheres
+            # would be overlapping at such a separation (F-43 / AC-13).
+            raise ValueError(
+                f"scene {scene.scene_id!r}: source-receiver separation "
+                f"{distance:.4f} m is below {self.min_source_receiver_distance_m} m. At that range the "
+                f"direct term 1/d diverges and a real backend's source/listener "
+                f"spheres overlap. Declare a placement `distance_range` with a "
+                f"lower bound of at least {self.min_source_receiver_distance_m} m."
+            )
         direct_gain = 1.0 / distance
 
         # --- Propagation delay: nothing arrives before the direct sound (AC-11) ---

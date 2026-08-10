@@ -69,6 +69,13 @@ _ROLE_KEYS = ("tune", "sweep")
 #: because the tag also appears in existing on-disk scene specs.
 ID_POOL_TAG = "id"
 
+#: Names inside `preprocessed/` that are NOT split directories. A split declared
+#: with one of these names would collide with that directory — `carrier` in
+#: particular is exempted from the stale-split sweep, so a split named `carrier`
+#: would be permanently exempted from clearing and reinstate the F-25 leak for
+#: itself. Reserved for the same reason as ID_POOL_TAG (F-38).
+RESERVED_SPLIT_NAMES = (ID_POOL_TAG, "carrier")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Role grammar (fixed / tuned / swept)
@@ -589,12 +596,16 @@ class Config(BaseModel):
                 f"metric_onset_rel_db must be < 0 (dB below peak); got {self.metric_onset_rel_db}"
             )
 
-        # `id` is the generator's reserved "hash-bucket me" tag, not a split name.
-        if ID_POOL_TAG in self.splits:
+        # Reserved names: `id` is the generator's "hash-bucket me" tag (a split of
+        # that name silently captures or loses scenes instead of being routed), and
+        # `carrier` is a non-split directory inside preprocessed/ that the stale-
+        # split sweep deliberately skips.
+        clashes = sorted(set(self.splits) & set(RESERVED_SPLIT_NAMES))
+        if clashes:
             raise ValueError(
-                f"{ID_POOL_TAG!r} is reserved: it is the tag the generator puts on "
-                f"unassigned id-pool scenes, so a split of that name silently "
-                f"captures or loses scenes instead of being routed. Rename the split."
+                f"split name(s) {clashes} are reserved (they collide with pipeline "
+                f"sentinels or non-split directories, and would silently misroute or "
+                f"retain scenes). Reserved: {list(RESERVED_SPLIT_NAMES)}."
             )
         self._check_id_pool_sizing()
         self._check_split_seeds()

@@ -64,7 +64,8 @@ class TestSimulatorBlock:
         assert cfg.simulator.name == "dry_run"
         # dry_run gets its OWN params file; none of gsound's keys survive the switch
         # (its schema forbids extras, so any that did would fail loudly here).
-        assert set(cfg.simulator.params) == {"speed_of_sound_m_s"}
+        assert set(cfg.simulator.params) == {
+            "speed_of_sound_m_s", "min_source_receiver_distance_m"}
 
     def test_unknown_simulator_fails_loud(self) -> None:
         with pytest.raises(ValueError, match="Unknown simulator"):
