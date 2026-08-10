@@ -37,9 +37,14 @@ grep -rn 'F-09' src/ tests/ configs/
 ```
 
 recovers the substance. `configs/` belongs in that list: RD-05's only citation in
-the whole repo is in `configs/base.yaml`. Verified 2026-08-10 by checking every id
-cited anywhere in `src/`, `tests/` and `configs/` against
-`git log -S … -- docs/review_ledger.md`; every other cited id IS recoverable.
+the whole repo is in `configs/base.yaml`.
+
+**Verified at the close of cycle 3 (2026-08-10, HEAD `ffe87b6`):** all **150**
+distinct ids cited anywhere in `src/`, `tests/`, `configs/`, `README.md`,
+`CLAUDE.md` and `docs/design_spec.md` are either a live row above, one of the 16
+exceptions, or recoverable by `git log -S`. Re-run this sweep when closing a cycle
+— citations have twice outrun the ledger (RR-40), most recently RD-75/RD-78/RD-79,
+which this cycle acted on before writing them down.
 
 ## OPEN findings
 
