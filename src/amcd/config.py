@@ -210,7 +210,8 @@ def _sweep_axes(node: Any, path: str = "") -> dict[str, int]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class Seeds(BaseModel):
-    """One master seed plus optional per-aspect overrides (design_spec §5, inv #5).
+    """One master seed plus optional per-aspect overrides (design_spec §10 "Invariants",
+    inv #5; the per-aspect derivation itself is §7 "Config system").
 
     Any aspect left unset is derived independently from `master` via
     SeedSequence.spawn — single-knob reproducibility with per-aspect independence
@@ -529,7 +530,8 @@ class SimulatorSpec(BaseModel):
     config edit.
 
     NOT here (named non-goal, RD-40): `low_ray_budget` / `high_ray_budget`. They are
-    the swept research axis (design_spec §7 l.219) and stay TOP-LEVEL Config fields.
+    the swept research axis (design_spec §7 "Config system — three parameter roles",
+    the swept-role note) and stay TOP-LEVEL Config fields.
     Inside a plugin block they would sit under `_merge_layer`'s F-11 name-change
     scoping, which drops a block's `params` when the name changes — silently
     discarding the sweep the moment a second raytracer is selected.

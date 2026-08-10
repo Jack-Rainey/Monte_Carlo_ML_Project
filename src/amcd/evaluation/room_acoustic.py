@@ -107,10 +107,10 @@ def _butter_octave_filter(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.n
     exercised the reflection. It is a property of the metric path, not of that fix.
 
     An impulse response is silent before its direct arrival, so the physically
-    correct context is ZEROS. The guard is scaled as 1/fc because the filter's
-    ringing is (measured 500 Hz T30 21.97 ms, 1000 Hz 10.96 ms, exactly 1/f), and it
-    is stripped afterwards so integration still starts at the direct arrival, as
-    ISO 3382 requires.
+    correct context is ZEROS. The guard scales as 1/fc because the filter's ringing
+    does; `_band_resolvable_decay_s` measures that ringing and is the ONE place its
+    values are written down (RR-39). The guard is stripped afterwards, so
+    integration still starts at the direct arrival as ISO 3382 requires.
 
     KNOWN RESIDUAL: `filtfilt` is non-causal, so an impulse at the arrival index
     produces a symmetric response and stripping the guard discards its pre-ringing
@@ -400,7 +400,7 @@ def channel_band_avg_metrics(
     sample_rate: int,
     iso_eval_freqs: list[float],  # config.iso_eval_freqs (§7)
     onset_rel_db: float,          # config.metric_onset_rel_db (§3 metric path)
-    band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-23)
+    band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-26/AC-27)
     trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> tuple[dict[str, float], dict[str, str]]:
     """Onset-align a W-channel IR to its direct arrival, then average ISO-3382 band
@@ -452,7 +452,7 @@ def channel_per_band_metrics(
     sample_rate: int,
     iso_eval_freqs: list[float],  # config.iso_eval_freqs (§7)
     onset_rel_db: float,          # config.metric_onset_rel_db (§3 metric path)
-    band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-23)
+    band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-26/AC-27)
     trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> list[tuple[dict[str, float], dict[str, str]]]:
     """Onset-align a W-channel IR (AC-02), then compute per-eval-band ISO-3382
@@ -489,7 +489,7 @@ def compute_room_acoustic_metrics(
     sample_rate: int,
     iso_eval_freqs: list[float],  # from config.iso_eval_freqs (§7)
     onset_rel_db: float,          # from config.metric_onset_rel_db (§3 metric path)
-    band_resolvability_margin: float,  # from config.metric_band_resolvability_margin (§3, AC-23)
+    band_resolvability_margin: float,  # from config.metric_band_resolvability_margin (§3, AC-26/AC-27)
 ) -> tuple[
     dict[str, MetricTriple],
     dict[tuple[str, str], str],

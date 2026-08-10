@@ -119,7 +119,7 @@ def validate_provenance(meta: dict, *, simulator_name: str, scene_id: str, leg: 
 
 @runtime_checkable
 class Simulator(Protocol):
-    """Render backend (design_spec §8 l.243).
+    """Render backend (design_spec §8 "Plugin interfaces (signatures)").
 
     Implementations additionally carry a nested pydantic `Params` schema
     (`extra="forbid"`) describing their own config block — see `build_simulator`
