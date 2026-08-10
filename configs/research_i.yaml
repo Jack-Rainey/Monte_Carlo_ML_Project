@@ -30,10 +30,30 @@
 #    confounded split would make v3's own robustness claim uninterpretable.
 #    ⇒ v3's test_geometry_shift is NOT comparable to RI's 0.61 baseline rel-L2.
 #
-# 2. (RD-28) RI's material shift targets ceiling_absorptive AND asymmetric_walls.
-#    `asymmetric_walls` needs per-surface absorption; SceneSpec carries one
-#    scalar, so only ceiling_absorptive is applied.
-#    ⇒ the material shift here is WEAKER than RI's; the split is not comparable.
+# 2. (RD-28/AC-20) RI's material shift targets ceiling_absorptive AND
+#    asymmetric_walls. `asymmetric_walls` needs per-surface absorption; SceneSpec
+#    carries one scalar, so only ceiling_absorptive is applied — and that scalar
+#    is applied to ALL SIX SURFACES, not to a ceiling.
+#    ⇒ the material shift here is DIFFERENT IN KIND and LARGER IN MAGNITUDE than
+#      RI's — not weaker. Measured, not argued: α ∈ [0.85, 0.98] on six surfaces
+#      gives Sabine T60 0.117 / 0.161 / 0.209 s for 6x5x3, 10x8x3.5 and
+#      14x10x4.5 m rooms, whereas an area-weighted ceiling-only reading of RI's
+#      "ceiling_absorptive" gives 0.42 / 0.51 / 0.65 s (mean α 0.27-0.31) — 3-4x
+#      stronger. On the realized RI dataset, test_material_shift has Sabine T60
+#      median 0.151 s and Eyring 0.059 s against train's 0.327 / 0.257 s.
+#      The split is NEAR-ANECHOIC, not "a room with a more absorptive ceiling".
+#      Dropping asymmetric_walls weakens the shift; the scalar-on-all-surfaces
+#      implementation overshoots it by far more. The split is not comparable to
+#      RI's, and the E1 report must state the direction as measured here.
+#    ⇒ Consequences that follow (AC-21, AC-23): the diffuse-field model this
+#      characterization relies on has failed for 100 % of this split (Sabine/
+#      Eyring ratio median 2.51; critical distance exceeds the largest room
+#      dimension in 23 % of scenes), and at these decay times the reported
+#      ABSOLUTE ISO metrics approach the octave filter's own resolution. The
+#      split is therefore retained for the PAIRED comparison — a near-anechoic
+#      room is still a room the model must denoise — while absolute T30/EDT below
+#      `metric_min_measurable_t60_s` are reported unscored rather than as numbers.
+#      Treat this split's absolutes as diagnostic, never as physical values.
 #
 # 3. (RD-29) RI's placement regimes carry `+mid_pair` / `+far_pair` pairing
 #    sub-regimes whose distance sub-ranges the paper NEVER states numerically —
@@ -145,6 +165,10 @@ splits:
     { role: valid, frac: null, count: 60,  seed: 1002 }
   test_id:
     { role: test,  frac: null, count: 60,  seed: 1003 }
+  # Deviation 2: the scalar absorption applies to all six surfaces, so this split
+  # is near-anechoic (Sabine T60 median 0.151 s vs train 0.327 s) — a shift LARGER
+  # in magnitude than RI's, not weaker, and different in kind. Paired improvement
+  # is valid here; absolute ISO values are diagnostic only. See deviation 2 above.
   test_material_shift:
     { role: test, count: 40, seed: 1004, axes: { material: ceiling_absorptive } }
   test_placement_shift:
