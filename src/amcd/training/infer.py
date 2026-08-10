@@ -68,6 +68,16 @@ def run_infer(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         sp for sp in config.test_split_names
         if any(s == sp for s in split_map.values())
     ]
+    # A declared test split with no scenes is dropped here silently otherwise (F-45);
+    # eval/stats/report now report it as unscored, so the reason must be visible at
+    # the stage that first drops it.
+    for sp in config.test_split_names:
+        if sp not in present_test_splits:
+            emit(
+                verbosity, "warning",
+                f"  WARNING: declared test split {sp!r} has no scenes — no predictions "
+                f"will be written for it; it will be reported as unscored.",
+            )
 
     if not present_test_splits:
         raise RuntimeError(

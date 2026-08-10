@@ -214,3 +214,40 @@ class TestEmptySplitVisibility:
             "split_counts must be keyed on the CONFIG-declared split set, so a "
             "split receiving zero scenes is visible as 0 rather than absent"
         )
+
+
+class TestDeclaredButEmptySplitIsReported:
+    """F-45: downstream stages enumerated the splits PRESENT in the data, so a
+    declared test split with no scored scenes vanished from stats and the report
+    entirely — and an absent split is indistinguishable from one never declared."""
+
+    def test_stats_and_report_name_a_declared_empty_split(self, tmp_path) -> None:
+        import csv
+        import json
+
+        from amcd.config import Config
+        from amcd.pipeline import Pipeline
+        from amcd.runtime import Verbosity
+
+        # split_assignment 104 with n_id 6 starves test_id while train/valid survive,
+        # so the run completes and the split's absence is the only thing under test.
+        overlay = tmp_path / "starve.yaml"
+        overlay.write_text("seeds:\n  split_assignment: 104\nscenes:\n  n_id: 6\n")
+        cfg = Config.load(
+            Path("configs/base.yaml"), Path("configs/dry_run.yaml"), overlay
+        )
+        run_dir = tmp_path / "run"
+        Pipeline(cfg, run_dir, Verbosity(1, 0)).run_all()
+
+        counts = json.loads((run_dir / "preprocessed" / "meta.json").read_text())
+        assert counts["split_counts"]["test_id"] == 0, "fixture must actually starve test_id"
+
+        rows = list(csv.DictReader((run_dir / "stats" / "ci_table.csv").open()))
+        tid = [r for r in rows if r["split"] == "test_id"]
+        assert tid, "declared-but-empty split missing from ci_table.csv (F-45)"
+        assert all(r["n_attempted"] == "0" and r["n_scored"] == "0" for r in tid)
+
+        summary = (run_dir / "report" / "summary.txt").read_text()
+        assert "test_id" in summary, "declared-but-empty split missing from summary.txt"
+        # And it must be words, not a number a reader could mistake for a result.
+        assert "0 scenes — unscored" in summary

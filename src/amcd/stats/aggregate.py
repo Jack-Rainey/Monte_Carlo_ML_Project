@@ -253,6 +253,40 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         }
         summary.append(row)
 
+    # Declared-but-unscored test splits (F-45). Everything above is keyed on the
+    # splits PRESENT in metrics.parquet, so a declared test split that received no
+    # scored scene would simply not appear — and an absent split is indistinguishable
+    # from one that was never declared. F-30 fixed this at preprocess only; the same
+    # discipline has to reach the artifacts a reader actually consults.
+    scored_splits = {str(s) for s in df["split"].unique()}
+    metric_names = sorted(str(m) for m in df["metric"].unique())
+    for split_name in config.test_split_names:
+        if split_name in scored_splits:
+            continue
+        for metric_name in metric_names:
+            summary.append({
+                "split": split_name,
+                "metric": metric_name,
+                # No scene reached eval, so no metric declared a kind here. Empty
+                # rather than borrowed: inventing one would assert an improvement
+                # direction nothing measured (F-20).
+                "kind": "",
+                "n_attempted": 0,
+                "n_pred": 0,
+                "pred_mean": float("nan"),
+                "pred_ci_lower": float("nan"),
+                "pred_ci_upper": float("nan"),
+                "pred_std": float("nan"),
+                "n_scored": 0,
+                "improvement_mean": float("nan"),
+                "improvement_ci_lower": float("nan"),
+                "improvement_ci_upper": float("nan"),
+                "improvement_std": float("nan"),
+                "improvement_mdes": float("nan"),
+                "n_improved": 0,
+                "pct_improved": float("nan"),
+            })
+
     summary_df = pd.DataFrame(summary)
     summary_df.to_csv(stats_dir / "ci_table.csv", index=False)
 
@@ -261,6 +295,20 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         json.dumps(summary_df.to_dict(orient="records"), indent=2)
     )
 
-    n_splits = summary_df["split"].nunique() if not summary_df.empty else 0
+    # Counts are stated against the DECLARED test-split set, so "3 of 4" is visible
+    # rather than being reported as a complete "3" (F-45).
+    n_declared = len(config.test_split_names)
+    n_scored_splits = len(scored_splits & set(config.test_split_names))
     n_metrics = summary_df["metric"].nunique() if not summary_df.empty else 0
-    emit(verbosity, "metrics", f"  Stats for {n_metrics} metrics × {n_splits} splits → {stats_dir}")
+    emit(
+        verbosity, "metrics",
+        f"  Stats for {n_metrics} metrics × {n_scored_splits} of {n_declared} "
+        f"declared test splits → {stats_dir}",
+    )
+    for split_name in config.test_split_names:
+        if split_name not in scored_splits:
+            emit(
+                verbosity, "warning",
+                f"  WARNING: declared test split {split_name!r} has no scored scenes — "
+                f"reported as unscored, not omitted.",
+            )

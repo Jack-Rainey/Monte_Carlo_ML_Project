@@ -71,18 +71,38 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     )
 
     # One section per split — never pool test splits (invariant #9).
+    #
+    # Sections are enumerated from the CONFIG-DECLARED test splits in declaration
+    # order, not from the splits present in the data (F-45). A declared split that
+    # received no scored scene previously vanished from this file entirely, and an
+    # absent split is indistinguishable from one that was never declared — the same
+    # silent-exclusion class the drop log exists to prevent. Ordering is therefore
+    # declaration order rather than the previous alphabetical sort.
     lines = ["=" * 70, f"Run: {run_dir.name}", "=" * 70]
-    present_splits = sorted(df["split"].unique()) if not df.empty else []
-    for split_name in present_splits:
+    present_splits = set(df["split"].unique()) if not df.empty else set()
+    declared = list(config.test_split_names)
+    # Anything scored but not declared would be a routing bug; surface it rather
+    # than dropping it off the end of the report.
+    undeclared = sorted(present_splits - set(declared))
+    for split_name in declared + undeclared:
         split_rows = [r for r in summary if r["split"] == split_name]
+        scored_rows = [r for r in split_rows if r.get("n_attempted", 0) > 0]
+        suffix = "" if split_name in declared else "  [NOT DECLARED IN CONFIG]"
         lines += [
             "",
-            f"Metric results ({split_name}, paired improvement, bootstrap CI):",
+            f"Metric results ({split_name}, paired improvement, bootstrap CI):{suffix}",
             "",
-            hdr,
-            "-" * len(hdr),
         ]
-        for row in split_rows:
+        if not scored_rows:
+            # Mirrors _metric_row's n_scored == 0 rule at the split level: nothing
+            # here is a result, so render no numbers at all (RR-14).
+            lines.append(
+                "0 scenes — unscored: this split is declared in config but no scene "
+                "reached eval (see preprocessed/meta.json split_counts)."
+            )
+            continue
+        lines += [hdr, "-" * len(hdr)]
+        for row in scored_rows:
             lines.append(_metric_row(row))
 
     lines += [

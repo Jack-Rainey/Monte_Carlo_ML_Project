@@ -51,8 +51,13 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
 
     norm_stats = meta["norm_stats"]
 
-    # Discover all splits present in this run
-    all_splits = sorted(set(splits.values()))
+    # Enumerate the CONFIG-DECLARED splits, in declaration order, not the splits
+    # that happen to have received a scene (F-45) — a declared split with no scenes
+    # is a fact about this run and must be reported as 0, not omitted. Any split
+    # present in the data but not declared would be a routing bug, so it is appended
+    # rather than silently ignored.
+    declared_splits = list(config.splits)
+    all_splits = declared_splits + sorted(set(splits.values()) - set(declared_splits))
 
     # ─── D0a ─────────────────────────────────────────────────────────────────
     per_split: dict[str, dict] = {}
@@ -62,6 +67,16 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
         split_dir = preprocessed_dir / split_name
         scene_ids = [sid for sid, sp in splits.items() if sp == split_name]
         if not scene_ids:
+            # Live branch now that enumeration is config-declared (F-45): record the
+            # empty split rather than skipping it, so the probe's split list matches
+            # the config's declared set.
+            per_split[split_name] = {
+                "n_scenes": 0,
+                "unscored_reason": "declared in config but received no scenes",
+            }
+            emit(verbosity, "warning",
+                 f"  WARNING: declared split {split_name!r} has no scenes — "
+                 f"recorded as 0, not omitted (F-45).")
             continue
 
         scene_gaps: list[float] = []
@@ -119,6 +134,14 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
     emit(verbosity, "metrics", f"  {'Split':<28} {'n':>4}  {'mean gap':>9}  {'std':>6}  Verdict")
     emit(verbosity, "metrics", "  " + "-" * 80)
     for sp, info in per_split.items():
+        if info["n_scenes"] == 0:
+            # Declared but empty (F-45): named with its reason, never rendered as a
+            # number — a 0.00 dB gap would read as a measured result.
+            emit(
+                verbosity, "metrics",
+                f"  {sp:<28} {0:>4}  unscored — {info['unscored_reason']}",
+            )
+            continue
         emit(
             verbosity, "metrics",
             f"  {sp:<28} {info['n_scenes']:>4}  {info['mean_gap_db']:>8.2f} dB"
@@ -177,6 +200,10 @@ def _run_d0b(
         split_dir = preprocessed_dir / split_name
         scene_ids = [sid for sid, sp in splits.items() if sp == split_name]
         if not scene_ids:
+            per_split_residuals[split_name] = {
+                "n_scenes": 0,
+                "unscored_reason": "declared in config but received no scenes",
+            }
             continue
 
         scene_results: list[dict[str, float]] = []
