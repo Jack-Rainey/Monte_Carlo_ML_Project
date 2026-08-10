@@ -400,3 +400,78 @@ def test_prediction_cannot_set_the_band_set() -> None:
     assert np.isnan(out["degenerate"][0]["EDT"].pred)
     assert "AC-25" in out["degenerate"][1][("EDT", "pred")]
     assert np.isfinite(out["healthy"][0]["EDT"].pred)
+
+
+# ---------------------------------------------------------------------------
+# AC-36 / AC-40: the octave filter's treatment of an ONSET-ALIGNED impulse
+# ---------------------------------------------------------------------------
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("fc", _ISO)
+def test_an_onset_impulse_keeps_the_band_energy_an_interior_one_gets(fc: float) -> None:
+    """AC-36/AC-40 — the one change that moves every reported ISO metric.
+
+    Two defects met at the first sample of an onset-aligned IR, and neither had a
+    test until now:
+
+      * scipy's default `padtype="odd"` REFLECTS the signal about sample 0, so the
+        direct arrival became a step of twice the peak that never existed.
+        MEASURED at 500 Hz: 6.171 units of in-band energy for 1 unit in, against
+        the 0.013228 the band's own bandwidth allows — 420x, and ~23 dB on C50.
+      * zero-padding fixed that but then DISCARDED the acausal pre-ringing when the
+        guard was stripped, throwing away 50.9 % of the arrival's in-band energy
+        (0.006728 vs 0.013228). C50's numerator was not the ISO integral, and the
+        deficit is a monotone function of DRR — so it was common-mode across LEGS
+        but not across SCENES.
+
+    The known answer is the analytic bandwidth integral, which an impulse far from
+    either edge also realizes. A refactor that drops the guard or the fold restores
+    one of the two failures silently.
+    """
+    from amcd.evaluation.room_acoustic import _band_energy
+
+    n = 2 * _SR
+    at_onset = np.zeros(n, dtype=np.float32)
+    at_onset[0] = 1.0
+    interior = np.zeros(n, dtype=np.float32)
+    interior[n // 2] = 1.0
+
+    e_onset = float(_band_energy(at_onset, fc, _SR).sum())
+    e_interior = float(_band_energy(interior, fc, _SR).sum())
+
+    assert e_onset == pytest.approx(e_interior, rel=1e-3), (
+        f"an impulse AT the onset index yields {e_onset:.6f} of in-band energy at "
+        f"{fc:g} Hz but an interior one yields {e_interior:.6f} — the guard, the "
+        f"energy fold, or both have regressed (AC-36)"
+    )
+    # The absolute bound catches the padtype="odd" reflection even if both paths
+    # regressed together: 6.171 at 500 Hz would sail past a ratio test.
+    bandwidth_fraction = (fc * 2 ** 0.5 - fc / 2 ** 0.5) / (_SR / 2)
+    assert e_onset < 2.0 * bandwidth_fraction, (
+        f"in-band energy {e_onset:.4f} exceeds twice the {fc:g} Hz band's own "
+        f"bandwidth fraction ({bandwidth_fraction:.4f}) — a filter with |H| <= 1 "
+        f"cannot do that, so the padding is manufacturing energy again"
+    )
+
+
+def test_a_record_ending_at_full_scale_is_not_given_a_dc_tail() -> None:
+    """AC-36 secondary: `padtype="constant"` replicates the EDGE SAMPLE, so a
+    record whose last sample is non-zero got a DC tail — measured -25.5 % band
+    energy. Padding with explicit zeros at BOTH ends makes "constant" replicate
+    0.0, which is what an impulse response's surroundings actually are."""
+    from amcd.evaluation.room_acoustic import _band_energy
+
+    n = _SR // 2
+    ends_high = np.zeros(n, dtype=np.float32)
+    ends_high[0] = 1.0
+    ends_high[-1] = 1.0
+    padded_tail = np.concatenate([ends_high, np.zeros(_SR // 4, dtype=np.float32)])
+
+    e_abrupt = float(_band_energy(ends_high, 500.0, _SR).sum())
+    e_padded = float(_band_energy(padded_tail, 500.0, _SR).sum())
+    assert e_abrupt == pytest.approx(e_padded, rel=1e-3), (
+        f"truncating the record changed its band energy ({e_abrupt:.6f} vs "
+        f"{e_padded:.6f}) — the trailing pad is replicating the last sample again"
+    )

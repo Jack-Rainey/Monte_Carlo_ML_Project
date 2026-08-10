@@ -87,7 +87,9 @@ def _lundeby_truncate(energy_samples: np.ndarray, sample_rate: int) -> int:
     return max(truncate_idx, min_samples)
 
 
-def _butter_octave_filter(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.ndarray:
+def _butter_octave_filter(
+    ir_w: np.ndarray, fc: float, sample_rate: int
+) -> tuple[np.ndarray, int]:
     """
     Zero-phase 4th-order Butterworth octave-band filter centered at fc Hz.
     Passband: [fc / sqrt(2), fc * sqrt(2)].
@@ -126,11 +128,15 @@ def _butter_octave_filter(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.n
     f_hi = min(f_hi, nyq * 0.99)  # stay below Nyquist
     sos = butter(4, [f_lo, f_hi], btype="bandpass", fs=sample_rate, output="sos")
     # ~4x the filter's own T30 in this band; zeros are cheap and the bound only has
-    # to exceed the ringing, not match it.
+    # to exceed the ringing, not match it. BOTH ends are padded (AC-36): scipy's
+    # `padtype="constant"` replicates the edge SAMPLE, so a record whose last sample
+    # is non-zero got a DC tail — measured -25.5 % band energy for a record ending at
+    # 1.0. Padding with explicit zeros first makes "constant" replicate 0.0, which is
+    # what an impulse response's surroundings actually are at both ends.
     guard = int(np.ceil(48.0 / fc * sample_rate))
-    padded = np.concatenate([np.zeros(guard, dtype=np.float64), np.asarray(ir_w, dtype=np.float64)])
-    filtered = sosfiltfilt(sos, padded, padtype="constant")
-    return filtered[guard:].astype(np.float32)
+    zeros = np.zeros(guard, dtype=np.float64)
+    padded = np.concatenate([zeros, np.asarray(ir_w, dtype=np.float64), zeros])
+    return sosfiltfilt(sos, padded, padtype="constant").astype(np.float32), guard
 
 
 def _find_onset(ir_w: np.ndarray, rel_db: float) -> int:
@@ -161,7 +167,32 @@ def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.ndarray:
     """Octave-band energy envelope (squared band-filtered samples) — the input both
     to Lundeby truncation and to Schroeder integration. Factored out so a truncation
     index can be derived WITHOUT computing metrics (AC-17)."""
-    return _butter_octave_filter(ir_w, fc, sample_rate) ** 2
+    filtered, guard = _butter_octave_filter(ir_w, fc, sample_rate)
+    energy = (filtered.astype(np.float64) ** 2)
+    # FOLD THE ACAUSAL PRE-RINGING BACK IN (AC-36). `filtfilt` is zero-phase, so a
+    # sample at the onset index produces a response symmetric about it; the half
+    # lying in the guard belongs to that arrival. Discarding it threw away 50.9 % of
+    # a direct arrival's in-band energy — measured 0.006728 at 500 Hz against the
+    # 0.013228 that both an interior impulse and the analytic bandwidth integral
+    # give — so C50's numerator was not the ISO integral.
+    #
+    # This is not a cosmetic correction: the bias is a monotone function of DRR
+    # (measured -3.71 dB at d = 0.5 m, -2.68 at 1 m, -0.34 at 4 m, -0.00 at 8 m), so
+    # it is common-mode across LEGS but NOT across SCENES — `test_placement_shift`
+    # and `test_id` would carry different biases in their absolute C50.
+    #
+    # Folding rather than keeping the guard preserves the ISO requirement that t=0 is
+    # the direct arrival, and conserves energy exactly.
+    #
+    # BOTH ends are folded. The trailing one is not symmetry for its own sake: a
+    # record truncated mid-decay — exactly what AC-22's record-length gate is about
+    # — has real signal at its last sample, whose acausal response extends past the
+    # end. Leaving it out cost that sample half its band energy, which lands in the
+    # C50 LATE window and in the Lundeby estimate.
+    n_record = len(energy) - 2 * guard
+    energy[guard] += energy[:guard].sum()
+    energy[guard + n_record - 1] += energy[guard + n_record:].sum()
+    return energy[guard:guard + n_record].astype(np.float32)
 
 
 def _decay_times_from_energy(
@@ -202,7 +233,10 @@ def _band_resolvable_decay_s(fc: float, sample_rate: int) -> dict[str, float]:
     this is not being measured — the filter is.
 
     MEASURED here rather than asserted, and the numbers scale exactly as 1/f
-    (48 kHz): 500 Hz → T30 20.309 ms, EDT 9.551 ms; 1000 Hz → 10.037 / 4.793 ms.
+    (48 kHz): 500 Hz → T30 17.881 ms, EDT 11.765 ms; 1000 Hz → 8.924 / 5.771 ms.
+    THIS DOCSTRING IS THE ONE PLACE THOSE VALUES ARE WRITTEN DOWN (RR-39) — they
+    have moved twice as the filter path was corrected (AC-36's energy fold last),
+    and every restatement elsewhere became a contradiction. Cite this function.
     `sosfiltfilt` runs the 4th-order section forwards and backwards, which doubles
     the effective order — the reason an earlier estimate of "~3 ms of ringing" from
     the nominal 353 Hz bandwidth understated it by 3-7x (AC-27).

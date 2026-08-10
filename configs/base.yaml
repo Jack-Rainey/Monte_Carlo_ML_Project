@@ -196,8 +196,14 @@ metric_onset_rel_db: -20.0
 
 # How many times the octave filter's OWN decay a room's decay must exceed to be
 # resolvable in that band. The floor is MEASURED per (metric, band) from the
-# filter's impulse response — 500 Hz: T30 20.31 ms, EDT 9.55 ms; 1000 Hz: 10.04 /
-# 4.79 ms; exactly 1/f — so this declares only the safety margin (AC-26/AC-27).
+# filter's impulse response and scales as 1/f; the values live in ONE place,
+# `_band_resolvable_decay_s` in evaluation/room_acoustic.py (RR-39). This declares
+# only the safety margin (AC-26/AC-27).
+#
+# 2.0 is calibrated, not chosen: with the floor disabled, the 500 Hz T30
+# estimator's bias is +12.8 % at margin 1.0, +4.9 % at margin 2.0 and +2.8 % at
+# 3.0, so 2.0 lands where the bias crosses this project's own d0b_t30_jnd_frac of
+# 0.05 (measured by acoustics-reviewer, 300 realizations/point).
 metric_band_resolvability_margin: 2.0
 
 # EDT below this is variance-limited, not filter-limited: measured sd 24-31 % of
