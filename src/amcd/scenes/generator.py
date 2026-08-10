@@ -421,6 +421,16 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
         )
 
 
+def _scene_is_characterized(room: dict, flags: tuple[str, ...]) -> bool:
+    """Whether this scene has the closed-form quantities `flags` describe.
+
+    False for a geometry family declaring `characterization: none` (RD-64): a
+    non-enclosure carries a reason instead of Sabine/Eyring numbers, so it can be
+    counted neither for nor against a diffuse-field flag.
+    """
+    return all(flag in room for flag in flags)
+
+
 def _flag_counts(room_stats: list[dict], flags: tuple[str, ...], **context) -> dict:
     """Count and fraction for each named per-scene boolean, plus its context.
 
@@ -433,7 +443,7 @@ def _flag_counts(room_stats: list[dict], flags: tuple[str, ...], **context) -> d
     # be counted for or against a diffuse-field flag. Excluded from BOTH numerator
     # and denominator, and the exclusion is itself reported — a fraction whose
     # denominator silently shrank is exactly the silent drop the project forbids.
-    modelled = [r for r in room_stats if flag_key_present(r, flags)]
+    modelled = [r for r in room_stats if _scene_is_characterized(r, flags)]
     n_uncharacterized = len(room_stats) - len(modelled)
     n = len(modelled)
     out: dict = {"n_scenes": n, **context}
@@ -452,10 +462,6 @@ def _flag_counts(room_stats: list[dict], flags: tuple[str, ...], **context) -> d
         }
     return out
 
-
-def flag_key_present(room: dict, flags: tuple[str, ...]) -> bool:
-    """Whether this scene carries every flag being counted."""
-    return all(flag in room for flag in flags)
 
 
 def _summarize(values: list[float]) -> dict:

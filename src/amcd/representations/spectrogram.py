@@ -72,9 +72,9 @@ def _build_third_octave_filters(
     # a real measurement.
     #
     # It is NOT behaviour-preserving in general — only at 48 kHz (F-59). MEASURED
-    # against the old rule, min_bins_per_band=1:
-    #     48000/2048 → 27 vs 27 (bank bit-identical)   48000/512 → 21 vs 21
-    #      8000/256  → 18 vs 19                        44100/2048 → 27 vs 28
+    # against the old rule at min_bins_per_band=1, as `new (was old)`:
+    #     48000/2048 → 27 (was 27), bank bit-identical    48000/512 → 21 (was 21)
+    #      8000/256  → 18 (was 19), one band LOST        44100/2048 → 27 (was 28)
     # At 44.1 kHz the change leaves 17959.4-22050 Hz — 18.5 % of the spectrum — in
     # NO band, where `decode()` passes it through unshaped at scale 1.0. That is
     # the correct trade (a straddling band is not a measurement) but it is a real
