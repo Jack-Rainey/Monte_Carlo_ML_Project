@@ -257,6 +257,25 @@ def remove(lane: dict, cycle: str) -> None:
     print(f"  lane {lane['id']}: removed {worktree} (branch {branch_name(lane['id'], cycle)} kept)")
 
 
+def _resolve_partition(given: Path, parser: argparse.ArgumentParser) -> Path:
+    """Find the partition file whether or not the shell is in the repo.
+
+    A terminal opened fresh starts wherever it starts, so a repo-relative
+    `--partition docs/lanes/cycle4.yaml` fails with a bare ENOENT on a path the
+    user never typed (`//scripts/...`). Everything else here is anchored to the
+    checkout via `__file__`; this argument was the one thing that was not.
+    """
+    if given.exists():
+        return given
+    from_repo = _MAIN / given
+    if from_repo.exists():
+        return from_repo
+    parser.error(
+        f"no partition file at '{given}' (cwd {Path.cwd()}) or '{from_repo}'. "
+        f"Available: {', '.join(sorted(p.name for p in (_MAIN / 'docs' / 'lanes').glob('*.yaml') if not p.name.startswith('._'))) or 'none'}"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--partition", required=True, type=Path)
@@ -268,7 +287,7 @@ def main() -> None:
     if not args.all and not args.lanes:
         parser.error("choose lanes with --lane ID (repeatable) or --all")
 
-    spec = yaml.safe_load(args.partition.read_text())
+    spec = yaml.safe_load(_resolve_partition(args.partition, parser).read_text())
     cycle, base_branch = spec["cycle"], spec["base_branch"]
     wanted = spec["lanes"] if args.all else [
         lane for lane in spec["lanes"] if lane["id"] in args.lanes
