@@ -346,3 +346,102 @@ class TestDryRunTailIsUnbiased:
             f"ray budget no longer controls anything and there is nothing to denoise; "
             f"too large means the legs differ by more than estimation noise."
         )
+
+
+class TestPlacementAxisIsAcousticallyLive:
+    """AC-28: the scaffold's "direct sound" was not a direct sound.
+
+    `direct = direct_gain * exp(-t/0.02)` is a one-pole envelope with a 7.96 Hz
+    corner, so only 6.06e-7 of its energy reached the 500 Hz octave band. MEASURED
+    in a 10x8x3.5 m room at alpha 0.2 (r_c = 1.19 m): C50 read 1.966 / 1.957 /
+    1.953 / 1.951 / 1.950 dB at d = 0.5, 1, 2, 4 and 8 m — flat to 0.02 dB across a
+    16x distance range — while the closed-form DRR the scene report publishes swung
+    +7.55 to -16.53 dB. `test_placement_shift` therefore carried NO acoustic
+    difference from the id baseline in any reported ISO-3382 metric.
+
+    SCOPE OF THESE TESTS (RD-79). The DRR agreement below is a SCAFFOLD
+    SELF-CONSISTENCY check: the diffuse tail is scaled by
+    sqrt(16*pi / (R * sum(decay^2))) precisely so the rendered DRR equals the
+    closed form, so it verifies that the two share one formula (RD-75) — it does
+    NOT validate the ISO path against independent physics. The independent check is
+    the Step-6 probe against a real gsound render (RD-17). What IS non-circular
+    here is the C50 SHAPE: nothing in the construction forces C50, an ISO-3382
+    quantity computed through octave filtering and Schroeder integration, to track
+    distance at all.
+    """
+
+    _DIMS = (10.0, 8.0, 3.5)
+    _ALPHA = 0.2
+    _SURFACE = 2.0 * (10.0 * 8.0 + 8.0 * 3.5 + 10.0 * 3.5)
+
+    def _render(self, distance: float):
+        from amcd.simulators.dry_run import DryRunSimulator
+
+        sim = DryRunSimulator(
+            n_channels=1, n_samples=48000, sample_rate=48000,
+            speed_of_sound_m_s=343.0, min_source_receiver_distance_m=0.3,
+        )
+        scene = SceneSpec(
+            scene_id="s", seed=1, geometry_family="shoebox", dims=self._DIMS,
+            material_absorption=self._ALPHA, source_pos=(1.0, 1.0, 1.5),
+            receiver_pos=(1.0 + distance, 1.0, 1.5), sim_params={},
+            split_regime="id", regime_axes={},
+        )
+        return sim.render(scene, 200000)
+
+    def _c50(self, distance: float) -> float:
+        from amcd.evaluation.room_acoustic import channel_band_avg_metrics
+
+        values, _ = channel_band_avg_metrics(
+            self._render(distance).ir[0], sample_rate=48000,
+            iso_eval_freqs=[500.0, 1000.0], onset_rel_db=-20.0,
+            band_resolvability_margin=0.0,
+        )
+        return values["C50"]
+
+    def test_c50_moves_with_distance(self) -> None:
+        """The kill assertion. Pre-fix the spread over this range was 0.016 dB."""
+        c50 = [self._c50(d) for d in (0.5, 1.0, 2.0, 4.0, 8.0)]
+        assert c50 == sorted(c50, reverse=True), f"C50 not monotone in distance: {c50}"
+        assert c50[0] - c50[-1] > 6.0, (
+            f"C50 spans only {c50[0] - c50[-1]:.3f} dB over a 16x distance range "
+            f"({c50}) — the placement axis is acoustically inert again (AC-28)"
+        )
+
+    def test_the_direct_arrival_is_the_loudest_sample(self) -> None:
+        """`_find_onset` documents this as an assumption (AC-07). Pre-fix the global
+        peak sat 300-550 samples INTO the diffuse tail, violating it — inert only
+        because the whole response starts at d/c."""
+        from amcd.evaluation.room_acoustic import _find_onset
+
+        for d in (0.5, 2.0, 8.0):
+            ir = self._render(d).ir[0]
+            assert int(np.argmax(np.abs(ir))) == _find_onset(ir, -20.0)
+
+    def test_realized_drr_matches_the_published_closed_form(self) -> None:
+        """SCAFFOLD SELF-CONSISTENCY, not metric validation — see the class
+        docstring. The residual grows with distance because the direct sample and
+        the tail's first sample are superposed, which matters more as the direct
+        term shrinks."""
+        from amcd.acoustics import diffuse_field_drr_db
+        from amcd.evaluation.room_acoustic import _find_onset
+
+        for d in (0.5, 1.0, 2.0, 4.0, 8.0):
+            ir = self._render(d).ir[0]
+            onset = _find_onset(ir, -20.0)
+            direct = float(ir[onset]) ** 2
+            reverberant = float(np.sum(ir[onset + 1:].astype(np.float64) ** 2))
+            realized = 10.0 * np.log10(direct / reverberant)
+            expected = diffuse_field_drr_db(self._SURFACE, self._ALPHA, d)
+            assert realized == pytest.approx(expected, abs=1.0), (
+                f"rendered DRR {realized:.2f} dB vs published {expected:.2f} dB at "
+                f"d={d} m — the scaffold and scenes/placement_report.json have "
+                f"stopped sharing one formula (RD-75)"
+            )
+
+    def test_the_realized_snr_is_stamped(self) -> None:
+        """AC-35: RD-07's caveat needs a magnitude, and the Step-6 probe needs a
+        number to put a real gsound render beside."""
+        meta = self._render(2.0).meta
+        assert meta["realized_snr_db"] == pytest.approx(10.0 * np.log10(200000), abs=0.01)
+        assert "modelling assumption" in meta["noise_scale_basis"]

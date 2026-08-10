@@ -328,8 +328,33 @@ class GeometryFamily(BaseModel):
 
     dims: list[list[float]]   # [[x_lo, x_hi], [y_lo, y_hi], [z_lo, z_hi]]
 
+    #: Which closed-form acoustic characterization applies to this family. NO
+    #: DEFAULT — each family states it, because the alternative is a uniform spine
+    #: assuming a property that only happens to hold today (RD-64, the same class
+    #: as the metric `kind` contract).
+    #:
+    #:   "sabine" — a closed enclosure. Sabine/Eyring T60, room constant, critical
+    #:              distance and diffuse-field DRR are all derived from `dims`, and
+    #:              the AC-22 record-length gate compares against that T60.
+    #:   "none"   — not an enclosure. `_room_acoustics` records a (split, reason)
+    #:              instead of a number, and `worst_case_t60` skips the family.
+    #:
+    #: "none" exists for the roadmap's OUTDOOR and PARTIALLY-OPEN scenes (paper
+    #: §6), which design_spec §6 says the architecture must not preclude. Without
+    #: it, admitting one means either emitting meaningless closed-box numbers into
+    #: the canonical placement_report.json or rewriting the gate — so the seam is
+    #: declared now, while the only cost is one field.
+    characterization: str
+
     @model_validator(mode="after")
     def _check(self) -> "GeometryFamily":
+        if self.characterization not in ("sabine", "none"):
+            raise ValueError(
+                f"characterization must be 'sabine' (a closed enclosure) or 'none' "
+                f"(not an enclosure); got {self.characterization!r}. It has no "
+                f"default: a family that does not state it would silently receive "
+                f"closed-box Sabine numbers (RD-64)."
+            )
         if len(self.dims) != 3:
             raise ValueError(f"dims must have 3 axis ranges; got {len(self.dims)}")
         for axis, rng in enumerate(self.dims):
@@ -656,7 +681,14 @@ class Config(BaseModel):
             self.scenes.material_regimes.items(), key=lambda kv: kv[1].absorption[0]
         )[0]
         worst = None
+        skipped: list[str] = []
         for family, spec in self.scenes.geometry_families.items():
+            # A family that is not an enclosure has no Sabine T60 to sweep, and
+            # forcing the closed-box formula onto one would put a fabricated number
+            # in `resolved.yaml` (RD-64). Skipped and NAMED, never silently omitted.
+            if spec.characterization == "none":
+                skipped.append(family)
+                continue
             lx, ly, lz = (axis[1] for axis in spec.dims)  # upper bound of each axis
             volume = lx * ly * lz
             surface = 2.0 * (lx * ly + ly * lz + lx * lz)
@@ -669,6 +701,19 @@ class Config(BaseModel):
                     "material_regime": alpha_regime,
                     "absorption": float(alpha_min),
                 }
+        if worst is None:
+            return {
+                "t60_sabine_s": None,
+                "uncharacterized_reason": (
+                    "no geometry family declares characterization: sabine, so the "
+                    "declared support admits no closed-form decay corner"
+                ),
+                "skipped_families": skipped,
+                "ir_duration_s": float(self.ir_duration),
+                "covered_by_record": None,
+            }
+        if skipped:
+            worst["skipped_families"] = skipped
         worst["ir_duration_s"] = float(self.ir_duration)
         worst["covered_by_record"] = bool(self.ir_duration >= worst["t60_sabine_s"])
         return worst

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from amcd.acoustics import critical_distance
 from amcd.config import Config
 from amcd.scenes.generator import _room_acoustics, run_gen_scenes
 
@@ -141,6 +142,7 @@ class TestDiffuseFieldValidityFlags:
             dims, alpha, distance,
             alpha_limit=kw.get("alpha_limit", 0.3),
             ir_duration_s=kw.get("ir_duration_s", 3.0),
+            characterization=kw.get("characterization", "sabine"),
         )
 
     def test_alpha_above_the_declared_limit_is_flagged(self) -> None:
@@ -171,6 +173,84 @@ class TestDiffuseFieldValidityFlags:
         for key in ("t60_sabine_s", "t60_eyring_s", "critical_distance_m", "drr_db"):
             assert strict[key] == loose[key]
         assert strict["alpha_above_diffuse_limit"] != loose["alpha_above_diffuse_limit"]
+
+
+class TestReceiverInsideCriticalDistance:
+    """AC-29: the strictest per-scene condition, already computed but never flagged.
+
+    Inside r_c the receiver sits in the DIRECT field, so the diffuse-field DRR
+    being reported has no reverberant field to divide by. `d_over_rc` was already
+    summarized as a VALUE while the per-split validity summary omitted it, and the
+    shipped flags under-reported by ~2.6x on the split they were built for
+    (test_material_shift: 92.5 % vs `rc_exceeds_max_dim`'s 35.0 %).
+    """
+
+    @staticmethod
+    def _at(d_over_rc: float) -> dict:
+        dims, alpha = (10.0, 8.0, 3.5), 0.2
+        surface = 2.0 * (10.0 * 8.0 + 8.0 * 3.5 + 10.0 * 3.5)
+        r_c = critical_distance(surface, alpha)
+        return _room_acoustics(
+            dims, alpha, d_over_rc * r_c,
+            alpha_limit=0.3, ir_duration_s=3.0, characterization="sabine",
+        )
+
+    def test_half_the_critical_distance_flags(self) -> None:
+        assert self._at(0.5)["receiver_inside_critical_distance"] is True
+
+    def test_twice_the_critical_distance_does_not(self) -> None:
+        assert self._at(2.0)["receiver_inside_critical_distance"] is False
+
+    def test_the_flag_agrees_with_the_d_over_rc_it_already_reported(self) -> None:
+        """No new formula — the flag reads the quantity that was already there."""
+        for d_over_rc in (0.25, 0.5, 0.99, 1.01, 2.0, 4.0):
+            room = self._at(d_over_rc)
+            assert room["receiver_inside_critical_distance"] == (room["d_over_rc"] < 1.0)
+
+    def test_the_0_db_drr_crossing_is_the_critical_distance(self) -> None:
+        """r_c is defined as where direct and reverberant are equal, so the two
+        quantities must agree by construction, not approximately."""
+        assert self._at(1.0)["drr_db"] == pytest.approx(0.0, abs=1e-9)
+
+
+class TestNonEnclosureGeometryIsNotCharacterized:
+    """RD-64: the closed-box spine assumed a property that only happens to hold
+    today. The roadmap's outdoor / partially-open scenes (paper §6) would have been
+    admitted with meaningless Sabine numbers in the canonical report."""
+
+    def test_characterization_has_no_default(self) -> None:
+        from amcd.config import GeometryFamily
+
+        assert GeometryFamily.model_fields["characterization"].is_required()
+
+    def test_an_unknown_characterization_is_rejected_at_config_load(self) -> None:
+        from pydantic import ValidationError
+
+        from amcd.config import GeometryFamily
+
+        with pytest.raises(ValidationError, match="characterization"):
+            GeometryFamily(dims=[[3, 4], [3, 4], [2, 3]], characterization="outdoor")
+
+    def test_a_non_enclosure_gets_a_reason_not_a_number(self) -> None:
+        room = _room_acoustics(
+            (10.0, 8.0, 3.5), 0.2, 3.0,
+            alpha_limit=0.3, ir_duration_s=3.0, characterization="none",
+        )
+        for key in ("t60_sabine_s", "critical_distance_m", "drr_db", "d_over_rc"):
+            assert key not in room, (
+                f"{key} was emitted for a non-enclosure — a closed-box number in a "
+                f"canonical artifact is exactly what RD-64 is about"
+            )
+        assert "not a closed enclosure" in room["uncharacterized_reason"]
+
+    def test_the_worst_case_corner_skips_and_names_it(self) -> None:
+        cfg = tiny_config(scenes={"geometry_families": {
+            "shoebox": {"dims": [[3, 12], [3, 10], [2.4, 5]], "characterization": "sabine"},
+            "courtyard": {"dims": [[8, 20], [8, 20], [3, 6]], "characterization": "none"},
+        }})
+        worst = cfg.worst_case_t60()
+        assert worst["geometry_family"] == "shoebox"
+        assert worst["skipped_families"] == ["courtyard"]
 
 
 class TestValidityReachesTheReport:

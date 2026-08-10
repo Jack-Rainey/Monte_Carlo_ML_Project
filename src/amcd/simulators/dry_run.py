@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 from pydantic import BaseModel
 
-from ..acoustics import sabine_rt60
+from ..acoustics import diffuse_field_drr_db, room_constant, sabine_rt60
 from ..registry import simulator_registry
 from .base import IRResult, SceneSpec
 
@@ -20,8 +20,12 @@ class DryRunSimulator:
     distribution-shift splits actually differ at the tensor level, not just by label):
       - RT60 follows the Sabine equation from room volume + surface + absorption
         → geometry_shift (corridor) and material_shift (ceiling_absorptive) move it.
-      - A coherent direct component scaled by 1/distance → placement_shift (near_corner)
-        changes the direct-to-reverberant ratio (C50/DRR).
+      - A BROADBAND direct impulse scaled by 1/distance, against a reverberant tail
+        scaled from the room constant → the rendered direct-to-reverberant ratio
+        equals the closed form `placement_report.json` publishes, so
+        placement_shift (near_corner) genuinely moves C50/DRR. It did not before
+        (AC-28): the direct component was an envelope with a 7.96 Hz corner, and
+        C50 was flat to 0.02 dB across a 16x distance range.
       - A diffuse reverberant tail carries the Monte-Carlo noise that converges with
         ray budget (σ ∝ 1/√N) — this is the low→high signal to be denoised. The direct
         component is shared (early reflections resolve even at low ray count).
@@ -120,7 +124,55 @@ class DryRunSimulator:
         t_active = t[:n_active]
 
         decay = np.exp(-6.908 * t_active / rt60).astype(np.float32)
-        direct = (direct_gain * np.exp(-t_active / 0.02)).astype(np.float32)
+
+        # --- Direct arrival: a BROADBAND impulse, not an envelope (AC-28) ---
+        #
+        # This was `direct_gain * exp(-t/0.02)`, a one-pole envelope whose corner is
+        # 7.96 Hz — so only 6.06e-7 of its energy reached the 500 Hz octave band and
+        # 3.52e-8 the 1000 Hz band. MEASURED consequence in a 10x8x3.5 m room at
+        # alpha 0.2 (r_c = 1.19 m): C50 read 1.95-1.97 dB at d = 0.5, 1, 2, 4 and
+        # 8 m — flat to within 0.02 dB across a 16x distance range — while the
+        # closed-form DRR this scene's own report publishes swung +7.55 to
+        # -16.53 dB. The declared placement axis was INERT in every reported
+        # ISO-3382 metric, so `test_placement_shift` carried no acoustic difference
+        # from the id baseline at the metric level.
+        #
+        # A physical direct arrival is a broadband impulse scaled by 1/d. As a unit
+        # sample it has flat energy in every band, so C50/DRR now move with distance
+        # in every band rather than in none.
+        #
+        # Second defect it fixes: the global peak previously sat 300-550 samples
+        # INTO the diffuse tail, violating `_find_onset`'s documented AC-07
+        # assumption that the direct sound is the loudest arrival. It is now the
+        # first and largest sample by construction.
+        #
+        # NOT MODELLED: a distinct early-reflection cluster between the direct
+        # arrival and the diffuse onset. The tail begins at the direct arrival, so
+        # this scaffold has no early-reflection structure — one more reason its D0b
+        # verdicts are plumbing evidence, not acoustic results (RD-07).
+        direct = np.zeros(n_active, dtype=np.float32)
+        if n_active > 0:
+            direct[0] = direct_gain
+
+        # --- Reverberant level from the room constant (AC-28/RD-75) ---
+        #
+        # The tail is scaled so the RENDERED direct-to-reverberant ratio equals the
+        # closed-form DRR that `scenes/placement_report.json` publishes for this
+        # same scene. Direct energy is direct_gain^2 = 1/d^2 and the tail carries
+        # A^2 * sum(decay^2), so matching 1/(4*pi*d^2) against 4/R gives
+        # A = sqrt(16*pi / (R * sum(decay^2))) — independent of d, which is what
+        # leaves the whole distance dependence in the direct term (6 dB per
+        # doubling) and puts the 0 dB crossing at d = r_c, since r_c = sqrt(R/16pi).
+        #
+        # Both quantities come from `amcd.acoustics`, for the reason AC-24 gave for
+        # the T60: the room the report DESCRIBES and the room the scaffold RENDERS
+        # must not be able to drift apart.
+        surface_alpha = float(np.clip(scene.material_absorption, 0.01, 0.99))
+        r_constant = room_constant(surface, surface_alpha)
+        decay_energy = float(np.sum(decay.astype(np.float64) ** 2))
+        diffuse_gain = float(
+            np.sqrt(16.0 * np.pi / (r_constant * decay_energy)) if decay_energy > 0 else 0.0
+        )
 
         # Per-channel amplitude variation (fixed by scene)
         channel_scales = (0.7 + 0.3 * rng_scene.random(self.n_channels)).astype(np.float32)
@@ -154,7 +206,7 @@ class DryRunSimulator:
         for c in range(self.n_channels):
             converged = rng_scene.standard_normal(n_active).astype(np.float32)
             mc_noise = rng_noise.standard_normal(n_active).astype(np.float32)
-            diffuse = decay * (converged + mc_noise * noise_scale)
+            diffuse = diffuse_gain * decay * (converged + mc_noise * noise_scale)
             ir[c, delay_samples:] = channel_scales[c] * (direct + diffuse)
 
         return IRResult(
@@ -178,5 +230,33 @@ class DryRunSimulator:
                 "rt60_clipped": bool(rt60_clipped),
                 "distance_m": distance,
                 "noise_scale": noise_scale,
+                # ── What `noise_scale` is, and what it is NOT (AC-35) ──────────
+                # It is the relative error of a mean formed from N independent
+                # samples, 1/sqrt(N), applied PER PRESSURE SAMPLE of the diffuse
+                # tail. The scaffold does not model what estimator that would be:
+                # a real ray tracer's error depends on ray density per (octave
+                # band, time bin), which involves diffuse_depth, the band count and
+                # the decay length — none of which this backend consumes. So the
+                # MAGNITUDE is an undeclared modelling assumption, not ray-count
+                # physics, and it is stamped rather than left implicit.
+                "noise_scale_basis": (
+                    "1/sqrt(ray_budget) applied per pressure sample of the diffuse "
+                    "tail; a modelling assumption, not a derived ray-tracing error"
+                ),
+                # The realized broadband converged-to-noise ratio of THIS leg,
+                # exactly 10*log10(N) under the model above: 37.0 dB at 5,000 and
+                # 53.0 dB at 200,000. Recorded so the Step-6 probe (RD-17) can put
+                # a real gsound number beside it — under this scaffold the
+                # denoising problem is nearly absent, which is what RD-07's caveat
+                # says qualitatively and this says in dB.
+                "realized_snr_db": float(-20.0 * np.log10(noise_scale)),
+                # The reverberant level is set from the room constant so the
+                # rendered DRR matches the closed form the scene report publishes
+                # (AC-28). Recorded so the two can be compared without re-deriving.
+                "room_constant_m2": float(r_constant),
+                "diffuse_gain": diffuse_gain,
+                "expected_drr_db": float(
+                    diffuse_field_drr_db(surface, surface_alpha, distance)
+                ),
             },
         )

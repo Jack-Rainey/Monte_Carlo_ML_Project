@@ -183,7 +183,16 @@ def _run_d0b(
 
     Per-split reporting (Invariant 9 — never pool splits).
     """
-    all_splits = sorted(set(splits.values()))
+    # Config-declared enumeration, in declaration order — the same rule as D0a ~130
+    # lines above (F-45). This half was missed: `sorted(set(splits.values()))` lists
+    # only splits that RECEIVED a scene, so a declared split with none simply
+    # vanished from d0b_oracle.json, and the `if not scene_ids:` branch below was
+    # DEAD CODE (every member of that set has >= 1 scene by construction).
+    # Reproduced with an empty `test_id`: d0a_gap.json included it, d0b_oracle.json
+    # did not, and the run still printed "D0b verdict: CARRIER CEILING CLEARS" —
+    # a verdict over a split set that silently differed from the declared one.
+    declared_splits = list(config.splits)
+    all_splits = declared_splits + sorted(set(splits.values()) - set(declared_splits))
     iso_eval_freqs = [float(f) for f in config.iso_eval_freqs]
 
     # Instantiate representation for D3 decode
@@ -309,6 +318,18 @@ def _run_d0b(
     any_indeterminate = False
 
     for split_name, summary in per_split_residuals.items():
+        # A declared split that received no scene carries only its unscored reason,
+        # not per-metric residuals (F-45). Treated as INDETERMINATE, never as a
+        # pass: a verdict cannot clear a split it never measured, which is exactly
+        # what the pre-fix enumeration allowed by omitting the split entirely.
+        if "T30" not in summary:
+            any_indeterminate = True
+            emit(
+                verbosity, "metrics",
+                f"  {split_name:<28} {'N/A':>12}  {'N/A':>12}  {'N/A':>12}  "
+                f"N/A — {summary.get('unscored_reason', 'no scenes')}",
+            )
+            continue
         t30_r = summary["T30"]["mean_residual"]
         edt_r = summary["EDT"]["mean_residual"]
         c50_r = summary["C50"]["mean_residual"]

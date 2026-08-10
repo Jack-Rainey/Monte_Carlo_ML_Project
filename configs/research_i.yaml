@@ -59,7 +59,7 @@
 #      MAJORITY of its EDT realizations and biased the surviving mean +31.2 %
 #      (measured, 200 realizations at true T60 = 0.06 s). Censoring an estimator
 #      on its own value is not a disclosure, it is a distortion. The floor is now
-#      the filter's own resolvable decay (~0.011-0.021 s here), which these decays
+#      the filter's own resolvable decay (~0.010-0.020 s here), which these decays
 #      clear — so the numbers ARE reported, and are labelled instead: eval counts
 #      per split how many scenes fall below `metric_edt_variance_limited_s`, where
 #      the EDT estimator carries 24-31 % sd. Read this split's absolutes as
@@ -150,8 +150,8 @@ scenes:
   # Figure 5: shoebox L 4.0-14.0 / W 3.0-10.0 / H 2.4-4.5 m;
   #           corridor L 8.0-24.0 / W 1.8-4.0 / H 2.4-4.0 m.
   geometry_families:
-    shoebox:  { dims: [[4.0, 14.0], [3.0, 10.0], [2.4, 4.5]] }
-    corridor: { dims: [[8.0, 24.0], [1.8, 4.0], [2.4, 4.0]] }
+    shoebox:  { dims: [[4.0, 14.0], [3.0, 10.0], [2.4, 4.5]], characterization: sabine }
+    corridor: { dims: [[8.0, 24.0], [1.8, 4.0], [2.4, 4.0]], characterization: sabine }
 
   placement_regimes:
     # Figure 5: source/receiver height 1.2-1.8 m; separation 1.0-10.0 m.

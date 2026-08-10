@@ -95,8 +95,11 @@ scenes:
   geometry_families:
     # dims: per-axis (lo, hi) metre ranges. corridor's long axis is DISJOINT from
     # shoebox's so geometry_shift is a genuine held-out region.
-    shoebox:  { dims: [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]] }
-    corridor: { dims: [[15.0, 30.0], [1.5, 3.0], [2.4, 3.5]] }
+    # `characterization` states which closed-form model applies; no default, so an
+    # outdoor / partially-open family (paper §6) cannot silently inherit closed-box
+    # Sabine numbers (RD-64).
+    shoebox:  { dims: [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]], characterization: sabine }
+    corridor: { dims: [[15.0, 30.0], [1.5, 3.0], [2.4, 3.5]], characterization: sabine }
   placement_regimes:
     # `height_range` and `distance_range` are REQUIRED KEYS that may be null:
     # presence is mandatory so a constraint is never silently defaulted, and null
@@ -193,8 +196,8 @@ metric_onset_rel_db: -20.0
 
 # How many times the octave filter's OWN decay a room's decay must exceed to be
 # resolvable in that band. The floor is MEASURED per (metric, band) from the
-# filter's impulse response — 500 Hz: T30 21.97 ms, EDT 10.70 ms; 1000 Hz: 10.96 /
-# 5.44 ms; exactly 1/f — so this declares only the safety margin (AC-26/AC-27).
+# filter's impulse response — 500 Hz: T30 20.31 ms, EDT 9.55 ms; 1000 Hz: 10.04 /
+# 4.79 ms; exactly 1/f — so this declares only the safety margin (AC-26/AC-27).
 metric_band_resolvability_margin: 2.0
 
 # EDT below this is variance-limited, not filter-limited: measured sd 24-31 % of

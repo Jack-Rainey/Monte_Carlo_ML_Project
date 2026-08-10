@@ -42,6 +42,53 @@ def sabine_rt60(volume_m3: float, surface_m2: float, absorption: float) -> float
     return SABINE_K * volume_m3 / (absorption * surface_m2)
 
 
+def room_constant(surface_m2: float, absorption: float) -> float:
+    """Room constant R = Sα/(1-α) (m²) — the diffuse-field "absorbing power".
+
+    Shared by the scene report and the scaffold for the AC-24 reason: the
+    reverberant level the report PUBLISHES and the reverberant level the scaffold
+    RENDERS have to come from one formula, or the described room and the rendered
+    room diverge with nothing recording it (RD-75).
+
+    CLOSED-ENCLOSURE MODEL. R is defined for a room whose reverberant field is
+    sustained by its own boundaries; it is meaningless for the roadmap's outdoor
+    and partially-open scenes (paper §6). Callers must not apply it to a geometry
+    family that does not declare `characterization: sabine` — see
+    `GeometryFamily.characterization` (RD-64).
+    """
+    if not 0.0 < absorption < 1.0:
+        raise ValueError(
+            f"absorption must be in (0, 1) for the room constant; got {absorption!r}. "
+            f"α ≥ 1 gives an infinite R and α ≤ 0 a non-positive one, neither of "
+            f"which describes an enclosure."
+        )
+    if surface_m2 <= 0:
+        raise ValueError(f"surface must be positive; got {surface_m2!r}.")
+    return surface_m2 * absorption / (1.0 - absorption)
+
+
+def critical_distance(surface_m2: float, absorption: float) -> float:
+    """Critical distance r_c = sqrt(R/16π) (m): where the direct and reverberant
+    fields are equal. Same closed-enclosure caveat as `room_constant`."""
+    return math.sqrt(room_constant(surface_m2, absorption) / (16.0 * math.pi))
+
+
+def diffuse_field_drr_db(surface_m2: float, absorption: float, distance_m: float) -> float:
+    """Diffuse-field direct-to-reverberant ratio (dB) at `distance_m`.
+
+    Direct 1/(4πd²) against the reverberant field 4/R, so
+    DRR = 10·log10(R / (16π d²)) — which is 0 dB exactly at d = r_c, by
+    construction. Same closed-enclosure caveat as `room_constant`.
+    """
+    if distance_m <= 0:
+        raise ValueError(
+            f"distance must be > 0 for a DRR; got {distance_m!r}. A coincident "
+            f"source/receiver pair has no finite direct-to-reverberant ratio."
+        )
+    r = room_constant(surface_m2, absorption)
+    return 10.0 * math.log10(r / (16.0 * math.pi * distance_m ** 2))
+
+
 def eyring_rt60(volume_m3: float, surface_m2: float, absorption: float) -> float:
     """Eyring reverberation time (s) — `-S·ln(1-α)` in place of Sabine's `S·α`.
 

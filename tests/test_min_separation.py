@@ -157,7 +157,7 @@ class TestGenScenesRejectsUnrenderableRegimes:
         cfg = Config.load(_BASE)
         object.__setattr__(cfg.scenes.placement_regimes["interior_random"],
                            "distance_range", [None, 10.0])
-        with pytest.raises(ValueError, match="no minimum declared"):
+        with pytest.raises(ValueError, match="no minimum source-receiver separation"):
             _check_regimes_clear_backend_floor(cfg)
 
     def test_error_points_at_the_config_value_not_the_backend_floor(self) -> None:
@@ -234,3 +234,46 @@ class TestBaseConfigCannotEmitBelowItsFloor:
             assert d >= floors[regime], f"{scene.scene_id}: {d} m under {regime}"
             seen += 1
         assert seen > 0
+
+
+class TestTheResearcherMinimumIsBackendIndependent:
+    """F-61: the whole AC-13/F-48 protection sat behind `if floor <= 0.0: return`.
+
+    A backend legitimately declaring a 0.0 floor — valid under the `Simulator`
+    contract, unexercised by any shipped backend — made both the gen-scenes check
+    and render's pre-flight early-return. `distance_range: null` was then legal
+    again and the pre-F-48 near-field population returned silently: `_room_acoustics`
+    rejects only d == 0 exactly, so d = 0.001 m would publish a ~+60 dB DRR into
+    placement_report.json as if measured. Valid input under the declared contract,
+    silently mishandled by an unexercised path.
+    """
+
+    def test_a_null_distance_range_fails_even_with_a_zero_floor_backend(self) -> None:
+        from amcd.scenes.generator import _check_regimes_clear_backend_floor
+
+        cfg = tiny_config(
+            simulator={"params": {"min_source_receiver_distance_m": 0.0}},
+            scenes={"placement_regimes": {"interior_random": {"distance_range": None}}},
+        )
+        with pytest.raises(ValueError, match="no minimum source-receiver separation"):
+            _check_regimes_clear_backend_floor(cfg)
+
+    def test_a_declared_minimum_passes_with_a_zero_floor_backend(self) -> None:
+        from amcd.scenes.generator import _check_regimes_clear_backend_floor
+
+        cfg = tiny_config(
+            simulator={"params": {"min_source_receiver_distance_m": 0.0}},
+        )
+        assert _check_regimes_clear_backend_floor(cfg) == 0.0
+
+    def test_the_two_checks_are_reported_separately(self) -> None:
+        """The researcher's minimum and the backend's floor are different claims
+        (RD-57), so a config that declares a minimum BELOW the backend floor gets
+        the floor message, not the missing-declaration one."""
+        from amcd.scenes.generator import _check_regimes_clear_backend_floor
+
+        cfg = tiny_config(
+            simulator={"params": {"min_source_receiver_distance_m": 5.0}},
+        )
+        with pytest.raises(ValueError, match="cannot render a source-receiver"):
+            _check_regimes_clear_backend_floor(cfg)

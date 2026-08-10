@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..acoustics import eyring_rt60, sabine_rt60
+from ..acoustics import critical_distance, diffuse_field_drr_db, eyring_rt60, sabine_rt60
 from ..config import Config, Margins, PlacementRegime
 from ..runtime import Verbosity, emit
 from ..simulators.base import SceneSpec, simulator_min_separation
@@ -159,25 +159,50 @@ def _check_regimes_clear_backend_floor(config: Config) -> float:
     the scientifically motivated minimum stays in the config where it belongs.
     """
     floor = simulator_min_separation(config)
+
+    # A DECLARED minimum is required unconditionally, independently of the backend
+    # (F-61). The whole check used to sit behind `if floor <= 0.0: return`, so a
+    # backend legitimately declaring a zero floor — a valid value under the
+    # `Simulator` contract, and one no shipped backend exercises — made both this
+    # check and render's pre-flight early-return. At that point `distance_range:
+    # null` is legal again and the pre-F-48 near-field population returns with no
+    # error at all: `_room_acoustics` rejects only d == 0 exactly, so d = 0.001 m
+    # would report a ~+60 dB DRR into placement_report.json as if it were measured.
+    #
+    # The researcher's minimum is a SCIENTIFIC choice about the scene distribution
+    # (base.yaml argues 1.0 m from the critical distance and ISO 3382-1 §5.3); the
+    # backend floor is only a lower limit on that choice (RD-57). So the two are
+    # now checked separately, in that order.
+    missing = [
+        name for name, regime in config.scenes.placement_regimes.items()
+        if regime.distance_range is None or regime.distance_range[0] is None
+    ]
+    if missing:
+        raise ValueError(
+            f"these placement regimes declare no minimum source-receiver "
+            f"separation: {', '.join(sorted(missing))}.\n"
+            f"Every regime must declare a `distance_range` lower bound. It is a "
+            f"research choice about the scene distribution — at very short range "
+            f"the direct term dominates, C50/D50 saturate and the diffuse tail this "
+            f"study is about is buried — so it is required whatever the active "
+            f"backend's own floor happens to be, including zero."
+        )
     if floor <= 0.0:
         return floor
-    offenders = []
-    for name, regime in config.scenes.placement_regimes.items():
-        rng = regime.distance_range
-        declared_min = None if rng is None else rng[0]
-        if declared_min is None or declared_min < floor:
-            offenders.append((name, declared_min))
+    offenders = [
+        (name, regime.distance_range[0])
+        for name, regime in config.scenes.placement_regimes.items()
+        if regime.distance_range[0] < floor
+    ]
     if offenders:
         lines = "\n".join(
-            f"    {name}: distance_range lower bound = "
-            + ("null (no minimum declared)" if lo is None else f"{lo} m")
-            for name, lo in offenders
+            f"    {name}: distance_range lower bound = {lo} m" for name, lo in offenders
         )
         raise ValueError(
             f"simulator {config.simulator.name!r} cannot render a source-receiver "
             f"separation below {floor} m, but these placement regimes admit closer "
             f"pairs:\n{lines}\n"
-            f"Declare a `distance_range` lower bound of at least {floor} m on each. "
+            f"Raise each `distance_range` lower bound to at least {floor} m. "
             f"That bound is a research choice about the scene distribution — the "
             f"backend floor is only a lower limit on it, not a recommended value."
         )
@@ -223,6 +248,7 @@ def _room_acoustics(
     *,
     alpha_limit: float,
     ir_duration_s: float,
+    characterization: str,
 ) -> dict:
     """Closed-form acoustic descriptors of one scene, from geometry alone.
 
@@ -240,10 +266,41 @@ def _room_acoustics(
     their own premise has failed — and for `test_material_shift`, the very split
     this artifact was built to characterize, it has failed for 100 % of scenes
     (alpha median 0.894, Sabine/Eyring ratio median 2.51, 23 % with r_c larger than
-    the room's longest dimension). So each scene now also carries three flags. No
+    the room's longest dimension). So each scene now also carries four flags. No
     formula changes and nothing is dropped: a +4.9 dB DRR from a formula outside
     its domain is still reported, but it is reported AS an extrapolation.
+
+    NOT EVERY GEOMETRY IS AN ENCLOSURE (RD-64). Every quantity here — Sabine/Eyring
+    T60, room constant, critical distance, DRR — is derived from `dims` on the
+    assumption of a closed box. That holds for shoebox and corridor and fails for
+    the roadmap's outdoor and partially-open scenes (paper §6), which design_spec
+    §6 says the architecture must not preclude. So the geometry family DECLARES its
+    `characterization`, and a family declaring "none" gets a recorded reason
+    instead of a number — per "nothing leaves a result silently" — rather than
+    meaningless closed-box values in the canonical placement_report.json.
     """
+    if characterization == "none":
+        # An unmodelled geometry is UNCHARACTERIZED, not zero and not NaN: every
+        # numeric key is absent so no consumer can average it, and the reason
+        # travels with the scene.
+        return {
+            "characterization": "none",
+            "uncharacterized_reason": (
+                "geometry family declares characterization: none — it is not a "
+                "closed enclosure, so Sabine/Eyring T60, room constant, critical "
+                "distance and diffuse-field DRR are undefined for it"
+            ),
+            # The record-length gate consumes this key for every scene, so it is
+            # present and False: an unmodelled geometry cannot be ASSERTED to
+            # exceed the record, and claiming it does would be a fabricated
+            # disclosure. The reason above is what a reader sees instead.
+            "t60_exceeds_ir_duration": False,
+        }
+    if characterization != "sabine":
+        raise ValueError(
+            f"unknown geometry characterization {characterization!r}; expected "
+            f"'sabine' or 'none'."
+        )
     if not distance > 0.0:
         # DRR divides by d²; a coincident pair would silently report +inf into a
         # canonical artifact. Geometrically degenerate anyway — guarded rather
@@ -266,10 +323,13 @@ def _room_acoustics(
     # Eyring is the better estimate at high absorption, where Sabine overpredicts
     # — and ceiling_absorptive reaches α = 0.98.
     t60_eyring = eyring_rt60(volume, surface, alpha)
-    # Room constant R = Sα/(1-α); critical distance r_c = sqrt(R/16π).
-    room_constant = surface * alpha / (1.0 - alpha)
-    r_c = float(np.sqrt(room_constant / (16.0 * np.pi)))
+    # Room constant, critical distance and diffuse-field DRR come from
+    # `amcd.acoustics` for the AC-24 reason the T60s already did (RD-75): the
+    # scaffold now scales its reverberant tail from the SAME formulas, so the DRR
+    # this report publishes and the DRR the render realizes cannot diverge.
+    r_c = critical_distance(surface, alpha)
     return {
+        "characterization": "sabine",
         "volume_m3": volume,
         "surface_m2": surface,
         "absorption": alpha,
@@ -278,7 +338,7 @@ def _room_acoustics(
         "critical_distance_m": r_c,
         "d_over_rc": distance / r_c if r_c > 0 else float("inf"),
         # Diffuse-field DRR: direct 1/(4πd²) against the reverberant field 4/R.
-        "drr_db": float(10.0 * np.log10(room_constant / (16.0 * np.pi * distance**2))),
+        "drr_db": diffuse_field_drr_db(surface, alpha, distance),
         # ── Validity indicators (AC-21) ──────────────────────────────────────
         # Sabine and Eyring agree only for small α; the ratio is a direct,
         # assumption-free readout of how far the diffuse-field model is being
@@ -288,6 +348,16 @@ def _room_acoustics(
         # A critical distance larger than the room means the "reverberant field"
         # the DRR formula divides by does not exist inside this room at all.
         "rc_exceeds_max_dim": bool(r_c > max(dims)),
+        # The SHARPEST per-scene condition, and the one the shipped flags were
+        # missing (AC-29). Inside the critical distance the receiver sits in the
+        # DIRECT field, so the diffuse-field DRR being reported has no reverberant
+        # field to divide by. `d_over_rc` was already computed and summarized as a
+        # value but never flagged or counted, so the per-split validity summary
+        # omitted the strictest indicator it already had in hand. MEASURED over the
+        # realized base.yaml set: this fires for 92.5 % of test_material_shift and
+        # 17.2 % of id, against `rc_exceeds_max_dim`'s 35.0 % and 0.0 % — an
+        # under-report of ~2.6x on the split the flags were built for.
+        "receiver_inside_critical_distance": bool(distance < r_c),
         # AC-22's realized gate: this scene's decay against the record length.
         # Sabine (the longer estimate) so the flag errs toward declaring a scene
         # unsupported rather than silently truncating it.
@@ -359,15 +429,33 @@ def _flag_counts(room_stats: list[dict], flags: tuple[str, ...], **context) -> d
     domain" and "one scene is" are very different disclosures, and the flag alone
     cannot tell them apart (AC-21/AC-22).
     """
-    n = len(room_stats)
+    # An uncharacterized scene (RD-64) has no closed-form quantities, so it cannot
+    # be counted for or against a diffuse-field flag. Excluded from BOTH numerator
+    # and denominator, and the exclusion is itself reported — a fraction whose
+    # denominator silently shrank is exactly the silent drop the project forbids.
+    modelled = [r for r in room_stats if flag_key_present(r, flags)]
+    n_uncharacterized = len(room_stats) - len(modelled)
+    n = len(modelled)
     out: dict = {"n_scenes": n, **context}
+    if n_uncharacterized:
+        out["n_uncharacterized"] = n_uncharacterized
+        out["uncharacterized_note"] = (
+            "scenes whose geometry family declares characterization: none are "
+            "excluded from these fractions — the closed-form model they measure "
+            "does not apply to a non-enclosure (RD-64)"
+        )
     for flag in flags:
-        count = sum(1 for r in room_stats if r[flag])
+        count = sum(1 for r in modelled if r[flag])
         out[flag] = {
             "count": count,
             "fraction": (count / n) if n else None,
         }
     return out
+
+
+def flag_key_present(room: dict, flags: tuple[str, ...]) -> bool:
+    """Whether this scene carries every flag being counted."""
+    return all(flag in room for flag in flags)
 
 
 def _summarize(values: list[float]) -> dict:
@@ -448,6 +536,9 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 dims, absorption, distance,
                 alpha_limit=scenes_cfg.diffuse_field_alpha_limit,
                 ir_duration_s=config.ir_duration,
+                characterization=(
+                    scenes_cfg.geometry_families[axes["geometry"]].characterization
+                ),
             ))
 
             spec = SceneSpec(
@@ -494,7 +585,8 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             # reduction operation minimum" instead of a named, readable summary.
             **{
                 f"{key}": (
-                    _summarize([r[key] for r in room_stats]) if room_stats else None
+                    _summarize([r[key] for r in room_stats if key in r])
+                    if any(key in r for r in room_stats) else None
                 )
                 for key in ("volume_m3", "t60_sabine_s", "t60_eyring_s",
                             "critical_distance_m", "d_over_rc", "drr_db",
@@ -506,7 +598,8 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             # than only that some of it is.
             "diffuse_field_validity": _flag_counts(
                 room_stats,
-                ("alpha_above_diffuse_limit", "rc_exceeds_max_dim"),
+                ("alpha_above_diffuse_limit", "rc_exceeds_max_dim",
+                 "receiver_inside_critical_distance"),
                 alpha_limit=scenes_cfg.diffuse_field_alpha_limit,
             ),
             "t60_over_ir_duration": _flag_counts(

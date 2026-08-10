@@ -92,6 +92,32 @@ def _butter_octave_filter(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.n
     Zero-phase 4th-order Butterworth octave-band filter centered at fc Hz.
     Passband: [fc / sqrt(2), fc * sqrt(2)].
     Uses sosfiltfilt for zero-phase response (no group-delay offset in EDT).
+
+    LEADING SILENCE IS EXPLICIT, NOT LEFT TO scipy's DEFAULT PADDING. `sosfiltfilt`
+    pads with `padtype="odd"`, which reflects the signal about its first sample: for
+    an onset-aligned IR — whose first sample IS the direct arrival, the largest in
+    the record — that manufactures a step of twice the peak immediately before t=0,
+    an arrival that never existed. MEASURED at 48 kHz with a unit impulse at index
+    0: the 500 Hz octave returns 6.171 units of energy for 1 unit in, against the
+    ~0.0147 its own bandwidth allows — a 420x inflation, entirely from the padding.
+    Downstream it inflated C50 by ~23 dB.
+
+    The defect was INERT until AC-28 made the scaffold's direct arrival a genuine
+    broadband impulse; before that no IR had an impulsive first sample, so nothing
+    exercised the reflection. It is a property of the metric path, not of that fix.
+
+    An impulse response is silent before its direct arrival, so the physically
+    correct context is ZEROS. The guard is scaled as 1/fc because the filter's
+    ringing is (measured 500 Hz T30 21.97 ms, 1000 Hz 10.96 ms, exactly 1/f), and it
+    is stripped afterwards so integration still starts at the direct arrival, as
+    ISO 3382 requires.
+
+    KNOWN RESIDUAL: `filtfilt` is non-causal, so an impulse at the arrival index
+    produces a symmetric response and stripping the guard discards its pre-ringing
+    — measured, about half the impulse's in-band energy (0.0067 vs the 0.0132 an
+    interior impulse yields). That is a property of zero-phase filtering, it is
+    common-mode across legs, and paired improvements are unaffected; it does bias
+    ABSOLUTE C50 low for strongly direct-dominated scenes.
     """
     nyq = sample_rate / 2.0
     f_lo = fc / 2.0 ** 0.5
@@ -99,7 +125,12 @@ def _butter_octave_filter(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.n
     f_lo = max(f_lo, 10.0)      # stay well above DC
     f_hi = min(f_hi, nyq * 0.99)  # stay below Nyquist
     sos = butter(4, [f_lo, f_hi], btype="bandpass", fs=sample_rate, output="sos")
-    return sosfiltfilt(sos, ir_w).astype(np.float32)
+    # ~4x the filter's own T30 in this band; zeros are cheap and the bound only has
+    # to exceed the ringing, not match it.
+    guard = int(np.ceil(48.0 / fc * sample_rate))
+    padded = np.concatenate([np.zeros(guard, dtype=np.float64), np.asarray(ir_w, dtype=np.float64)])
+    filtered = sosfiltfilt(sos, padded, padtype="constant")
+    return filtered[guard:].astype(np.float32)
 
 
 def _find_onset(ir_w: np.ndarray, rel_db: float) -> int:
@@ -171,7 +202,7 @@ def _band_resolvable_decay_s(fc: float, sample_rate: int) -> dict[str, float]:
     this is not being measured — the filter is.
 
     MEASURED here rather than asserted, and the numbers scale exactly as 1/f
-    (48 kHz): 500 Hz → T30 21.965 ms, EDT 10.696 ms; 1000 Hz → 10.955 / 5.442 ms.
+    (48 kHz): 500 Hz → T30 20.309 ms, EDT 9.551 ms; 1000 Hz → 10.037 / 4.793 ms.
     `sosfiltfilt` runs the 4th-order section forwards and backwards, which doubles
     the effective order — the reason an earlier estimate of "~3 ms of ringing" from
     the nominal 353 Hz bandwidth understated it by 3-7x (AC-27).
