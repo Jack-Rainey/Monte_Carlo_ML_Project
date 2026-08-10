@@ -9,6 +9,16 @@ ISO-3382 metrics (T30, EDT, C50).
 - **Build plan, invariants, and the D0→E4 experiment ledger:** [`docs/design_spec.md`](docs/design_spec.md)
 - **Agent operating rules (plan/review/ledger discipline):** [`CLAUDE.md`](CLAUDE.md)
 - **Open review findings:** [`docs/review_ledger.md`](docs/review_ledger.md)
+- **Render-backend environment + upstream API reference:** [`docs/gsound_sir_setup.md`](docs/gsound_sir_setup.md)
+
+Code and tests cite review-ledger row ids (`F-49`, `AC-17`, `RD-45`) as their
+traceability device. A resolved row is **deleted** from the ledger — git history is
+the audit trail — so a cited id that is not in the ledger is a row that was closed,
+not a mistake. Recover it with:
+
+```bash
+git log -S 'RD-45' -- docs/review_ledger.md
+```
 
 ## Install
 
