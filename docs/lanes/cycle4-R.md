@@ -1,20 +1,38 @@
 # Lane R brief — render enablement, Steps 2+3 (cycle 4)
 
-You are the reason this cycle can move the render gate instead of only its row
-count. RD-33a lifts on **both** (i) zero OPEN rows on its declared path list and
-(ii) the RD-17 probe validating that the 200,000-ray high leg is a converged
-reference — and RD-17 cannot run until Steps 2/3 exist. Lanes M and S work
-condition (i). Nothing but this lane touches (ii).
+`src/amcd/simulators/gsound_sir.py:124` raising `NotImplementedError` is the
+binding constraint on this project. It is yours.
 
-`src/amcd/simulators/gsound_sir.py` raising `NotImplementedError` is the binding
-constraint on this project. It is yours.
+**Be precise about what this cycle does to the gate.** RD-33a lifts on **both**
+(i) zero OPEN rows on its declared path list and (ii) the RD-17 probe validating
+that the 200,000-ray high leg is a converged reference. Lanes M and S work (i).
+This lane **unblocks** (ii) — RD-17 cannot run until Steps 2/3 exist — but it
+does **not lift** it, because RD-17 is assigned to no lane this cycle. Cycle 4
+removes the blocker; cycle 5 runs the probe (RD-89c).
 
-## Your rows are DEFERRED in the ledger, and that is correct
+## Step 0 — the worker itself, before any assigned row
 
-RD-08, RD-24, RD-67 and RD-21 all read `DEFERRED (gate: Step 2)` or `Step 3`.
-Cycle 4 **is** Steps 2+3, so they are in-gate here. Do not re-status them in the
-ledger yourself — the ownership hook will refuse the write. Record the transition
-in `docs/ledger_inbox/R.md` and let the integrator do it (rule 3).
+`GsoundSirSimulator.render` must return an `IRResult` through `build_simulator`.
+RD-24, RD-08, RD-67 and RD-21 are **requirements ON that render, not substitutes
+for it.** A pass condition satisfiable with synthetic PathData and a mocked
+gsound leg, while `render()` still raises, would miss this cycle's whole point —
+the lane that exists to move the gate would have a pass condition not requiring
+the thing that moves it (RD-89).
+
+The subprocess worker behind the existing seam is the deliverable. It had no
+ledger row of its own, which is exactly how it nearly went unbuilt.
+
+## Your rows were re-statused to OPEN before you started
+
+RD-08, RD-24, RD-67 and RD-21 read `DEFERRED (gate: Step 2 / Step 3)` until
+2026-08-10. Cycle 4 **is** Steps 2+3, so the integrator re-statused them to OPEN
+before any worktree existed — a row deferred to a gate that has arrived is not
+deferred, and leaving them DEFERRED would have let the cycle report "done" with
+all four untouched and `render()` still raising (RD-90).
+
+They are now inside the definition of done. Do not re-status anything yourself —
+the ownership hook will refuse the write; record status changes in
+`docs/ledger_inbox/R.md` (rule 3).
 
 ## Order
 
@@ -56,7 +74,7 @@ artifact rather than an accidental result.
 
 ## Pass condition
 
-Steps 2+3 are structural, so the evidence is a shape, not a number:
+Steps 2+3 are structural, so most of the evidence is a shape, not a number:
 
 - the canonical dry run still passes end to end (the scaffold must be unaffected —
   it shares `simulators/base.py` with you);
@@ -65,6 +83,10 @@ Steps 2+3 are structural, so the evidence is a shape, not a number:
 - `IRResult.paths` populated on the gsound leg and `None`/absent on the scaffold
   leg, with no downstream edit needed to tolerate either — that is the
   scaffolding rule, and a downstream `isinstance` check would be a defect.
+
+**Plus the step-0 condition, which is the one that matters:** `render()` returns
+a real `IRResult`. How that is evidenced is set by the render-evidence decision
+recorded at the top of `docs/lanes/cycle4.yaml` — do not decide it mid-lane.
 
 ## Evidence
 

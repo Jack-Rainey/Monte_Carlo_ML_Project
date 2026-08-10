@@ -14,13 +14,20 @@
 # through a session (RD-83 — F-72 was exactly that: assigned to S while its
 # test class sits in a file lane P owns).
 #
-# ── Accounting (RD-87: print it, do not merely assert it) ──────────────────
-#   67 OPEN = 25 lane + 13 integrator_queue + 22 awaiting_re_review + 7 new
-#             (RD-81…87, raised against THIS partition and fixed by it)
-# Every OPEN ledger row appears exactly once across those four lists; the
-# partition test asserts the union equals the ledger's OPEN set. Lane R's four
-# rows are DEFERRED, not OPEN — they are gated at Steps 2/3, and cycle 4 IS
-# Steps 2+3, so they become active here (see `note` on lane R).
+# ── Accounting (RD-87: print it; RD-88: and actually check it) ─────────────
+#   70 OPEN = 29 lane + 14 integrator_queue + 22 awaiting_re_review + 5 new
+#             (RD-88…92, raised against THIS partition and fixed by it)
+# `tests/test_lane_partition.py::test_the_partition_covers_exactly_the_ledgers_open_rows`
+# reads docs/review_ledger.md and asserts the union of the four lists EQUALS the
+# ledger's OPEN set — in both directions, so a row in no list and a row planned
+# but not open both fail. Until RD-88 this was claimed here and enforced by
+# nothing; do not restore the claim without the test.
+#
+# Lane R's four rows and RD-20 were DEFERRED at gate Step 2 / Step 3. Cycle 4 IS
+# Steps 2+3, so the integrator re-statused them to OPEN before any worktree was
+# created (RD-90): a row deferred to a gate that has ARRIVED is not deferred, and
+# leaving them out of the count made the definition of done blind to the cycle's
+# headline work.
 
 cycle: cycle4
 base_branch: v3-rebuild
@@ -138,10 +145,11 @@ lanes:
     # six QC rows would make S the wall-clock floor and waste M and P's
     # parallelism. Run three terminals and fold R into S if you prefer.
     note: >-
-      These four rows are DEFERRED in the ledger at gate Step 2 / Step 3.
-      Cycle 4 IS Steps 2+3, so they are in-gate here. Do not re-status them in
-      the ledger from a lane — record the transition in the inbox and let the
-      integrator do it (rule 3).
+      Step 0, before any row below: `GsoundSirSimulator.render` must return an
+      `IRResult` through `build_simulator`. RD-24/08/67/21 are requirements ON
+      that render, not substitutes for it — a pass condition satisfiable with
+      synthetic PathData while `render()` still raises `NotImplementedError`
+      would be this cycle's whole point missed (RD-89).
     owns:
       - src/amcd/simulators/base.py
       - src/amcd/simulators/render.py
@@ -197,4 +205,6 @@ awaiting_re_review:
 # Raised by research-director AGAINST this partition and fixed by this revision
 # of it. They join awaiting_re_review once the integrator's reviewer pass sees
 # them; they are listed separately so the arithmetic above is checkable.
-raised_against_this_partition: [RD-81, RD-82, RD-83, RD-84, RD-85, RD-86, RD-87]
+# RD-81…87 came from the FIRST pass and were all confirmed fixed at the second,
+# so their rows are deleted — `git log -S 'RD-83'` recovers them.
+raised_against_this_partition: [RD-88, RD-89, RD-90, RD-91, RD-92]

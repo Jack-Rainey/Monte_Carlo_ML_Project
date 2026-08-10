@@ -72,6 +72,18 @@ specifically, the test must construct the *failing* population — a split of
 `characterization: none` scenes, a scene with its tensors removed — and assert
 the counts, because both defects are invisible on a healthy run.
 
+**And one more, which is not obvious: your changes must be population-neutral.**
+You own `scenes/**`, which decides which scenes are ADMITTED, and therefore the
+population every reported number is computed over. The integration gate treats a
+moved `ci_table.csv` as cross-lane interference, so if your work moves it the
+detector cannot tell your legitimate change from a real defect (RD-91). Show an
+unchanged fixed-seed `ci_table.csv` on the canonical dry run.
+
+F-71 is the live risk: tightening `_scene_is_characterized` changes a gate
+OUTCOME. If it turns out to change admission rather than only the reported
+fraction, **stop** — that is an M-class change and belongs in the integrator
+queue. Your other rows are disclosure-only and safe.
+
 ## Evidence
 
 ```

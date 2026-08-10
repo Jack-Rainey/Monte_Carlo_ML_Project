@@ -34,6 +34,12 @@ _PARTITIONS = sorted(
 #: lane editing the authority it is being judged against defeats the review.
 SHARED_AUTHORITY = ("docs/review_ledger.md", "CLAUDE.md", "docs/design_spec.md")
 
+#: Which partition is checked against the LIVE ledger. Older cycles' files stay
+#: in docs/lanes/ as the record of what was planned, and describe a ledger state
+#: that no longer exists — asserting them against today's ledger would fail for
+#: being history rather than for being wrong.
+_CURRENT_CYCLE = "cycle4"
+
 
 def _partitions():
     assert _PARTITIONS, "no partition file in docs/lanes/ — did the directory move?"
@@ -148,6 +154,65 @@ def test_no_row_id_appears_in_two_places(path: Path, spec: dict) -> None:
                 f"'{bucket}'. Each row gets exactly one plan."
             )
             seen[row_id] = bucket
+
+
+def _open_ledger_ids() -> set[str]:
+    """Every row id the ledger currently marks OPEN.
+
+    Status is matched as a PREFIX, not an exact cell. `F-45` is `OPEN (narrowed)`
+    and `AC-09` is `DEFERRED (gate: E1 report)` — an exact `| OPEN |` match drops
+    the first and an exact `| DEFERRED |` match keeps it, so the naive parser
+    miscounts by one in the direction that makes a broken partition look sound
+    (RD-88).
+    """
+    ledger = (_REPO_ROOT / "docs" / "review_ledger.md").read_text()
+    ids = set()
+    for line in ledger.splitlines():
+        # A row splits to ['', id, agent, sev, status, ...]: the leading pipe
+        # yields an empty cell, so status is index 4 and the id index 1.
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) > 5 and cells[4].startswith("OPEN"):
+            ids.add(cells[1])
+    return ids
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_the_partition_covers_exactly_the_ledgers_open_rows(path: Path, spec: dict) -> None:
+    """Every OPEN row has a plan, and every planned row is really OPEN.
+
+    Pairwise uniqueness cannot catch a row that is in NO list — which is the
+    omission RD-73 was raised for, and precisely what a coverage figure equal to
+    its own scope hides. This is the check `cycle4.yaml` and the ledger both
+    CLAIMED was here while nothing read the ledger at all (RD-88).
+
+    Only the current cycle's partition is checked against the live ledger; an
+    older cycle's file describes a ledger state that no longer exists.
+    """
+    if path.stem != _CURRENT_CYCLE:
+        pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+
+    planned: set[str] = set()
+    for lane in spec["lanes"]:
+        planned |= {row["id"] for row in lane["rows"]}
+    planned |= {row["id"] for row in spec.get("integrator_queue", [])}
+    planned |= set(spec.get("awaiting_re_review", []))
+    planned |= set(spec.get("raised_against_this_partition", []))
+
+    open_ids = _open_ledger_ids()
+    unplanned = open_ids - planned
+    assert not unplanned, (
+        f"{path.name}: these rows are OPEN in the ledger but appear in NO list — "
+        f"neither a lane, the integrator queue, awaiting_re_review, nor raised "
+        f"against the partition: {sorted(unplanned)}. A row with no plan is the "
+        "silent omission RD-73 exists to prevent."
+    )
+    stale = planned - open_ids
+    assert not stale, (
+        f"{path.name}: these rows are planned but are NOT OPEN in the ledger "
+        f"(closed, deleted, or still DEFERRED): {sorted(stale)}. Either the row "
+        "was resolved and the partition is stale, or it needs re-statusing "
+        "before a lane is told to work it (RD-90)."
+    )
 
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))

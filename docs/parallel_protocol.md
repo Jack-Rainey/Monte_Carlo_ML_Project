@@ -96,7 +96,12 @@ cd /Volumes/T7/Monte_Carlo_Research/v3          # no LANE.md -> integrator
 cd /Volumes/T7/Monte_Carlo_Research/v3-lane-M
 cd /Volumes/T7/Monte_Carlo_Research/v3-lane-P
 cd /Volumes/T7/Monte_Carlo_Research/v3-lane-S
+cd /Volumes/T7/Monte_Carlo_Research/v3-lane-R
 ```
+
+(That list is cycle 4's. `new_lane.py` prints the real one for whatever partition
+you ran it with — trust its output over this example, which is the kind of second
+declaration that drifts.)
 
 **One session per worktree.** Two sessions in `v3-lane-M` would both correctly
 identify as lane M and then collide with each other — the hazard lanes exist to
@@ -215,6 +220,15 @@ Step 4 is also the cross-lane interference detector. Only the metric lane may
 have moved `ci_table.csv`; if another lane moved it, that is a defect to
 investigate, not a merge artifact.
 
+**The detector only discriminates if the other lanes are expected-neutral, and
+that has to be stated, not assumed.** The scenes lane owns `scenes/**`, which
+sets the POPULATION every number is computed over — so a scene-side change to a
+gate OUTCOME (dataset admission) moves the table legitimately, and at the
+detector it looks identical to interference (RD-91). Each non-metric lane's brief
+therefore declares its expected effect on `ci_table.csv`, and in cycle 4 all
+three declare *none*: a row that would genuinely change admission is an M-class
+change and goes to the integrator queue.
+
 ---
 
 ## Planning the next cycle's partition
@@ -228,6 +242,21 @@ part that changes; the machinery, the guard and the tests are cycle-agnostic.
    schedule could have all closed without moving RD-33a, because that gate needs
    a probe that unbuilt code cannot run (RD-81). **A cycle whose lanes cannot
    move the gate is a cycle that ends where it started, with a smaller ledger.**
+
+   **1b. State which gate conditions the cycle LIFTS and which it only
+   UNBLOCKS.** They are not the same and the difference is where cycles get
+   lost. Cycle 4 unblocks RD-33a(ii) — it builds the code the RD-17 probe needs —
+   and lifts nothing, because RD-17 itself is assigned to no lane. Writing that
+   down is what stops cycle 5 being planned as though the gate had moved
+   (RD-89c). A cycle that only unblocks is fine; a cycle that *believes* it
+   lifted is not.
+
+   **1c. Name the deliverable, not only its requirements.** Cycle 4's declared
+   content included the subprocess worker; the partition gave lane R the PathData
+   schema and the provenance fill — both requirements ON a render — and the
+   render itself had no row at all, so R's pass condition was satisfiable while
+   `render()` still raised (RD-89). If a deliverable has no ledger row, it will
+   not get a lane: give it one first.
 2. **Bucket the OPEN rows into four lists** and write all four down: lane rows,
    `integrator_queue:`, `awaiting_re_review:`, and anything raised against the
    partition itself. Print the arithmetic in the yaml header. A row in no list is

@@ -84,5 +84,13 @@ fingerprint changes must not depend on M's edits landing; declare scopes by
 module name, which is stable across what M is doing.
 
 RR-27 (stale design-spec line citations in `config.py` **and**
-`simulators/base.py`) spans lane S's files and is on the integrator's queue.
-New work in another lane's file goes to `docs/ledger_inbox/P.md`.
+`simulators/base.py`) spans **lane R's** files — the simulators moved to R this
+cycle — and is on the integrator's queue. New work in another lane's file goes to
+`docs/ledger_inbox/P.md`.
+
+**You own the reported tables.** `stats/aggregate.py` writes `ci_table.csv` and
+`reporting/tables.py` writes `summary.txt`, so three rows raised against other
+lanes terminate in your files and sit on the integrator's queue rather than
+yours: F-70, RD-65's report-table half, and AC-43 (RD-82). Do not start them —
+but expect the integrator to apply them to your files after the merge, so leave
+those two modules in a state that can take a new column.
