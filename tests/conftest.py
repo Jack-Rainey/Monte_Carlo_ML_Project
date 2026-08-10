@@ -1,8 +1,19 @@
 """Shared fixtures for amcd tests.
 
-Test configuration is loaded from `configs/test_tiny.yaml` rather than hardcoded
-in Python — the same "config is the source of truth, no defaults in code" rule the
-pipeline follows. Tests that need a variant deep-merge overrides onto it via
+Test configuration is COMPOSED FROM THREE CONFIG LAYERS rather than hardcoded in
+Python — the same "config is the source of truth, no defaults in code" rule the
+pipeline follows:
+
+  SIMULATOR_DRY_RUN   configs/overlays/simulator_dry_run.yaml — selects the
+                      scaffold backend, so no test needs GSound-SIR.
+  TEST_TINY           configs/overlays/test_tiny.yaml — the small framing
+                      (few channels, low rate, short record) that keeps the
+                      suite fast.
+  CANONICAL_DRY_RUN   base + simulator_dry_run + dry_run: the full canonical
+                      dry run, for tests that must exercise what an operator
+                      actually runs.
+
+Tests that need a variant deep-merge overrides onto the composition via
 `tiny_config(**overrides)`.
 """
 from pathlib import Path

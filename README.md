@@ -31,15 +31,17 @@ The project runs in the conda env `amcd`:
 ```bash
 conda activate amcd        # or use the interpreter at $CONDA/envs/amcd/bin/python
 pip install -e .           # editable install of the amcd package
-pytest tests/ -q           # 40+ invariant/config/shape tests should pass
+pytest tests/ -q           # the full suite should pass
 ```
 
 > **Simulator note (cross-platform):** the `dry_run` simulator is pure Python and
 > runs anywhere. The real `gsound_sir` render backend wraps GSound-SIR, whose
 > C++ core is **x86-only**: on an x86_64 machine (Ubuntu or Windows desktop) it
 > builds and runs natively; on Apple Silicon it runs under Rosetta 2 emulation in
-> a dedicated `osx-64` conda env. Cross-platform operation is a project
-> requirement — the emulation boundary lives in environment setup, never in
+> a dedicated `osx-64` conda env. **Setup for both hosts, and the upstream API
+> reference, are in [`docs/gsound_sir_setup.md`](docs/gsound_sir_setup.md); the
+> installer is [`scripts/setup_gsound_sir.py`](scripts/setup_gsound_sir.py).**
+> Cross-platform operation is a project requirement — the emulation boundary lives in environment setup, never in
 > package code, and every other stage (preprocess → train → eval → stats) is
 > architecture-independent.
 
@@ -153,9 +155,16 @@ src/amcd/
   stats/            # bootstrap CIs, aggregation
   diagnostics/      # D0a headroom + D0b oracle probes
   reporting/        # result tables
-configs/            # base / dry_run / test_tiny / models/*
-docs/               # research_I_paper.md, design_spec.md, review_ledger.md, verbosity.md
-tests/              # invariant / config / shape tests
+configs/            # three kinds of file (see "Config, not code" above):
+  base.yaml         #   the master config; research_i.yaml is the E1 overlay
+  overlays/         #   composable run overrides (dry_run, test_tiny, smoke)
+  models/           #   per-plugin params: one file per registered model,
+  representations/  #   representation and simulator — selected by `name`
+  simulators/       #   from the master config
+scripts/            # setup_gsound_sir.py — the ref-addressable backend installer
+docs/               # research_I_paper.md, design_spec.md, review_ledger.md,
+                    # verbosity.md, gsound_sir_setup.md
+tests/              # invariant / config / shape / metric / cache tests
 experiments/        # run outputs (git-ignored)
 ```
 

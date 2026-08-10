@@ -14,8 +14,10 @@
   results, the `stats` output with CIs, per test split. The builder does not
   assert success; it shows it. And YOU run the command: do not hand the user a
   command and assume its result (see Evidence and Bash below).
-- **One hypothesis = one experiment.** Prove plumbing with `--backend dry_run`
-  before any real render/train. Smallest change that tests one thing.
+- **One hypothesis = one experiment.** Prove plumbing with the canonical dry run
+  (`-c configs/base.yaml -c configs/overlays/simulator_dry_run.yaml -c
+  configs/overlays/dry_run.yaml`) before any real render/train. Smallest change
+  that tests one thing.
 - **Check invariants first** when changing methodology.
 
 ## Review agents (in `.claude/agents/`; invoke by name)

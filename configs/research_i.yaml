@@ -19,7 +19,7 @@
 #                   file 128 MB). Two of those config keys do not exist yet, so
 #                   they are NOT in this file — ledger RD-18.
 #
-# ── FOUR DELIBERATE DEVIATIONS — this config is NOT a verbatim RI clone ───────
+# ── FIVE DELIBERATE DEVIATIONS — this config is NOT a verbatim RI clone ───────
 # Each is arbitrated and tracked; the E1 report must disclose them per split.
 #
 # 1. (RD-27) RI's test_geometry_shift is DUAL-axis — corridor AND
@@ -74,7 +74,12 @@
 #    ⇒ the realized per-split distance distribution is recorded in
 #      scenes/placement_report.json so the E1 report can state what stood in.
 #
-# 4. Values RI never quantifies are inherited from base.yaml and flagged inline
+# 4. (AC-22) RI's declared geometry x absorption support reaches Sabine T60 4.09 s
+#    while its Figure 5 `ir_duration` is 3.0 s, so THE RECORD DOES NOT COVER THE
+#    DECLARED SUPPORT. Structural, not a research choice — lengthening the record
+#    would stop this being a reproduction. Quantified at the `scenes:` block below.
+#
+# 5. Values RI never quantifies are inherited from base.yaml and flagged inline
 #    below: near_corner's corner_frac, and the absorption ranges of the `mixed`
 #    and `ceiling_absorptive` material regimes.
 
@@ -130,7 +135,7 @@ scenes:
   # (see below) but does real work in long corridors.
   max_placement_attempts: 1000
 
-  # ── Deviation 4: the record does not cover the declared support ─────────────
+  # ── Deviation 4 (see header): the record does not cover the declared support ─
   # RI's declared geometry x absorption support reaches Sabine T60 4.09 s (the
   # 14 x 10 x 4.5 m shoebox at alpha = 0.05) while `ir_duration` is 3.0 s.
   #
