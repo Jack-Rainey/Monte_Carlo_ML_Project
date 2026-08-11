@@ -14,8 +14,18 @@ from .base import (
     SceneSpec,
     build_simulator,
     simulator_min_separation,
+    validate_path_descriptor,
     validate_provenance,
 )
+
+#: Simulator params that are HOST facts, not dataset facts, and so are redacted from
+#: the canonical provenance echo below (RD-93). `render_python` is an absolute path to
+#: a machine-local interpreter: stamping it would make the same render carry different
+#: provenance on the Apple-Silicon and the native-x86_64 host the project must both
+#: support, and would leak a user home path into every scene's meta.json. The value
+#: still governs nothing about the result — it only says which interpreter ran it —
+#: and it moves to `RunContext.host` when RD-20 lands.
+_HOST_SCOPED_PARAMS = ("render_python",)
 
 
 def _preflight_separations(config: Config, scenes: list[SceneSpec]) -> None:
@@ -70,9 +80,12 @@ def _canonical_meta(
     simulator's own `IRResult.meta`, validated against REQUIRED_PROVENANCE_KEYS.
     No branch here knows what a gsound is.
     """
+    params = {
+        k: v for k, v in config.simulator.params.items() if k not in _HOST_SCOPED_PARAMS
+    }
     return {
         "scene_id": scene.scene_id,
-        "simulator": {"name": config.simulator.name, "params": config.simulator.params},
+        "simulator": {"name": config.simulator.name, "params": params},
         "sample_rate": config.sample_rate,
         "n_samples": config.n_samples,
         "n_channels": config.n_channels,
@@ -145,6 +158,22 @@ def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
 
         np.save(out_dir / "low.npy", low_result.ir)
         np.save(out_dir / "high.npy", high_result.ir)
+
+        # The retained-path artifact, for backends that export paths (RD-08). Keyed
+        # on the FIELD, never on the simulator's type: a backend without paths — the
+        # scaffold — writes none and needs no downstream edit, which is the whole
+        # point of the scaffolding rule. Written at every save level for the same
+        # reason meta.json is (RD-16): under emulation a re-render costs hours, so an
+        # artifact this expensive to reproduce is canonical, not observability.
+        for leg, result in (("low", low_result), ("high", high_result)):
+            if result.paths is None:
+                continue
+            # The producer knows its ray budget; the STAGE owns the leg's label.
+            result.paths.descriptor["leg"] = leg
+            validate_path_descriptor(
+                result.paths, simulator_name=config.simulator.name, scene_id=scene.scene_id
+            )
+            result.paths.to_parquet(out_dir / f"paths_{leg}.parquet")
 
         # Canonical provenance — never verbosity-gated (RD-16). Diagnostic extras
         # (Step 4's per-criterion QC record) attach behind `saves("diagnostics")`

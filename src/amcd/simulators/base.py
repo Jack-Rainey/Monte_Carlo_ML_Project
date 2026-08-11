@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -60,6 +61,204 @@ class SceneSpec:
             return cls.from_dict(json.load(f))
 
 
+#: Per-path arrays every `PathData` carries, with the dtype each is stored and
+#: reloaded at. Pinned to the ACTUAL keys of upstream `getPathData()["path_data"][i]`,
+#: verified by introspection against the pinned SHA (docs/gsound_sir_setup.md §4) —
+#: not copied from upstream's docs, which disagree with the built module in at least
+#: one place (`generate_ambisonic_ir` has no `path_types` argument).
+#:
+#: `intensities` is the (N, num_bands) one; every other array is (N,) or (N, 3).
+PATH_ARRAY_DTYPES: dict[str, str] = {
+    "distances": "float32",
+    "intensities": "float32",
+    "listener_directions": "float32",
+    "source_directions": "float32",
+    "path_types": "uint32",
+    "speeds_of_sound": "float32",
+    "relative_speeds": "float32",
+    "source_indices": "uint64",
+}
+
+#: Scalars upstream reports alongside the arrays, with their dtypes.
+PATH_SCALARS: dict[str, type] = {
+    "num_paths": int,
+    "num_bands": int,
+    "total_energy": float,
+    "kept_energy_percentage": float,
+}
+
+
+@dataclass
+class PathData:
+    """The retained propagation paths for one rendered leg (design_spec §8).
+
+    THE FILE MUST BE SELF-DESCRIBING (RD-24). `intensities` is (N, num_bands) and
+    its band meaning — which frequency each column is — lives nowhere in the array
+    itself. Left implicit it would live only in the simulator config that produced
+    it, so a path file from a SECOND raytracer (the roadmap wants several) would be
+    uninterpretable the moment it was separated from that config. `describe()`
+    therefore travels INSIDE the parquet, in the file's own key/value metadata.
+
+    The descriptor also carries `ray_budget`, `leg` and `realization_index`
+    (RD-96/RD-23): the current `paths_{low,high}.parquet` filename convention
+    encodes exactly two legs and one realization, and RD-23's requirement ON THIS
+    GATE is that the artifact layout must not foreclose a realization index. Naming
+    is not the identifier — the file's own metadata is — so adding budgets (the E4
+    ray-count sweep) or realizations later needs no migration of files already
+    written.
+    """
+
+    #: (N,) metres, per path.
+    distances: np.ndarray
+    #: (N, num_bands) per-band energy. Bands are named by `band_edges_hz` /
+    #: `band_centres_hz` in the descriptor — never positionally by convention.
+    intensities: np.ndarray
+    #: (N, 3) unit vectors.
+    listener_directions: np.ndarray
+    source_directions: np.ndarray
+    #: (N,) upstream path-type bitmask.
+    path_types: np.ndarray
+    #: (N,) m/s, per path. Cross-checked against the backend's DECLARED
+    #: `speed_of_sound_m_s` at render time (RD-19): gsound's 344 m/s lives in C++
+    #: and can only be declared, so this array is the only way that declaration is
+    #: falsifiable.
+    speeds_of_sound: np.ndarray
+    relative_speeds: np.ndarray
+    #: (N,) index of the source each path came from.
+    source_indices: np.ndarray
+
+    num_paths: int
+    num_bands: int
+    total_energy: float
+    kept_energy_percentage: float
+
+    #: Everything needed to interpret the arrays without the producing config.
+    #: Written verbatim into the parquet's key/value metadata; see `describe()`.
+    descriptor: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        n = int(self.num_paths)
+        for name in PATH_ARRAY_DTYPES:
+            arr = np.asarray(getattr(self, name))
+            if arr.shape[0] != n:
+                raise ValueError(
+                    f"PathData.{name} has {arr.shape[0]} rows but num_paths is {n}; "
+                    f"every per-path array must agree with the path count."
+                )
+            setattr(self, name, arr)
+        if self.intensities.ndim != 2 or self.intensities.shape[1] != int(self.num_bands):
+            raise ValueError(
+                f"PathData.intensities must be (num_paths, num_bands) = "
+                f"({n}, {self.num_bands}); got {self.intensities.shape}. The band axis "
+                f"is what `descriptor['band_edges_hz']` names — a mismatch means the "
+                f"file would describe bands it does not contain."
+            )
+
+    def to_parquet(self, path: Path) -> None:
+        """Write the paths plus their descriptor into one self-describing file.
+
+        `intensities` becomes a fixed-size list column so the band axis survives the
+        round trip as a shape rather than as 8 positionally-named columns whose
+        meaning a reader would have to reconstruct.
+        """
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        columns = {
+            name: pa.array(np.ascontiguousarray(getattr(self, name)).reshape(-1))
+            if getattr(self, name).ndim == 1
+            else pa.FixedSizeListArray.from_arrays(
+                pa.array(np.ascontiguousarray(getattr(self, name)).reshape(-1)),
+                getattr(self, name).shape[1],
+            )
+            for name in PATH_ARRAY_DTYPES
+        }
+        table = pa.table(columns)
+        # Parquet key/value metadata is bytes-only, so the descriptor travels as one
+        # JSON blob under a single key rather than as N stringified entries.
+        table = table.replace_schema_metadata(
+            {b"amcd_path_data": json.dumps(self.describe()).encode("utf-8")}
+        )
+        pq.write_table(table, Path(path))
+
+    @classmethod
+    def from_parquet(cls, path: Path) -> "PathData":
+        """Reconstruct from a file written by `to_parquet`, descriptor included."""
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(Path(path))
+        raw = (table.schema.metadata or {}).get(b"amcd_path_data")
+        if raw is None:
+            raise ValueError(
+                f"{path} carries no `amcd_path_data` metadata, so its band axis, "
+                f"producing simulator and commit sha are unknown. A path file "
+                f"without its descriptor is uninterpretable by design (RD-24) — it "
+                f"was not written by PathData.to_parquet."
+            )
+        record = json.loads(raw.decode("utf-8"))
+        # `describe()` writes the descriptor and the scalars into one block; split
+        # them back apart so a round trip returns the SAME `descriptor` it was given
+        # rather than one that has absorbed the scalar fields.
+        descriptor = {k: v for k, v in record.items() if k not in PATH_SCALARS}
+
+        import pyarrow as pa
+
+        arrays = {}
+        for name, dtype in PATH_ARRAY_DTYPES.items():
+            col = table.column(name).combine_chunks()
+            if pa.types.is_fixed_size_list(col.type):
+                width = col.type.list_size
+                arrays[name] = np.asarray(col.flatten(), dtype=dtype).reshape(-1, width)
+            else:
+                arrays[name] = np.asarray(col, dtype=dtype)
+
+        scalars = {name: kind(record[name]) for name, kind in PATH_SCALARS.items()}
+        return cls(**arrays, **scalars, descriptor=descriptor)
+
+    def describe(self) -> dict:
+        """The self-describing block: the descriptor plus the scalars it must agree with.
+
+        Kept as one method so the written file and any in-memory reader see the same
+        record, and so a missing key fails in one place rather than per call site.
+        """
+        return {**self.descriptor, **{name: getattr(self, name) for name in PATH_SCALARS}}
+
+
+#: Descriptor keys a `PathData` must carry to be interpretable on its own (RD-24).
+#: `band_edges_hz` + `band_centres_hz` name the `intensities` columns; `simulator` +
+#: `commit_sha` say what produced them; `ray_budget` + `leg` + `realization_index`
+#: identify WHICH render this is without relying on the filename (RD-96/RD-23).
+REQUIRED_PATH_DESCRIPTOR_KEYS = (
+    "simulator",
+    "commit_sha",
+    "band_edges_hz",
+    "band_centres_hz",
+    "sample_rate",
+    "speed_of_sound_m_s",
+    "path_retention",
+    "ray_budget",
+    "leg",
+    "realization_index",
+)
+
+
+def validate_path_descriptor(paths: "PathData", *, simulator_name: str, scene_id: str) -> None:
+    """Raise unless `paths.descriptor` carries every required key (RD-24).
+
+    The `validate_provenance` of the path artifact: without a declared set, a second
+    raytracer silently omits the facts that make an expensive path file readable and
+    the artifact degrades with no error.
+    """
+    missing = [k for k in REQUIRED_PATH_DESCRIPTOR_KEYS if k not in paths.descriptor]
+    if missing:
+        raise ValueError(
+            f"simulator {simulator_name!r} returned PathData whose descriptor is "
+            f"missing {missing} for scene {scene_id!r}. A path file must be readable "
+            f"without the config that produced it "
+            f"(amcd.simulators.base.REQUIRED_PATH_DESCRIPTOR_KEYS)."
+        )
+
+
 @dataclass
 class IRResult:
     """Result of a single render call.
@@ -67,9 +266,16 @@ class IRResult:
     `meta` is the simulator's own provenance record for this leg. It is written
     into the render stage's CANONICAL meta.json at every save level, so it must
     carry at least `REQUIRED_PROVENANCE_KEYS` — see below.
+
+    `paths` is the retained propagation paths for this leg, the producer half of
+    the path-conditioned-variant seam design_spec §8 shows (RD-08). It is `None`
+    for any backend that does not export paths — the scaffold does not — and the
+    render stage keys on the FIELD, never on the simulator's type, so a backend
+    without paths needs no downstream edit (the scaffolding rule).
     """
     ir: np.ndarray  # (C, T) float32, channel-first
     meta: dict = field(default_factory=dict)
+    paths: PathData | None = None
 
 
 #: Provenance every simulator MUST report per rendered leg, validated by the render
