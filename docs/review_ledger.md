@@ -349,7 +349,7 @@ with its substance in the inbox named beside it.
 | AC-50 | acoustics-reviewer (lane S, was AC-46) | major | OPEN | configs/base.yaml (`distance_range` justification); src/amcd/scenes/generator.py | **THE d_min RANGE AC-30 ASKS THE INTEGRATOR TO WRITE INTO base.yaml IS ITSELF WRONG.** AC-30's [0.41, 5.16] m is the `mixed`-regime span only (α ≤ 0.80); `ceiling_absorptive` declares α ∈ [0.85, 0.98] on the SAME shoebox family, and `test_material_shift` selects exactly that regime. Over every geometry × material corner: Sabine **[0.412, 5.712] m**, Eyring **[0.417, 11.413] m**, max at 12×10×5 m, α = 0.98. Writing 5.16 would install a fresh understatement of 1.11× (Sabine) / 2.20× (Eyring) on the split whose realized shortfall is 92.5–100 %. Caught independently by lane S, its falsifier and its acoustics-reviewer. | Write the full product range, both variants. **AND NOW: these are NOMINAL-α numbers, which AC-54 has just shown is not the rendered room** — at α_eff the same corner gives ≈5.35 m Sabine / ≈8.07 m Eyring. Either resolve AC-54 first or write the range explicitly as "nominal α as configured; pending AC-54", and carry the same caveat onto `placement_report.json`'s `below_iso_min_distance` block, which is derived the same way (RD-131). |
 | RD-111 | research-director (lane S, was RD-93) | major | OPEN | docs/lanes/cycle4.yaml; rows RD-65, AC-30, RR-32 | **THREE HALF-REMEDIES LOOK WHOLE, AND DELETION IS THIS PROJECT'S ONLY "RESOLVED" MARKER.** RD-65, AC-30 and RR-32 each have a residual in a file lane S does not own, declared only in a YAML comment. `generator.py` now looks clean for all three, so a post-merge reviewer is invited to delete three rows that are each ~two-thirds unmet — and the cycle's accounting counted all three as fully covered. Related: the partition test validates declared `fix:` paths against `owns` but never against the row's own ANCHOR, which is how a spanning row passes rule 4. | **DO NOT DELETE RD-65, AC-30 or RR-32 at step 7.** Residuals: RD-65 → `reporting/tables.py` (per-split over-limit counts into the E1 table); AC-30 → `configs/base.yaml` (the corrected range, and see AC-50); RR-32 → `config.py` `_check_split_roles` (the F-44 transcript). Next cycle's partition gets a `partial_residual:` list, and the partition test flags any row whose ledger anchor names a file outside its owning lane. |
 | RD-126 | research-director (integrator) | major | OPEN | docs/parallel_protocol.md | **THE PROTOCOL HAS NO ROW-ID ALLOCATION RULE, AND FOUR LANES COLLIDED FOUR WAYS.** Each lane ran `research-director` on its plan and reviewers on its branch, and each numbered from this file's max — so `RD-93…RD-100` names four different findings depending on which inbox you read, and lane R's `AC-40…AC-43` / `RR-28…RR-38` collided with LIVE OPEN rows. Resolved for cycle 4 by a per-lane remap (header table), but the next cycle repeats it by construction. A blanket find/replace would additionally have corrupted lane M's citation of the live AC-43. | Add to `docs/parallel_protocol.md` "Setting up a cycle": the partition file allocates a DISJOINT id block per lane, and `tests/test_lane_partition.py` asserts the blocks do not overlap each other or the ledger's used set. Lane M's scoped-suffix convention (`F-M1`, `AC-42-R1`) is the cheaper alternative and collided with nothing — either is fine, but it must be declared. |
-| RD-128 | research-director (integrator) | major | OPEN | ledger RD-33a condition (i) | **RD-33a CONDITION (i) REGRESSED THIS CYCLE AND THE INTEGRATION PLAN WAS SILENT ON IT.** ~10 new OPEN rows on `src/amcd/evaluation/**` and ~10 on `src/amcd/scenes/**`, against a queue that advances (i) by ~zero. Finding rate on the path list exceeds closure rate — the RD-33 → RD-33a → RD-76 drift pattern one level down, and RD-76 exists precisely to stop the lift condition drifting. | **USER DECISION, not the builder's.** Either scope (i) by SEVERITY (zero OPEN blocker/major on the path list; minors explicitly DEFERRED at E1-report with reasons), or freeze (i) against a named row set. Stated per condition in the integration record above so it cannot be relaxed by a cycle that stops counting. |
+| RD-128 | research-director (integrator) | major | OPEN | ledger RD-33a condition (i) | **RD-33a CONDITION (i) REGRESSED THIS CYCLE AND THE INTEGRATION PLAN WAS SILENT ON IT.** ~10 new OPEN rows on `src/amcd/evaluation/**` and ~10 on `src/amcd/scenes/**`, against a queue that advances (i) by ~zero. Finding rate on the path list exceeds closure rate — the RD-33 → RD-33a → RD-76 drift pattern one level down, and RD-76 exists precisely to stop the lift condition drifting. | **USER DECISION, not the builder's.** Either scope (i) by SEVERITY (zero OPEN blocker/major on the path list; minors explicitly DEFERRED at E1-report with reasons), or freeze (i) against a named row set. Stated per condition in the integration record above so it cannot be relaxed by a cycle that stops counting. **DECIDED 2026-08-11 (user delegated to the builder): scope by SEVERITY — (i) lifts at zero OPEN blocker/major on the path list, minors explicitly DEFERRED with a reason. 20 rows to clear, was 59. See the DECIDED section. Awaiting re-review.** |
 | RD-129 | research-director (integrator) | major | OPEN | src/amcd/pipeline.py; tests/test_stage_cache.py; tests/test_simulator_seam.py | Wiring `gen-scenes`/`render` (RD-107) makes `diagnostics` the **standing example of the unwired path** in two test files, institutionalising AC-45's false clearance in the same edit that closes the neighbouring holes. | Take the `diagnostics` fingerprint (AC-45 / RD-108) in the same change, or state in both test docstrings that the example is a KNOWN OPEN HOLE with its row id, not a sanctioned design. |
 
 ### Reading guide — what actually matters in each lane's remainder
@@ -485,6 +485,12 @@ Then the seven, all scoped and justified in the approved plan:
 6. **AC-50 / AC-30** — the corrected d_min range, now needing AC-54's caveat (RD-131).
 7. **RR-43** — one comment naming what `._` files are. `research-director` ruled the
    filter correct and staying: a name filter, not a platform branch.
+
+**READ THE FINDING-CLUSTERS SECTION AT THE END OF THIS FILE BEFORE PLANNING ANYTHING.**
+244 OPEN rows is a misleading count: twelve clusters hold ~70 of them and represent
+**12 pieces of work**, several rows are the same defect found by three or four different
+agents, and ~22 are already fixed and awaiting confirmation. The realistic
+independent-work-item count is **30-40, not 244**. Plan against the clusters.
 
 **Do this before ANY cycle-5 lane work — it is a one-line-scale change that prevents a
 data-loss event: RR-80.** `docs/ledger_inbox/README.md` still instructs that inbox files
@@ -676,7 +682,7 @@ layer, not the work.
 | ID | agent | sev | status | anchor | finding | resolution |
 |----|-------|-----|--------|--------|---------|------------|
 | RD-142 | research-director | major | OPEN | tests/test_lane_partition.py; docs/ledger_inbox/*.md | **NOTHING ASSERTS INBOX ↔ LEDGER, so a finding missing from BOTH the ledger and the partition passes silently.** This is how the fold lost five rows including a blocker and a major (RD-INT2-1, now the five rows above). The existing check is ledger ↔ partition and is bidirectional and sound; it simply cannot see a finding that never became a row. RD-88's own failure mode one level up. | Add the missing direction: every `| ID |` in an inbox findings block must be an OPEN ledger row, or explicitly listed as folded-into-`<id>`. Cheap, and it is the only check that would have caught the fold's own defect. |
-| RD-143 | research-director | major | OPEN | docs/review_ledger.md "Resume here" queue; rows AC-54, AC-55, AC-56 | **THE SERIAL QUEUE IS ORDERED BY THE PRE-RENDER PLAN AND DOES NOT CONTAIN THE CYCLE'S OWN BLOCKER.** AC-54 appears in none of the seven items, and item 6 (AC-50/AC-30) is explicitly DOWNSTREAM of it — as scheduled it would write a caveated nominal-α number AC-54 has already falsified. Further, **AC-54 + AC-55 + AC-56 are ONE question**: is the declared scene population renderable by this backend at ISO-3382 fidelity? As configured the answer looks like NO — T60 realized 1.14-1.98× nominal (AC-54); pygsound compiles `maxIRLength = 3.0 s` and does not expose it, so `ir_duration: 4.25` can NEVER be filled, 29.4 % of every record is guaranteed zeros and RD-21's truncation QC is structurally dead (AC-56); `diffuse_depth: 100` is physically a TIME bound that kills the diffuse field before the T30 window closes for 14.0 % of `mixed` scenes under AC-54 (AC-55). Deciding them separately invites three inconsistent partial fixes to one physical inconsistency. | Make **"backend renderability of the declared population (AC-54 + AC-55 + AC-56)" item 0** of the cycle-5 serial queue, decided as ONE change. Drop item 6 until it resolves. Items 3/4 (F-81/F-82, RD-107) stay high — cross-platform and cache correctness on the render path that decision will exercise. |
+| RD-143 | research-director | major | OPEN | docs/review_ledger.md "Resume here" queue; rows AC-54, AC-55, AC-56 | **THE SERIAL QUEUE IS ORDERED BY THE PRE-RENDER PLAN AND DOES NOT CONTAIN THE CYCLE'S OWN BLOCKER.** AC-54 appears in none of the seven items, and item 6 (AC-50/AC-30) is explicitly DOWNSTREAM of it — as scheduled it would write a caveated nominal-α number AC-54 has already falsified. Further, **AC-54 + AC-55 + AC-56 are ONE question**: is the declared scene population renderable by this backend at ISO-3382 fidelity? As configured the answer looks like NO — T60 realized 1.14-1.98× nominal (AC-54); pygsound compiles `maxIRLength = 3.0 s` and does not expose it, so `ir_duration: 4.25` can NEVER be filled, 29.4 % of every record is guaranteed zeros and RD-21's truncation QC is structurally dead (AC-56); `diffuse_depth: 100` is physically a TIME bound that kills the diffuse field before the T30 window closes for 14.0 % of `mixed` scenes under AC-54 (AC-55). Deciding them separately invites three inconsistent partial fixes to one physical inconsistency. | Make **"backend renderability of the declared population (AC-54 + AC-55 + AC-56)" item 0** of the cycle-5 serial queue, decided as ONE change. Drop item 6 until it resolves. Items 3/4 (F-81/F-82, RD-107) stay high — cross-platform and cache correctness on the render path that decision will exercise. **DECIDED 2026-08-11: queue reordered, item 0 = C6 (backend renderability), item 0b = the retained-artifact re-measurement. Fix applied, awaiting re-review.** |
 | RD-144 | research-director | minor | OPEN | docs/review_ledger.md AC-54 resolution; src/amcd/scenes/generator.py; configs/simulators/gsound_sir.yaml | AC-54's remedy is stated as a free binary — pre-compensate at the `createbox` call site OR re-derive every closed form in `scenes/generator.py` from α_eff — but **the second half writes ONE raytracer's energy/amplitude confusion into the backend-agnostic scene population.** `generator.py` defines the dataset's declared acoustics for EVERY simulator, so after that edit a second raytracer renders a different room from the same scene spec with nothing declaring it. Forecloses the roadmap's multiple-raytracers item. | Make the absorption convention a declared PROPERTY OF THE BACKEND in `configs/simulators/<name>.yaml`, applied at that backend's own call site; `generator.py` stays in nominal α. Same shape as the existing simulator seam. The choice is not free. |
 | RD-145 | research-director | minor | OPEN | docs/review_ledger.md RD-33a row | The regression of condition (i) and the pending USER decision live in the integration record and in RD-128; **RD-33a's OWN row still reads as operationalized-and-stable** with no sign that either exists — and RD-33a's row is what a plan cites under CLAUDE.md. RD-76 was raised precisely because this gate's condition drifted while living in prose elsewhere. | One sentence in RD-33a's resolution cell pointing at RD-128 and the integration record. |
 | RD-146 | research-director | minor | OPEN | docs/lanes/cycle5.yaml vs docs/parallel_protocol.md rule 4, gate step 2, planning step 3 | The staging partition puts all rows — including the ~22 that are FIX APPLIED, awaiting re-review — under `integrator_queue:` and zeroes `awaiting_re_review:`. The header prose says staging, but the machine-readable structure says "the integrator's serial queue, applied at gate step 2", and planning step 3 ("exclude fix-applied rows from every lane; assigning one invites a second fix on a first nobody checked") depends on exactly the distinction that has been emptied. | Keep `awaiting_re_review:` populated in the staging file, or add `staging: true` plus an `unassigned:` bucket the partition test counts alongside the other four. The fix-applied set must stay distinguishable before lanes are drawn. |
@@ -757,3 +763,90 @@ caveats it adds: the competing explanation my pre-registration failed to name is
 `IR_THRESHOLD` + `ADAPTIVE_IR_LENGTH` (both on), which is what makes `native_ir_samples`
 differ between budgets rather than the 3.0 s cap; and the 500-vs-1000 Hz T30 spread of
 **8.4 %, ~1.7× `d0b_t30_jnd_frac`**, is unexplained on a frequency-independent-α room.
+
+---
+## DECIDED: RD-128 and RD-143 (2026-08-11)
+
+Both were routed to the user as decisions. The user's ruling was that neither needs to be:
+*"It's not an issue if some issues are blocking other issues from being solved, just make
+whatever that issue is a higher priority."* Correct, and both are now taken by the builder.
+
+**RD-143 — the queue order. DECIDED: reordered.** Item 0 is backend renderability
+(AC-54 + AC-55 + AC-56 as one decision), item 0b is the retained-artifact re-measurement.
+Already written into the resume note above. No further arbitration needed: a blocker that
+gates other work is simply scheduled first.
+
+**RD-128 — RD-33a condition (i). DECIDED: SCOPE BY SEVERITY.**
+
+Condition (i) reads "zero OPEN rows anchored in `src/amcd/scenes/**`,
+`src/amcd/evaluation/**`, `config.py` split handling, `configs/*.yaml` split
+declarations". Measured today that is **59 rows**, and the finding rate on that path list
+exceeds the closure rate — so as literally written the gate is a bar that recedes, and the
+720-scene render never happens. That is not a research decision so much as an arithmetic
+one, so:
+
+> **(i) lifts when zero OPEN BLOCKER or MAJOR rows are anchored in the path list.**
+> Minors on the path list must each be explicitly DEFERRED with a reason and a gate —
+> not merely outnumbered. **Today: 4 blocker + 16 major = 20 rows to clear** (was 59).
+
+Why this is the honest reading rather than a relaxation:
+
+- The bar it replaces was never satisfiable in practice. RD-33 already drifted once for
+  exactly this reason; RD-76 narrowed it and it drifted again. A third restatement of an
+  unreachable condition is not discipline, it is theatre.
+- A minor is by this project's own definition a row whose consequence does not reach a
+  reported number. Requiring zero of them before a render conflates *tidiness* with
+  *validity*, which is what let the ledger grow while the gate stood still.
+- The severity of every row is set by the raising reviewer, not by the builder wanting
+  to render — so this cannot be gamed by re-labelling. If a reviewer calls something
+  major, it blocks.
+
+**This does NOT lift RD-33a.** Four blockers sit on the path list right now (AC-54,
+AC-42-B1, AC-42-R1, F-M1) and condition (ii) — the RD-17 probe — has not run.
+
+---
+## FINDING CLUSTERS — what is actually one defect (2026-08-11)
+
+244 OPEN rows is a misleading count, and the user was right to ask for this. Four lanes ×
+four reviewers ran **16 review passes** in one cycle against a serial cycle's ~4, and the
+same defect was frequently found by several agents from different angles. Those are not
+244 pieces of work.
+
+**Rule for these clusters: close the whole cluster together, or none of it.** A cluster
+closed halfway is the F-M2 shape — a fix applied while the thing that made it visible is
+still missing. Where one row CORRECTS another, both stay until the correction is confirmed.
+
+| # | cluster | rows | what it really is |
+|---|---|---|---|
+| **C1** | the AC-42 C50 guard | `AC-42-B1` `AC-42-R1` `F-M1` **= ONE defect, three independent raisers** (builder, acoustics, falsifier). Successor: `F-99` | The first guard was a bogus "float32 residue" that censored the PHYSICAL legs. **Three agents deriving the same blocker independently is the strongest signal in the cycle.** Fix applied; F-99 says the REPLACEMENT is inert in the exact regime it was written for, so the cluster is NOT closed. |
+| **C2** | render/gen-scenes are not cache-protected | `F-75` `RD-107` `AC-44` | One defect, three angles: falsifier reproduced it, research-director framed the policy call, acoustics showed the blast radius (the ISO **reference** leg goes stale, not just "the renders"). One fix. |
+| **C3** | the render fingerprint carries non-IR params | `F-81` `F-82` `F-100` | One edit site. F-81 = host-scoped `render_python` (cross-platform blocker), F-82 = a disclosure-only threshold, F-100 confirms both and widens to `gen-scenes`, the chain root. |
+| **C4** | D0b prints a false clearance | `AC-45` `RD-108` `S-F1` `F-101` `F-M6`(narrowed) | **Five rows, one artifact, four INDEPENDENT routes to the same wrong verdict**: stale from cache, unfingerprinted, blind to per-metric attrition, and decidable by band composition. Fixing any one still leaves "CARRIER CEILING CLEARS" untrustworthy. |
+| **C5** | the Schroeder truncation window on real renders | `F-89` `AC-58` `AC-64` `RD-55` | One physical question. RD-55 predicted it at E4 and was DEFERRED; F-89 measured it; AC-58 gives the mechanism; AC-64 refutes my explanation of it. **RD-55 is no longer deferrable** — a real render has now reached it. |
+| **C6** | is the declared population renderable at ISO fidelity? | `AC-54` `AC-55` `AC-56` `AC-66` `AC-67` `RD-144` | research-director's ruling (RD-143) plus the two acoustics rows that arrived after it. One decision, taken once, in the BACKEND's config. |
+| **C7** | the reported caveat column | `F-M2` `AC-38` `F-70` + RD-65's report half | One column-plumbing change in `stats/aggregate.py` + `reporting/tables.py`. AC-38 must not close before it. |
+| **C8** | the small-n CI | `F-M7` `F-105` | One guard. F-105 is F-M7's analytic explanation, not a separate defect. Both re-scoped to dry-run/smoke. |
+| **C9** | the row-accounting machine | `RD-126` `RD-142` `F-103` `F-104` | Three holes in one machine plus the miss they let through: no id-allocation rule, nothing asserts inbox↔ledger, and a duplicate id is undetectable. Fix as one change to `test_lane_partition.py` + the protocol. |
+| **C10** | the AC-37 headroom guard | `AC-37-R4` **=** `F-M3` (same finding, two raisers) · `AC-37-R5` (fix applied) · `F-M10` | The guard's operand is a spectral-flatness test over all 27 bands while its calibration is about 500/1000 Hz octave quantities. |
+| **C11** | d_min / scene-acoustics disclosure | `AC-30` `AC-50` `AC-49` `AC-51` `AC-52` `S-1` | AC-50 CORRECTS AC-30's own numbers; the rest are the same disclosure block in `generator.py`. **Now gated on C6** — every number here is nominal-α. |
+| **C12** | docstrings that re-tell bug reports | `RR-32` `RR-36` `RR-37` `RR-38` `RR-86` `RR-87` and much of `RR-46…RR-79` | One editing pass with one rule (contract + ledger id; evidence lives in `git log -S`). This project's most-repeated readability finding, now in its third cycle. |
+
+**What this does to the count.** The twelve clusters above hold **~70 of the 244 rows** and
+represent **12 pieces of work**, not 70. Of the remainder, the great majority are `RR-*`
+rows inside C12's single editing pass, and ~22 are FIX APPLIED / awaiting re-review — i.e.
+already done, pending confirmation. **The realistic independent-work-item count is closer
+to 30-40 than to 244.**
+
+**On the growth itself, stated honestly.** Three different things are mixed in it, and only
+one is research complexity:
+
+1. **A new surface became visible.** `GsoundSirSimulator.render` worked for the first time
+   this cycle. AC-54, AC-55, AC-56, AC-66 and the whole C5 cluster were **unreachable
+   before** — you cannot find that gsound's effective absorption is 1−√(1−α) until gsound
+   runs. This is the good kind of growth: it is Research I's assumptions meeting a real
+   raytracer, and finding it now is worth far more than finding it in an E1 table.
+2. **Sixteen review passes instead of four.** Parallelism multiplied the reviewing, not
+   just the fixing. Much of the apparent growth is the same defects found more times —
+   which is exactly what the clusters above collapse.
+3. **Bookkeeping churn that is NOT research complexity** — the id collisions, my fold's
+   own defects, the anchor backfill. C9 exists to stop that recurring.
