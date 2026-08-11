@@ -204,6 +204,20 @@ metric_onset_rel_db: -20.0
 # estimator's bias is +12.8 % at margin 1.0, +4.9 % at margin 2.0 and +2.8 % at
 # 3.0, so 2.0 lands where the bias crosses this project's own d0b_t30_jnd_frac of
 # 0.05 (measured by acoustics-reviewer, 300 realizations/point).
+#
+# WHAT THIS MARGIN NOW GOVERNS — a DISCLOSURE, not a suppression (AC-38).
+# The threshold's independence from the datum was only half the fix; the DECISION
+# was still `fitted_value < floor`, which censors the estimator's own low tail and
+# biases the surviving split mean upward. MEASURED, 200 realizations/point, at
+# true T60 = 0.02 / 0.03 / 0.04 s: suppressing reads +13.4 / +7.0 / +7.1 % from
+# truth against +8.3 / +5.4 / +3.1 % when the value is reported and flagged, and
+# the two are IDENTICAL wherever the floor does not bite.
+#
+# So a physical leg (low/high) is never suppressed: its value is reported and
+# counted in `n_bands_resolvability_limited`. Only `pred` is suppressed, and only
+# in a band the PHYSICAL legs themselves resolve — a model that produced nothing
+# measurable where the physics is fine has failed, but a band no leg can resolve
+# is still a like-for-like paired comparison and keeps its datum (RD-93).
 metric_band_resolvability_margin: 2.0
 
 # EDT below this is variance-limited, not filter-limited: measured sd 24-31 % of

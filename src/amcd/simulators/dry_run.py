@@ -9,8 +9,6 @@ from ..registry import simulator_registry
 from .base import IRResult, SceneSpec
 
 
-
-
 @simulator_registry.register("dry_run")
 class DryRunSimulator:
     """
@@ -127,29 +125,18 @@ class DryRunSimulator:
 
         # --- Direct arrival: a BROADBAND impulse, not an envelope (AC-28) ---
         #
-        # This was `direct_gain * exp(-t/0.02)`, a one-pole envelope whose corner is
-        # 7.96 Hz — so only 6.06e-7 of its energy reached the 500 Hz octave band and
-        # 3.52e-8 the 1000 Hz band. MEASURED consequence in a 10x8x3.5 m room at
-        # alpha 0.2 (r_c = 1.19 m): C50 read 1.95-1.97 dB at d = 0.5, 1, 2, 4 and
-        # 8 m — flat to within 0.02 dB across a 16x distance range — while the
-        # closed-form DRR this scene's own report publishes swung +7.55 to
-        # -16.53 dB. The declared placement axis was INERT in every reported
-        # ISO-3382 metric, so `test_placement_shift` carried no acoustic difference
-        # from the id baseline at the metric level.
-        #
         # A physical direct arrival is a broadband impulse scaled by 1/d. As a unit
-        # sample it has flat energy in every band, so C50/DRR now move with distance
-        # in every band rather than in none.
-        #
-        # Second defect it fixes: the global peak previously sat 300-550 samples
-        # INTO the diffuse tail, violating `_find_onset`'s documented AC-07
-        # assumption that the direct sound is the loudest arrival. It is now the
-        # first and largest sample by construction.
+        # sample it has flat energy in every band, so C50/DRR move with distance in
+        # every band rather than in none. It is also the first and largest sample by
+        # construction, which is what `_find_onset`'s AC-07 assumption requires.
         #
         # NOT MODELLED: a distinct early-reflection cluster between the direct
         # arrival and the diffuse onset. The tail begins at the direct arrival, so
         # this scaffold has no early-reflection structure — one more reason its D0b
-        # verdicts are plumbing evidence, not acoustic results (RD-07).
+        # verdicts are plumbing evidence, not acoustic results (RD-07). AC-43
+        # measures the consequence: EDT is nearly inert on the placement axis
+        # (non-monotone, 5.5 % spread over a 16x distance range) even though C50 is
+        # live, so `test_placement_shift`'s EDT column is a plumbing result.
         direct = np.zeros(n_active, dtype=np.float32)
         if n_active > 0:
             direct[0] = direct_gain
@@ -179,27 +166,18 @@ class DryRunSimulator:
 
         # --- Diffuse tail: a CONVERGED response plus Monte-Carlo estimation noise ---
         #
-        # The tail must not BE the noise (AC-18). It previously read
-        # `diffuse = decay * noise * noise_scale` with noise_scale = 1/sqrt(N), so
-        # E[tail energy] scaled as 1/N: the low leg's late-window energy measured
-        # 39.7x the high leg's — 16.0 dB, exactly 200000/5000 — which made low→high a
-        # deterministic level shift (trivially learnable) whose converged limit is an
-        # IR with no reverberant tail at all. That is the unnamed mechanism behind the
-        # dry_run D0b "CARRIER BOTTLENECK" verdict being a plumbing artifact (RD-07).
+        # The tail models what ray tracing converges TO, and must not BE the noise
+        # (AC-18): a fixed realization of the room's diffuse response (rng_scene,
+        # identical in both legs — the signal), plus estimation noise shrinking as
+        # 1/sqrt(N) (rng_noise, budget-dependent — what the model must remove).
+        # E[energy] is then (1 + 1/N)·decay², budget-independent to within 0.02 %,
+        # while low - high is pure noise.
         #
-        # `decay * (1 + noise*noise_scale)` — the form AC-18 proposed — fixes the
-        # energy but produces a STRICTLY POSITIVE tail (verified: zero sign changes
-        # over a 200 ms window). An impulse response is a pressure signal that
-        # oscillates about zero; a positive envelope carries almost no energy in the
-        # 500/1000 Hz eval bands after octave filtering, which would hollow out the
-        # ISO-3382 metrics this scaffold exists to exercise.
-        #
-        # So the tail models what ray tracing actually converges TO: a fixed
-        # realization of the room's diffuse response (drawn from rng_scene, identical
-        # in both legs — this is the signal), plus estimation noise that shrinks as
-        # 1/sqrt(N) (drawn from rng_noise, budget-dependent — this is what the model
-        # must remove). E[energy] is then (1 + 1/N)·decay², i.e. budget-independent to
-        # within 0.02 %, while low - high is pure noise.
+        # The zero-mean form is deliberate. `decay * (1 + noise*noise_scale)` also
+        # fixes the energy but produces a STRICTLY POSITIVE tail, and an impulse
+        # response is a pressure signal oscillating about zero — a positive envelope
+        # carries almost no energy in the 500/1000 Hz eval bands after octave
+        # filtering, hollowing out the very metrics this scaffold exercises.
         noise_scale = float(1.0 / np.sqrt(max(ray_budget, 1)))
 
         ir = np.zeros((self.n_channels, self.n_samples), dtype=np.float32)

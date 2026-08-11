@@ -97,6 +97,7 @@ class TestLadderIsDeclaredNotHardcoded:
         params = dict(
             n_fft=256, hop_length=64, min_db=-80.0, reference_freq_hz=1000.0,
             bands_per_octave=3, min_center_freq_hz=10.0, min_bins_per_band=1,
+            min_db_headroom_db=55.0,
         )
         params[field] = value
         with pytest.raises(ValidationError):
@@ -241,6 +242,19 @@ class TestMinDbIsAnAbsoluteFloor:
             (rep.encode(np.stack([_decaying_ir(rep) * gain])) <= rep.min_db + 1e-6)
             .float().mean()
         )
+
+    def test_a_scene_on_the_floor_is_refused(self, production_rep) -> None:
+        """AC-37's guard, asserted beside the property it protects.
+
+        The gains below (0.01 … 100) sit INSIDE what the guard admits — measured,
+        gain 0.01 leaves 54.21 dB of worst-band headroom against the declared
+        50.0 — so those probes exercise the clamp without standing anything down.
+        One more decade quieter (34.21 dB) is refused. Asserting both here keeps
+        the two facts adjacent: the clamp is absolute, AND a scene that has slid
+        onto it is rejected rather than silently encoded.
+        """
+        with pytest.raises(ValueError, match="min_db headroom guard"):
+            production_rep.encode(np.stack([_decaying_ir(production_rep) * 1e-3]))
 
     def test_the_clamped_fraction_tracks_absolute_gain(self, production_rep) -> None:
         quiet = self._clamped_fraction(production_rep, 0.01)

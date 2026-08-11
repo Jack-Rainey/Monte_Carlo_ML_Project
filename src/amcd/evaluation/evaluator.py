@@ -184,6 +184,26 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 "n_bands_pred_unresolved": (
                     None if acct is None else len(acct["pred_unresolved_hz"])
                 ),
+                # AC-38: bands whose value is REPORTED despite sitting below what
+                # the band can resolve. Suppressing them censored the estimator on
+                # its own magnitude and biased the split mean up (+7.5 % at true
+                # T60 = 0.04 s), so the number is disclosed with a caveat instead —
+                # the shape `metric_edt_variance_limited_s` already uses (RD-78).
+                "n_bands_resolvability_limited": (
+                    None if acct is None else len(acct["resolvability_limited_hz"])
+                ),
+                # RD-93: the OVERLAP that makes AC-38 cost something. A band that is
+                # floor-limited AND unresolved in pred is a band that, before AC-38,
+                # left every leg's average — leaving the scene IN the paired
+                # comparison. It now stays, pred is NaN in it, and the scene leaves
+                # `paired_improvement` instead. That is F-70's selection on the
+                # dependent variable, enlarged and optimistic. F-70's bound lives in
+                # stats/aggregate.py (integrator queue), so this column is what makes
+                # the enlargement measurable rather than invisible.
+                "n_bands_pred_unresolved_in_floor_limited": (
+                    None if acct is None
+                    else len(acct["pred_unresolved_in_floor_limited_hz"])
+                ),
                 "estimator_variance_limited": edt_uncertain,
             })
             # Drop sweep (F-21): every consumed-leg NaN must carry a reason; a

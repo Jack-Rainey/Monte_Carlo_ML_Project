@@ -219,6 +219,59 @@ class ThirdOctaveSpectrogram:
         #: research decision about low-frequency coverage, not a code detail.
         min_bins_per_band: int
 
+        #: Smallest dB gap `encode` will accept between a scene's WEAKEST per-band
+        #: peak and `min_db` (AC-37). Below it, `encode` raises rather than
+        #: returning an envelope that `decode` will turn into an injected energy
+        #: floor.
+        #:
+        #: The guard exists because `min_db` is ABSOLUTE (see above), so a scene
+        #: reaches it by LEVEL alone. `decode` rescales the carrier's band power to
+        #: `10**(env/10)`, so wherever the clamp is active the decode BOOSTS the
+        #: carrier UP to the floor, injecting a non-decaying tail into the
+        #: prediction — inside the Schroeder window, which is shared and set by the
+        #: PHYSICAL legs (AC-17/RD-43), so the prediction never gets its own Lundeby
+        #: cut to truncate the injection away.
+        #:
+        #: CALIBRATED, not chosen. A definitionally perfect oracle
+        #: (`decode(encode(high), low)`) was swept in 1 dB steps of level over six
+        #: scenes spanning the declared support, recording the headroom at which
+        #: its T30 first breaches `d0b_t30_jnd_frac`:
+        #:
+        #:     scene            native hr   last OK   first breach
+        #:     large   a=0.05     72.6 dB   39.6 dB   38.6 dB (7.6 %)
+        #:     large   a=0.16     72.5 dB   46.5 dB   45.5 dB (6.8 %)
+        #:     medium  a=0.30     72.2 dB   42.2 dB   41.2 dB (5.6 %)
+        #:     small   a=0.50     73.2 dB   39.2 dB   38.2 dB (5.2 %)
+        #:     corridor a=0.20    74.1 dB   44.1 dB   43.1 dB (6.3 %)
+        #:     absorptive a=0.80  68.7 dB   37.7 dB   36.7 dB (6.1 %)
+        #:
+        #: The breach point is SCENE-DEPENDENT (36.7-46.5 dB), so no single scalar
+        #: is simultaneously tight and safe: admitting every scene that still
+        #: measures correctly needs a value <= 46.5, and rejecting every scene that
+        #: breaches needs > 45.5. That is a 1 dB window, and it is a real property
+        #: of the defect, not of this calibration.
+        #:
+        #: The shipped 50.0 deliberately errs toward REJECTING, because the two
+        #: errors are not symmetric: a false positive fails loudly at preprocess,
+        #: while a false negative is a silently wrong reported ISO metric that
+        #: surfaces as an apparent model failure. So 50.0 sits 3.5 dB above the
+        #: worst measured survivor and 18.7 dB below the tightest scene at its
+        #: native level. It ALSO rejects scenes carrying 46.5-50 dB of headroom that
+        #: would still have measured within JND — that is the accepted cost, stated
+        #: rather than discovered later.
+        #:
+        #: Physical reading: T30 regresses the EDR over -5 to -35 dB, so 35 dB of
+        #: genuine range is the floor of what any declared value may permit; 50 dB
+        #: is that span plus 15.
+        #:
+        #: The calibration is against the SCAFFOLD's level convention
+        #: (`direct = 1/d`, room-constant tail). A real gsound render sets absolute
+        #: level from `source_power` and `normalize_ir`, so this value must be
+        #: re-measured at the dataset-render gate — which is precisely why the guard
+        #: RAISES instead of clamping harder: a wrong value fails loudly at
+        #: preprocess rather than silently biasing every reported ISO metric.
+        min_db_headroom_db: float
+
     # Per-channel third-octave log band-energy in dB (the banded-rep contract).
     value_domain = "db"
 
@@ -232,11 +285,13 @@ class ThirdOctaveSpectrogram:
         bands_per_octave: int,
         min_center_freq_hz: float,
         min_bins_per_band: int,
+        min_db_headroom_db: float,
     ) -> None:
         self.sample_rate = sample_rate
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.min_db = min_db
+        self.min_db_headroom_db = min_db_headroom_db
         self._filter_bank, self.band_description = _build_third_octave_filters(
             n_fft, sample_rate,
             reference_freq_hz=reference_freq_hz,
@@ -291,6 +346,61 @@ class ThirdOctaveSpectrogram:
             fractions.append(in_band / total if total > 0 else float("nan"))
         return fractions
 
+    def _check_min_db_headroom(self, energy_db: torch.Tensor) -> None:
+        """Refuse a scene whose level has slid down onto the absolute `min_db`
+        floor (AC-37).
+
+        `min_db` is absolute, so this is reachable by LEVEL alone, and the
+        consequence lands in `decode`, not here: the clamp becomes a target power
+        the carrier is rescaled UP to, injecting a non-decaying floor into the
+        prediction inside a Schroeder window the prediction does not control.
+
+        Checked PER BAND, on the peak over channels and frames, because the
+        reported ISO-3382 metrics are per-band quantities — one band on the floor
+        corrupts the band average even where the broadband peak looks healthy.
+        Measured on a definitionally perfect oracle: a scene 30 dB below its native
+        level reads T30 2.1959 s against its target's 0.9681 s — a 126.8 % error —
+        at 42.6 dB of headroom, against the shipped 50 dB.
+
+        Raises rather than clamps. A representation cannot know whether a quiet
+        scene is a modelling choice or a mis-scaled render, and silently returning
+        an envelope that produces a physically wrong T30 is the failure AC-37
+        exists to prevent — it would surface on the emulated gsound render as an
+        apparent model failure.
+        """
+        # Peak over FRAMES only, per (channel, band): (C, n_bands).
+        #
+        # Maxing over channels too would hide the one that matters. The reported
+        # ISO-3382 path reads `ir[0]` — the W channel — exclusively
+        # (`compute_room_acoustic_metrics`), so a W channel sitting on the floor
+        # while a higher-order channel stays loud is precisely the case that
+        # corrupts every reported metric, and a channel-max would accept it. Not
+        # hypothetical under the real backend: `simulators/base.py` declares
+        # `acn_n3d`, and N3D scales degree l by sqrt(2l+1).
+        per_channel_band_peak_db = torch.amax(energy_db, dim=2)
+        headroom = per_channel_band_peak_db - self.min_db
+        flat = int(torch.argmin(headroom))
+        worst_c, worst_b = divmod(flat, headroom.shape[1])
+        worst_headroom = float(headroom[worst_c, worst_b])
+        if worst_headroom < self.min_db_headroom_db:
+            raise ValueError(
+                f"scene rejected by the min_db headroom guard (AC-37): channel "
+                f"{worst_c}'s {self.center_freqs[worst_b]:.1f} Hz band peaks at "
+                f"{float(per_channel_band_peak_db[worst_c, worst_b]):.1f} dB, "
+                f"only {worst_headroom:.1f} dB "
+                f"above min_db={self.min_db:g} dB, against the declared "
+                f"min_db_headroom_db={self.min_db_headroom_db:g} dB.\n"
+                f"min_db is an ABSOLUTE floor, so this scene's LEVEL has reached it. "
+                f"decode() rescales the carrier's band power up to the clamped "
+                f"envelope, which would inject a non-decaying energy floor into the "
+                f"prediction inside the shared Schroeder window and report a T30 that "
+                f"is a property of min_db, not of the room.\n"
+                f"Fix the level (source_power / normalize_ir / the backend's gain "
+                f"convention) or declare a lower min_db in "
+                f"configs/representations/spectrogram.yaml — do not raise "
+                f"min_db_headroom_db to silence this."
+            )
+
     def encode(self, ir: np.ndarray) -> torch.Tensor:
         """
         ir: (C, T) float32 channel-first
@@ -322,6 +432,9 @@ class ThirdOctaveSpectrogram:
 
         # Convert to dB, clamp at floor
         energy_db = 10.0 * torch.log10(energy.clamp(min=1e-10))
+        # Checked BEFORE the clamp: after it, a band sitting entirely on the floor
+        # reads exactly min_db and its true distance below is unrecoverable (AC-37).
+        self._check_min_db_headroom(energy_db)
         energy_db = energy_db.clamp(min=self.min_db)
 
         return energy_db.float()

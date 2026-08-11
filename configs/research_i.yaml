@@ -58,12 +58,28 @@
 #      split's Eyring median T60 is 0.059 s, so that threshold suppressed the
 #      MAJORITY of its EDT realizations and biased the surviving mean +31.2 %
 #      (measured, 200 realizations at true T60 = 0.06 s). Censoring an estimator
-#      on its own value is not a disclosure, it is a distortion. The floor is now
-#      the filter's own resolvable decay (~0.010-0.020 s here), which these decays
-#      clear — so the numbers ARE reported, and are labelled instead: eval counts
-#      per split how many scenes fall below `metric_edt_variance_limited_s`, where
-#      the EDT estimator carries 24-31 % sd. Read this split's absolutes as
-#      high-variance diagnostics, never as physical values.
+#      on its own value is not a disclosure, it is a distortion.
+#
+#      UPDATED (AC-38, cycle 4) — the reversal of RD-46's original decision is now
+#      COMPLETE, and stated here rather than left to be inferred from a diff.
+#      Cycle 3 replaced the 0.05 s scalar with the filter's own resolvable decay
+#      (~0.010-0.020 s here), which these decays clear, so suppression stopped
+#      biting for this split. Cycle 4 removes it as a MECHANISM for the physical
+#      legs entirely: a low/high value below the floor is REPORTED and flagged,
+#      never dropped, because the same censoring argument holds at any threshold
+#      (measured: +13.4 % survivor bias at true T60 = 0.02 s against +8.3 %
+#      disclosed). RD-46's decision was to SUPPRESS this split's absolutes; that
+#      decision no longer stands anywhere in the metric path, and this split's
+#      absolutes are now reported for every scene.
+#
+#      They are LABELLED instead, on two independent counts: how many scenes fall
+#      below `metric_edt_variance_limited_s` (the EDT estimator carries 24-31 % sd
+#      there), and how many bands were resolvability-limited but reported anyway.
+#      Read this split's absolutes as high-variance diagnostics, never as physical
+#      values. NOTE: the second count reaches `metrics.parquet` only — carrying it
+#      into `ci_table.csv` and summary.txt's Caveats column is lane P's half of
+#      AC-38 and is NOT done, so at the time of writing the reported table does not
+#      show it.
 #
 # 3. (RD-29) RI's placement regimes carry `+mid_pair` / `+far_pair` pairing
 #    sub-regimes whose distance sub-ranges the paper NEVER states numerically —

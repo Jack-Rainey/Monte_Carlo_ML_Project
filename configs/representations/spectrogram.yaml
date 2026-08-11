@@ -17,6 +17,36 @@ hop_length: 512
 # peak-relative floor would normalize away part of what test_placement_shift tests.
 min_db: -80.0
 
+# Smallest dB gap `encode` accepts between a scene's WEAKEST per-band peak and
+# min_db (AC-37). Below it encode RAISES.
+#
+# Because min_db is absolute, a scene reaches it by LEVEL alone, and the damage
+# lands in decode(): the clamped envelope becomes a target power the carrier is
+# rescaled UP to, injecting a non-decaying floor into the prediction inside the
+# Schroeder window — which is shared and set by the PHYSICAL legs (AC-17/RD-43), so
+# the prediction gets no Lundeby cut of its own to truncate the injection away.
+#
+# 50.0 is CALIBRATED. A definitionally perfect oracle, decode(encode(high), low),
+# was swept in 1 dB steps of level over six scenes spanning the declared support;
+# its T30 first breaches d0b_t30_jnd_frac at 36.7-46.5 dB of headroom, while those
+# same scenes carry 68.7-74.1 dB at their native level.
+#
+# The breach point is SCENE-DEPENDENT, so no single scalar is both tight and safe:
+# admitting every still-correct scene needs <= 46.5, rejecting every breaching one
+# needs > 45.5 — a 1 dB window. 50.0 errs toward REJECTING, because a false positive
+# fails loudly at preprocess while a false negative is a silently wrong reported ISO
+# metric. It therefore also rejects scenes at 46.5-50 dB that would still have
+# measured within JND; that cost is accepted deliberately. Physically it is the
+# 35 dB span T30 regresses over (-5 to -35 dB of EDR) plus 15. Full per-scene
+# table: `ThirdOctaveSpectrogram.Params`.
+#
+# Calibrated against the SCAFFOLD's level convention, so it must be re-measured at
+# the dataset-render gate, where a real render sets level from source_power and
+# normalize_ir. That is why the guard raises rather than clamping harder: a stale
+# value fails loudly at preprocess instead of silently biasing every reported
+# ISO metric.
+min_db_headroom_db: 50.0
+
 # ── The fractional-octave ladder (AC-19) ──────────────────────────────────────
 # Previously literals inside `_build_third_octave_filters`. Declared here because
 # they define what a "band" IS in every reported per-band quantity.
