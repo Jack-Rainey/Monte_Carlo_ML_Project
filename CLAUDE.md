@@ -58,6 +58,12 @@ One row per finding:
 - Status is exactly one of two values:
   - OPEN — not yet resolved. A fix applied but not yet re-review-confirmed stays
     OPEN; note "fix applied, awaiting re-review" in `resolution`.
+    **"Awaiting re-review" lasts ONE review pass, not one epoch.** The pass that
+    follows a fix MUST re-derive it and return CONFIRMED / NOT FIXED / REFUTED —
+    you do not wait for some later cycle to notice. Cycle 4 ended with 34 such
+    rows, some carried since cycle 3, and when they were finally checked several
+    were not fixed and one was refuted outright. An unverified fix is a claim,
+    and this project does not run on claims.
   - DEFERRED — intentionally out of scope for the current gate, with a one-line
     reason and the gate it belongs to. This is the live backlog.
 - There is NO ADDRESSED/RESOLVED status. The moment a finding is fixed AND
@@ -68,14 +74,28 @@ One row per finding:
 
 Definition of done: complete only after a full plan → implement → review cycle in
 which every invoked reviewer returns zero new findings AND the ledger has zero
-OPEN rows (DEFERRED backlog may remain). Because resolved rows are deleted, "zero
-OPEN rows" is now literally a near-empty ledger.
+OPEN rows (DEFERRED backlog may remain) AND **zero rows sit in "fix applied,
+awaiting re-review"** — that last clause because a fix nobody re-derived is a
+claim, and a backlog of them makes "zero new findings" look reachable while the
+unverified pile grows behind it. Because resolved rows are deleted, "zero OPEN
+rows" is now literally a near-empty ledger.
 
 ## Implementation loop
 
 Repeat until a clean pass: plan (Plan Mode) → implement → invoke reviewers by
 name → write findings to the ledger → address OPEN findings → repeat.
 
+- **A reviewer pass has TWO jobs: find new defects, AND verify the "fix applied,
+  awaiting re-review" backlog.** Send each reviewer its own such rows and require
+  a per-row verdict. Only then can a row be deleted. A pass that only looks for
+  new things guarantees the ledger grows monotonically.
+- **Deduplicate before you count.** Running N reviewers over M lanes produces
+  N×M passes, and the same defect surfaces repeatedly from different angles.
+  Keep every row — a second independent raiser is corroboration, and in cycle 4
+  three agents derived one blocker separately — but group them and record which
+  rows are ONE defect that must close together. **A row count is not a work
+  estimate**: cycle 4's 244 OPEN rows were ~30-40 independent work items, and
+  reporting the raw number misleads about both progress and remaining effort.
 - One loop is never assumed sufficient. Keep looping while any OPEN finding
   exists and budget remains.
 - A clean pass = reviewers run over the CURRENT state and raise zero new
@@ -85,24 +105,22 @@ name → write findings to the ledger → address OPEN findings → repeat.
 
 ## Parallel lanes
 
-Several sessions may work this repo at once, one per git worktree. Full protocol:
-`docs/parallel_protocol.md`. Five rules govern it:
+Several sessions may work this repo at once, one per git worktree. **Full protocol
+and all six rules: `docs/parallel_protocol.md`** — that file owns them, and a
+second copy here is what drifts (it already has, three times, in this exact
+machinery). What a session must know before reading anything else:
 
-1. **Ownership is by file and exclusive** — a lane edits only its declared files,
-   so textual merge conflicts are impossible. `scripts/lane_guard.py` enforces it.
-2. **The metric COMPUTATION path is always ONE lane** (`evaluation/`,
-   `representations/`, `acoustics.py`, `simulators/dry_run.py`): each lane's pass
-   condition is a fixed-seed `ci_table.csv` A/B, and two lanes moving that table
-   invalidate both. But the files that WRITE the reported artifacts —
-   `stats/aggregate.py`, `reporting/tables.py` — sit with the cache/provenance
-   lane, so a fix that adds a reported COLUMN spans two lanes however
-   metric-shaped it looks (RD-82).
-3. **Lanes never edit `docs/review_ledger.md`, `CLAUDE.md`, `docs/design_spec.md`**
+1. **Ownership is by file and exclusive**, so textual merge conflicts are
+   impossible; `scripts/lane_guard.py` enforces it, not discipline.
+2. **Lanes never edit `docs/review_ledger.md`, `CLAUDE.md`, `docs/design_spec.md`**
    — one writer, the integrator. Lanes write to `docs/ledger_inbox/<lane>.md`.
-4. **A finding spanning two lanes' files is not parallelized** — it goes to the
-   integrator's serial queue, declared in the cycle's partition file.
-5. **Reviewers count only on the integrated tree.** A lane-branch review is a
+3. **Reviewers count only on the integrated tree.** A lane-branch review is a
    self-check, never a clean pass.
+4. **Allocate new row ids only from your lane's declared `id_block`.** Cycle 4 had
+   no such rule and four lanes collided four ways, including with live rows.
+
+The rest — rule 2's metric-path file list and the reported-column span (RD-82),
+rule 4's spanning rows, and the seven-step integration gate — is in the protocol.
 
 In a lane, prefix every command with `PYTHONPATH=<worktree>/src`: the editable
 install pins the MAIN checkout, so a bare `pytest`/`amcd` measures the wrong

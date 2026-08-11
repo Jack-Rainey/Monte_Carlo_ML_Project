@@ -55,10 +55,38 @@ The main checkout runs no lane; it is the **integrator**.
 ## Setting up a cycle
 
 Declare the partition in `docs/lanes/<cycle>.yaml` — lane ids, titles, owned
-paths, assigned rows, and the integrator queue with a reason per row. That file
-is the single source of truth: `scripts/new_lane.py` generates each worktree's
-`LANE.md` (what the session reads) and `.claude/lane.json` (what the guard
-enforces) from it, so the two cannot disagree.
+paths, assigned rows, **an id block per lane**, and the integrator queue with a
+reason per row. That file is the single source of truth: `scripts/new_lane.py`
+generates each worktree's `LANE.md` (what the session reads) and
+`.claude/lane.json` (what the guard enforces) from it, so the two cannot disagree.
+
+### Row ids: every lane gets a DISJOINT BLOCK
+
+**Rule 6, added after cycle 4.** Each lane declares `id_block: {prefix: N..M}` per
+finding class, and allocates new ids only from inside it.
+
+Cycle 4 had no such rule, and every lane numbered from the ledger's max at the
+moment it started. The result: `RD-93…RD-100` named **four different findings**
+depending on which inbox you read, and lane R's `AC-40…AC-43` and `RR-28…RR-38`
+collided with **live OPEN rows**. Resolving it took a per-lane, per-CLASS remap of
+the source tree — and the remap itself then missed a lane's own `AC-` citations,
+which a reviewer had to catch (F-104). A blanket find/replace is *not* a safe
+repair: one file cited the live `AC-43` while another cited a lane's new one.
+
+`tests/test_lane_partition.py` asserts the blocks are disjoint from each other and
+from every id already used in the ledger. Two cheap companions it also asserts,
+because cycle 4 proved both holes are real:
+
+- **no duplicate id** — the ledger parser returns a *set*, so a duplicated row id
+  was undetectable, which is exactly the failure this rule exists to prevent (F-103);
+- **inbox → ledger coverage** — every `| ID |` in an inbox findings block must be an
+  OPEN ledger row or explicitly folded into one. Without it the only asserted
+  identity is ledger ↔ partition, so a finding missing from *both* sides passes
+  silently — which is how cycle 4's fold lost five rows including a blocker (RD-142).
+
+The cheaper alternative, if you prefer it: lane-scoped suffixes (`F-M1`, `AC-42-R1`).
+Lane M used them and collided with nothing. Either is fine — what is not fine is
+leaving allocation implicit.
 
 Each row declares the `fix:` and `test:` paths it will actually touch.
 `tests/test_lane_partition.py` then asserts:
@@ -198,8 +226,32 @@ Serial, in the main checkout, after the lanes report:
    captured before the lanes started.
 5. Fold `docs/ledger_inbox/*.md` into the ledger — new findings become rows,
    closures get "fix applied, awaiting re-review". **Delete nothing yet.**
+   Two things the fold must do, both learned the hard way in cycle 4:
+   - **Every finding becomes a TABLE ROW with a FILE ANCHOR.** Not a prose
+     enumeration — `tests/test_lane_partition.py` parses `| ID |` rows only, so a
+     prose list is invisible to the check that exists to stop silent omissions.
+     And not `anchor: see inbox`: ownership is by file, the gate's own lift
+     condition is "zero OPEN rows *anchored in* this path list", and 116 anchorless
+     rows made that condition literally uncomputable (RD-INT2-2 / RR-INT-3).
+   - **DEDUPLICATE, and write the clusters down.** N lanes × 4 reviewers is 4N
+     review passes, and the same defect gets found repeatedly from different
+     angles — in cycle 4 one blocker was raised independently by three agents. Keep
+     every row (a second raiser is evidence, not noise) but group them, and record
+     which rows are ONE defect that must close together. A raw row count is not a
+     work estimate: cycle 4's 244 rows were ~30-40 independent work items.
 6. Run the four reviewers on the merged tree. **This is the pass that counts.**
-7. **Now** delete the rows that pass confirmed clean.
+   They do two jobs, not one:
+   - find new defects in the merged state; and
+   - **VERIFY THE "FIX APPLIED, AWAITING RE-REVIEW" BACKLOG.** Each reviewer
+     re-derives its own rows and returns CONFIRMED FIXED / NOT FIXED / REFUTED.
+     This is the step that makes step 7 possible, and skipping it is how the
+     backlog reaches 34 rows carried across three cycles.
+7. **Now** delete the rows step 6 confirmed clean — and only those.
+
+**A cycle does not end with an unverified backlog.** "Awaiting re-review" is a
+state that lasts one gate, not one epoch. If step 6 could not reach some rows, say
+which and why in the resume note; do not let them accumulate silently, because a
+row nobody re-checks is indistinguishable from a row nobody fixed.
 
 Steps 5 and 7 are separate on purpose. CLAUDE.md deletes a row only when it is
 fixed AND re-review-confirmed; deleting at step 5 would authorize deletion on the

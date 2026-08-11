@@ -118,6 +118,13 @@ def _lane_md(lane: dict, cycle: str, worktree: Path, base_branch: str) -> str:
         for row in lane["rows"]
     )
     note = f"\n> {lane['note'].strip()}\n" if lane.get("note") else ""
+    # Rule 6. Without a declared block every lane numbers from the ledger's max at
+    # the moment it starts, and cycle 4 proved where that ends: RD-93..RD-100 named
+    # FOUR different findings, and one lane's new AC ids landed on live OPEN rows.
+    blocks = lane.get("id_block") or {}
+    id_block = "\n".join(
+        f"- **`{prefix}-{rng}`**" for prefix, rng in sorted(blocks.items())
+    ) or "- _none declared — STOP and ask the integrator before allocating any id._"
     src = worktree / "src"
     return f"""# You are lane {lane['id']} — {lane['title']}
 
@@ -135,6 +142,20 @@ declaration, so an edit here changes what you believe and not what is allowed.
 ## Assigned rows
 
 {rows}
+
+## Your row-id block — allocate NEW ids only from here (rule 6)
+
+{id_block}
+
+Any finding you or a reviewer raises on this branch takes its id from that block,
+in your inbox. Do NOT number from the ledger's current maximum: every lane is
+running at once and would pick the same numbers. In cycle 4 they did —
+`RD-93`…`RD-100` ended up naming four different findings, and one lane's new
+`AC-` ids collided with rows that were live and unrelated. Untangling it needed a
+per-lane, per-class remap of the source tree, and the remap then missed a lane's
+own citations and had to be caught by a reviewer.
+
+If you exhaust your block, say so in your inbox and stop — do not borrow.
 
 ## Files you own this cycle
 
@@ -200,6 +221,22 @@ Record, in whatever order things happened: rows you closed with the command and
 output that shows it; new findings, anchored by concrete file path; anything you
 deliberately did not do, and why. An untouched row with no note is
 indistinguishable from a row nobody read.
+
+**Two things this file's format has to get right, both learned in cycle 4:**
+
+- **Give every finding a FILE ANCHOR**, as `path` or `path:line`. The integrator's
+  fold copies it into the ledger's anchor column, and that column is what assigns
+  the row to a lane next cycle AND what the RD-33a gate counts. Cycle 4 shipped
+  116 rows anchored "see inbox" and made the gate's own lift condition
+  uncomputable.
+- **Number new findings from YOUR id block only** (it is in your `LANE.md`). Every
+  lane runs at once, so numbering from the ledger's maximum guarantees collisions.
+
+**This file is PERMANENT, not a scratch pad.** The integrator's fold keeps compact
+rows that point back here for the measurements, so it is the primary record for
+its findings and is never truncated while an OPEN row cites it — see
+`docs/ledger_inbox/README.md`. Write it for a reader in a later cycle who has only
+this file and the ledger row that names it.
 
 ---
 """

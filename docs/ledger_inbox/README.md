@@ -25,6 +25,29 @@ Both directions, in whatever order they happened:
 - **Anything you deliberately did not do**, and why. A row left untouched with no
   note is indistinguishable from a row nobody read.
 
-Files here are emptied at the start of each cycle, after the integrator has
-folded them in. Git history keeps them, which is the same audit trail the ledger
-itself relies on.
+## When a lane file may be emptied — READ THIS BEFORE DELETING ANYTHING
+
+**This file used to say "files here are emptied at the start of each cycle". That
+instruction is now a DATA-LOSS BUG (RR-80) and has been removed.**
+
+It was safe only while the fold COPIED each finding's substance into the ledger. From
+cycle 4 it does not: ~130 ledger rows are compact and say *"substance, measurements and
+probes in `docs/ledger_inbox/<lane>.md`"*, because a lane's own write-up is better
+evidence than a paraphrase of it. Emptying these files on that schedule would delete the
+only readable record of half the OPEN set.
+
+The rule now:
+
+- **A lane file may be emptied only once NO OPEN ledger row cites it.** Check before you
+  touch it, not after.
+- **Cycle-4 content is permanent.** When cycle 5 opens, move it to
+  `docs/ledger_inbox/archive/cycle4-<lane>.md` rather than truncating it, so the next
+  cycle's lanes get clean files without destroying the citations.
+- **The ids differ between here and the ledger.** Four lanes collided on row ids in cycle
+  4 and the ledger renumbered; these files were deliberately left un-renumbered. The
+  ledger's header carries the durable remap table, and every compact row names the id AS
+  WRITTEN HERE. So `grep` for an id in this directory and in the ledger can legitimately
+  land on different findings — always go through the remap table.
+
+Git history remains the audit trail underneath all of this, but a row that points at a
+file expects that file to still say something.
