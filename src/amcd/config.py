@@ -39,7 +39,76 @@ from . import provenance
 from .acoustics import sabine_rt60
 
 
-_CONFIGS_DIR = Path(__file__).parent.parent.parent / "configs"
+#: Where `configs/` may live, most-preferred first.
+#:
+#: `configs/` used to be resolved three levels up from this module and nowhere
+#: else, which silently assumed a source checkout — so a wheel installed into
+#: site-packages could not find `base.yaml` and failed with a bare
+#: `FileNotFoundError` deep inside `_merge_yaml`, naming a path three parents above
+#: a site-packages directory (F-73). That is the same class of defect as a
+#: platform-keyed branch: a host-layout assumption baked into package code.
+#:
+#: The packaged location is listed FIRST and is not a source checkout's layout, so
+#: shipping `configs/` as package data later needs no change here.
+_CONFIG_ROOT_CANDIDATES = (
+    Path(__file__).parent / "configs",            # packaged alongside the package
+    Path(__file__).parent.parent.parent / "configs",  # source checkout: repo/configs
+)
+
+
+def _resolve_configs_dir() -> Path:
+    """The first candidate that actually holds `base.yaml`.
+
+    Falls back to the source-checkout candidate when none does, so importing
+    `amcd.config` never fails on layout alone and `_CONFIGS_DIR` is always a real
+    Path. A layout that resolves to nothing is reported by `_require_configs`, at
+    the point a caller asks to LOAD a config — with a message naming every
+    location tried, rather than a bare FileNotFoundError from `_merge_yaml`.
+    """
+    for candidate in _CONFIG_ROOT_CANDIDATES:
+        if (candidate / "base.yaml").is_file():
+            return candidate
+    return _CONFIG_ROOT_CANDIDATES[-1]
+
+
+def _require_configs() -> None:
+    """Raise an actionable error if `configs/base.yaml` is not where we look.
+
+    Called before any load. Every value that governs a run comes from a config
+    layer, so there is no default to degrade to — the only useful response is to
+    say where we looked and what would fix it.
+    """
+    if not _BASE_YAML.is_file():
+        tried = "\n".join(f"    {c / 'base.yaml'}" for c in _CONFIG_ROOT_CANDIDATES)
+        raise FileNotFoundError(
+            "amcd cannot find `configs/base.yaml`, which holds every default a run "
+            f"is built from.\n  Tried:\n{tried}\n"
+            "  Run from a source checkout (where `configs/` sits beside `src/`), or "
+            "install a build that ships `configs/` as package data. There is no "
+            "built-in fallback: a value that governs an experiment never has a "
+            "default in Python."
+        )
+    # The plugin params directories too, not just base.yaml (F-80). A root holding
+    # base.yaml but none of these — precisely the half-finished "ship configs/ as
+    # package data" the message above recommends — used to win the candidate race
+    # and then load a VALIDATED Config with `representation.params={}` and
+    # `simulator.params={}`, because `_attach_params_block` cannot distinguish a
+    # missing DIRECTORY from "this registered plugin needs no params file". The run
+    # died later on a pydantic missing-field error naming neither, which is the
+    # confusion F-73 exists to end.
+    missing = [d.name for d in (_MODELS_DIR, _REPS_DIR, _SIMS_DIR) if not d.is_dir()]
+    if missing:
+        raise FileNotFoundError(
+            f"amcd found `base.yaml` in {_CONFIGS_DIR} but not the plugin parameter "
+            f"director{'y' if len(missing) == 1 else 'ies'} {missing}. Each plugin's "
+            f"concrete parameters live beside it there, and a missing directory is "
+            f"indistinguishable from a parameter-free plugin, so the run would load "
+            f"with empty params and fail later without naming this. Install a build "
+            f"that ships the whole `configs/` tree, or run from a source checkout."
+        )
+
+
+_CONFIGS_DIR = _resolve_configs_dir()
 _BASE_YAML = _CONFIGS_DIR / "base.yaml"
 _MODELS_DIR = _CONFIGS_DIR / "models"
 _REPS_DIR = _CONFIGS_DIR / "representations"
@@ -770,11 +839,27 @@ class Config(BaseModel):
     # ── Validation ────────────────────────────────────────────────────────────
     @model_validator(mode="after")
     def _check(self) -> "Config":
-        # Positivity guards for scalars a §7 tuned sweep (or a typo) could otherwise
-        # drive ≤ 0, caught here at load rather than deep in torch/stats. (F-07, F-08)
-        # F-08 in particular: bootstrap_n_resamples ≤ 0 → degenerate/empty CIs, and CIs
-        # are the load-bearing evidence for every headline claim; the D0a/D0b thresholds
-        # are gate multipliers a negative value would silently invert.
+        """Every cross-field validation, as a list of named checks."""
+        self._check_scalar_domains()
+        self._check_reserved_split_names()
+        # Role vocabulary + cardinality. Must run BEFORE the shift-split check,
+        # which already assumes `role == "test"` is meaningful (F-44/RD-53).
+        self._check_split_roles()
+        self._check_id_pool_sizing()
+        self._check_split_seeds()
+        self._check_inert_split_fields()
+        self._check_split_counts_positive()
+        self._check_shift_splits()
+        return self
+
+    def _check_scalar_domains(self) -> None:
+        """Ranges a §7 tuned sweep (or a typo) could otherwise drive out of bounds.
+
+        Caught at load rather than deep in torch/stats (F-07, F-08). F-08 in
+        particular: `bootstrap_n_resamples` ≤ 0 gives degenerate CIs, and CIs are
+        the load-bearing evidence for every headline claim; the D0a/D0b thresholds
+        are gate multipliers a negative value would silently invert.
+        """
         positive_fields = (
             "huber_delta", "learning_rate",
             "bootstrap_n_resamples",
@@ -809,10 +894,11 @@ class Config(BaseModel):
                 f"metric_onset_rel_db must be < 0 (dB below peak); got {self.metric_onset_rel_db}"
             )
 
-        # Reserved names: `id` is the generator's "hash-bucket me" tag (a split of
-        # that name silently captures or loses scenes instead of being routed), and
-        # `carrier` is a non-split directory inside preprocessed/ that the stale-
-        # split sweep deliberately skips.
+    def _check_reserved_split_names(self) -> None:
+        """`id` is the generator's "hash-bucket me" tag (a split of that name
+        silently captures or loses scenes instead of being routed), and `carrier` is
+        a non-split directory inside preprocessed/ that the stale-split sweep
+        deliberately skips (F-38)."""
         clashes = sorted(set(self.splits) & set(RESERVED_SPLIT_NAMES))
         if clashes:
             raise ValueError(
@@ -820,16 +906,15 @@ class Config(BaseModel):
                 f"sentinels or non-split directories, and would silently misroute or "
                 f"retain scenes). Reserved: {list(RESERVED_SPLIT_NAMES)}."
             )
-        # Role vocabulary + cardinality. Must run BEFORE the shift-split loop below,
-        # which already assumes `role == "test"` is meaningful (F-44/RD-53).
-        self._check_split_roles()
-        self._check_id_pool_sizing()
-        self._check_split_seeds()
-        self._check_inert_split_fields()
-        self._check_split_counts_positive()
 
-        # Shift splits: each needs a count and exactly one axis, over a known regime
-        # value that differs from the id baseline (controlled single-axis shift).
+    def _check_shift_splits(self) -> None:
+        """Each shift split is a CONTROLLED single-axis perturbation of the id
+        baseline, and the baseline itself is a declared regime.
+
+        A shift split that matched id on its named axis, or named a regime that
+        does not exist, would still generate and render scenes — and then be
+        reported as a distribution shift that was never applied.
+        """
         id_regime = self.scenes.id_regime
         axis_registries = {
             "geometry": self.scenes.geometry_families,
@@ -864,7 +949,6 @@ class Config(BaseModel):
                 raise ValueError(
                     f"scenes.id_regime.{axis}={id_regime.get(axis)!r} not in scenes.{axis} regimes"
                 )
-        return self
 
     # ── id-pool sizing modes ──────────────────────────────────────────────────
     @property
@@ -1075,6 +1159,10 @@ class Config(BaseModel):
     # ── Loading ───────────────────────────────────────────────────────────────
     @staticmethod
     def _merge_yaml(paths: list[Path]) -> dict:
+        # A missing config ROOT is a layout problem, not a missing-file problem,
+        # and the two need different messages (F-73). Checked here so every entry
+        # point — load, with_overrides, expand_sweeps — is covered by one guard.
+        _require_configs()
         merged: dict = {}
         for path in paths:
             with open(path) as f:
@@ -1179,18 +1267,39 @@ class Config(BaseModel):
                 versions[pkg] = importlib.metadata.version(pkg)
             except importlib.metadata.PackageNotFoundError:
                 versions[pkg] = "not-installed"
-        # Resolved from the PACKAGE, not from run_dir (F-56): a --run-dir on a data
-        # volume is the normal case, and asking git about it stamped "unavailable"
-        # here while the same run's eval sentinel recorded a real sha. `git_dirty`
-        # is stated because a sha alone does not describe an edited tree — what the
-        # CACHE compares is provenance.code_version(), a content hash.
+        # git sha/dirty are HUMAN provenance resolved from the PACKAGE, never the
+        # run_dir — see amcd.provenance (F-56).
         versions["git_sha"] = provenance.git_sha()
         versions["git_dirty"] = provenance.git_is_dirty()
         # Whole-package, unlike the per-stage scopes: this one is for a HUMAN
         # asking "which code was this run made with", not a cache key.
+        #
+        # It describes THIS INVOCATION, and stamp() runs before any stage does, so
+        # it is NOT a claim that this code produced the artifacts in the run_dir.
+        # It read as one: re-running on a run_dir whose stages are all cached
+        # re-stamps this file with the current hash, so a run_dir whose renders
+        # predate a change to the render backend carried a stamp asserting the new
+        # code made them (F-75). Which code produced a given stage's artifacts is
+        # recorded per stage in `stages/<stage>.done` (`code_version_unscoped`),
+        # and `Pipeline` warns when a stage with no scoped `code_version` is served
+        # from cache under changed source. Said in the file itself, because a
+        # comment here does not reach whoever reads versions.json.
         versions["code_version"] = provenance.code_version(provenance.ALL_SOURCES)
+        versions["code_version_describes"] = (
+            "this invocation, not necessarily the artifacts in this run_dir; "
+            "cached stages may predate it — see stages/<stage>.done"
+        )
+        # WHICH MACHINE, beside which code — the same config and code_version give
+        # different weights on MPS and on CUDA/CPU. Neither is a cache key; see
+        # amcd.provenance (F-74).
+        versions["device"] = str(provenance.select_device())
+        versions["platform_machine"] = provenance.host_platform()
         (run_dir / "versions.json").write_text(json.dumps(versions, indent=2))
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Plugin blocks + layer merge
+# ─────────────────────────────────────────────────────────────────────────────
 
 # kind → (package to import so its plugins self-register, registry attribute name).
 _PLUGIN_REGISTRY = {

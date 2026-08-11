@@ -1,4 +1,6 @@
 """Config invariants: loading, validation, role grammar, seed reproducibility."""
+import json
+import platform
 from pathlib import Path
 
 import pytest
@@ -159,6 +161,137 @@ class TestPluginSeam:
         assert (tmp_path / "config.yaml").exists()
         assert (tmp_path / "resolved.yaml").exists()
         assert (tmp_path / "versions.json").exists()
+
+
+class TestVersionsJsonNamesTheMachine:
+    """F-74: the compute device was auto-selected, never recorded, never stamped.
+
+    `versions.json` recorded six package versions, the git sha, the dirty flag and
+    `code_version` — and no device or host. Under the project's two-host
+    requirement the SAME config and the SAME `code_version` produce different
+    weights on this Mac (MPS) and on the x86 box (CUDA/CPU), with identical
+    provenance stamps.
+    """
+
+    def _versions(self, tmp_path: Path) -> dict:
+        Config.load().stamp(tmp_path)
+        return json.loads((tmp_path / "versions.json").read_text())
+
+    def test_the_device_is_recorded(self, tmp_path: Path) -> None:
+        versions = self._versions(tmp_path)
+        assert versions["device"] in {"mps", "cuda", "cpu"} or versions[
+            "device"
+        ].startswith(("cuda:", "mps:")), versions["device"]
+
+    def test_the_host_architecture_is_recorded(self, tmp_path: Path) -> None:
+        assert self._versions(tmp_path)["platform_machine"] == platform.machine()
+
+    def test_it_names_the_device_the_checkpoint_was_trained_on(
+        self, tmp_path: Path
+    ) -> None:
+        """The stamp must agree with the selector `train` and `infer` actually use,
+        or the record describes a different run than the one on disk (F-56's rule,
+        applied to the device)."""
+        from amcd.provenance import select_device
+
+        assert self._versions(tmp_path)["device"] == str(select_device())
+
+    def test_the_device_is_in_no_fingerprint(self, tmp_path: Path) -> None:
+        """Deliberately NOT a cache key: moving machines must not discard an
+        expensive artifact."""
+        from amcd.pipeline import STAGE_FINGERPRINT
+
+        for stage, fingerprint in STAGE_FINGERPRINT.items():
+            if fingerprint is None:
+                continue
+            payload = json.dumps(fingerprint(tiny_config()), default=str)
+            assert "device" not in payload, stage
+
+    def test_one_selector_serves_both_stages(self) -> None:
+        """It was duplicated verbatim in trainer.py and infer.py, so the two could
+        drift apart while both claimed to describe 'the device'."""
+        from amcd.training import infer, trainer
+        from amcd.provenance import select_device
+
+        assert trainer.select_device is select_device
+        assert infer.select_device is select_device
+
+
+class TestConfigRootIsNotAssumedToBeASourceCheckout:
+    """F-73: `configs/` was resolved three levels up from the module and nowhere
+    else, so a wheel install into site-packages could not find `base.yaml` and
+    failed with a bare FileNotFoundError deep inside `_merge_yaml`."""
+
+    def test_a_missing_config_root_fails_actionably(self, monkeypatch) -> None:
+        import amcd.config as config_mod
+
+        missing = Path("/nonexistent-amcd-root/configs")
+        monkeypatch.setattr(config_mod, "_CONFIG_ROOT_CANDIDATES", (missing,))
+        monkeypatch.setattr(config_mod, "_BASE_YAML", missing / "base.yaml")
+
+        with pytest.raises(FileNotFoundError) as excinfo:
+            Config.load()
+        message = str(excinfo.value)
+        # The three things the operator needs: what is missing, where we looked,
+        # and what would fix it.
+        assert "configs/base.yaml" in message
+        assert str(missing / "base.yaml") in message
+        assert "package data" in message
+
+    def test_resolution_never_raises_so_import_cannot_fail_on_layout(
+        self, monkeypatch
+    ) -> None:
+        """`_CONFIGS_DIR` is computed at import. If resolution could raise, a bad
+        layout would make `import amcd.config` itself explode — so the resolver
+        returns a Path regardless and `_require_configs` reports the problem at
+        load time, where the message can be actionable."""
+        import amcd.config as config_mod
+
+        monkeypatch.setattr(
+            config_mod, "_CONFIG_ROOT_CANDIDATES", (Path("/nonexistent-amcd-root/configs"),)
+        )
+        resolved = config_mod._resolve_configs_dir()
+        assert isinstance(resolved, Path)
+
+    def test_the_packaged_location_is_preferred_over_the_checkout(self) -> None:
+        """Listed first so shipping `configs/` as package data later needs no code
+        change here (the packaging half is on the integrator's queue)."""
+        import amcd
+        import amcd.config as config_mod
+
+        packaged = Path(amcd.__file__).resolve().parent / "configs"
+        assert config_mod._CONFIG_ROOT_CANDIDATES[0] == packaged
+
+    def test_the_resolved_root_actually_holds_base_yaml(self) -> None:
+        import amcd.config as config_mod
+
+        assert (config_mod._CONFIGS_DIR / "base.yaml").is_file()
+
+
+class TestFingerprintExemptionsAreWellFormed:
+    """F-65's exemption table is a CLAIM about the fingerprint contract, so it has
+    to be checkable itself — an exemption naming a field that no longer exists
+    would silently widen the guard's blind spot."""
+
+    def test_every_exempt_name_is_a_real_config_field(self) -> None:
+        from amcd.pipeline import FINGERPRINT_EXEMPT_FIELDS
+
+        unknown = set(FINGERPRINT_EXEMPT_FIELDS) - set(Config.model_fields)
+        assert unknown == set(), (
+            f"{sorted(unknown)} are exempted from fingerprinting but are not "
+            f"Config fields"
+        )
+
+    def test_every_exemption_says_what_would_end_it(self) -> None:
+        """A present-tense fact ('nothing consumes it') reads to a later editor as
+        permission to delete the field. Each reason must point somewhere."""
+        from amcd.pipeline import FINGERPRINT_EXEMPT_FIELDS
+
+        for field, reason in FINGERPRINT_EXEMPT_FIELDS.items():
+            assert any(
+                marker in reason
+                for marker in ("Non-exempt", "non-exempt", "fingerprinted through")
+            ), f"exemption for {field!r} does not say what would make it non-exempt"
 
 
 class TestRoleGrammar:

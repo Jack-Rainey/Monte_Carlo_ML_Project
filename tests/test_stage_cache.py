@@ -1,21 +1,30 @@
-"""Stage-cache fingerprints and artifact residue.
+"""Stage-cache fingerprints, code versions, and artifact residue.
 
-Ledger rows F-46, F-47 (widening F-38), F-49, F-50, RD-54/RD-59.
+Every class names the row it pins; the reproductions behind those rows live in
+git history and the review ledger, which is what the ids are for.
 
-Two failure families, both about a run_dir quietly disagreeing with its config:
-  * FINGERPRINTS — a cached stage must be refused when its inputs changed, and
-    NOT refused when they did not (a false refusal costs an emulated re-render).
+The failure families, all about a run_dir quietly disagreeing with its config:
+  * FINGERPRINT SCOPE — a cached stage must be refused when its inputs changed,
+    and NOT refused when they did not (a false refusal costs an emulated
+    re-render, and teaches the operator to reach for `--force`).
+  * CODE VERSION — a config fingerprint cannot see a code change; the declared
+    per-stage scope must cover what the stage actually depends on.
+  * THE CHAIN — staleness must reach the reported table transitively.
+  * CONFIG-FIELD COVERAGE — every Config field is fingerprinted or declared exempt.
+  * HOST INDEPENDENCE — the cache key describes the source, not the machine.
   * RESIDUE — scene ids are POSITIONAL, so a shrunk scene set leaves orphans that
     a later config silently reuses under different geometry.
 """
+import ast
 import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from amcd.config import Config
+from amcd.config import SEED_NAMES, Config
 from amcd.pipeline import (
+    FINGERPRINT_EXEMPT_FIELDS,
     STAGE_CODE_SCOPE,
     STAGE_FINGERPRINT,
     STAGE_UPSTREAM,
@@ -430,6 +439,540 @@ class TestZeroCountIsRejected:
             for key in ("volume_m3", "t60_sabine_s")
         }
         assert payload == {"volume_m3": None, "t60_sabine_s": None}
+
+
+class TestTheTableProducingStagesAreCacheProtected:
+    """F-63 / F-64: cycle 3's "the cache protects the reported result" held for
+    train/infer/eval and failed for `preprocess`, `stats` and `report` — the stages
+    that produce the table. Each was reproduced end to end at exit 0 before the fix.
+    """
+
+    def test_preprocess_carries_a_code_version(self) -> None:
+        fp = STAGE_FINGERPRINT["preprocess"](tiny_config())
+        assert isinstance(fp.get("code_version"), str) and fp["code_version"]
+
+    def test_stats_and_report_carry_a_code_version(self) -> None:
+        for stage in ("stats", "report"):
+            fp = STAGE_FINGERPRINT[stage](tiny_config())
+            assert isinstance(fp.get("code_version"), str) and fp["code_version"]
+
+    def test_the_chain_runs_unbroken_from_scenes_to_report(self) -> None:
+        chain = ["gen-scenes", "render", "preprocess", "train", "infer", "eval",
+                 "stats", "report"]
+        for downstream, upstream in zip(chain[1:], chain[:-1]):
+            assert STAGE_UPSTREAM[downstream] == upstream, (
+                f"{downstream} is not chained to {upstream}, so a change to "
+                f"{upstream}'s inputs would not reach the reported table"
+            )
+
+    def test_report_format_invalidates_report(self) -> None:
+        assert STAGE_FINGERPRINT["report"](tiny_config()) != STAGE_FINGERPRINT[
+            "report"
+        ](tiny_config(report_format="markdown"))
+
+    @pytest.mark.parametrize(
+        "stage, module",
+        [
+            ("preprocess", "representations/spectrogram.py"),
+            ("stats", "stats/aggregate.py"),
+            ("report", "reporting/tables.py"),
+        ],
+    )
+    def test_editing_the_code_that_produces_the_artifact_moves_its_version(
+        self, stage: str, module: str
+    ) -> None:
+        """The generalisation of the three reproductions: for each newly wired
+        stage, an edit to the module that computes its output must move its key."""
+        import amcd.provenance as prov
+        from amcd.pipeline import _code_version
+
+        target = Path(prov.__file__).resolve().parent / module
+        original = target.read_bytes()
+        before = _code_version(stage)
+        try:
+            target.write_bytes(original + b"\n# F-63/F-64 probe\n")
+            assert _code_version(stage) != before, (
+                f"editing {module} did not move {stage}'s code_version, so a "
+                f"cached artifact would be served under the changed code"
+            )
+        finally:
+            target.write_bytes(original)
+        assert _code_version(stage) == before, "restore did not return the version"
+
+    def test_an_encoder_edit_refuses_preprocess_and_not_only_train(self) -> None:
+        """F-64's sharp edge: the refusal must name the stage whose artifacts are
+        actually stale. A message naming `train` sends the operator to `--force`
+        train, which rebuilds the wrong thing and exits 0."""
+        import amcd.provenance as prov
+        from amcd.pipeline import _code_version
+
+        target = Path(prov.__file__).resolve().parent / "representations" / "spectrogram.py"
+        original = target.read_bytes()
+        before = _code_version("preprocess")
+        try:
+            target.write_bytes(original + b"\n# encoder probe\n")
+            assert _code_version("preprocess") != before
+        finally:
+            target.write_bytes(original)
+
+
+class TestDeclaredScopeCoversWhatTheStageImports:
+    """F-66: the scope declaration is only as good as its weakest entry, and a
+    scope that omits a real dependency fails SILENTLY.
+
+    `eval` and `infer` both called `data.normalization.denormalize` on every
+    reported leg while neither declared `data`, masked only because `data` sits in
+    TRAIN's scope and the chain refuses upstream first — an accident of ordering.
+
+    WHAT THIS TEST CHECKS, precisely, because the previous docstring claimed more
+    than the test did and that overstatement was itself the finding: the declared
+    scope is a SUPERSET of the stage's STATIC transitive `amcd.*` import closure
+    (module-level and function-level), minus `_CORE_SOURCES`.
+
+    WHAT IT CANNOT CHECK: a dependency reached without an import statement. The
+    plugin registry loads `representations`, `models` and `simulators` BY NAME, so
+    those edges are invisible here and remain a declared judgement. Over-declaring
+    is therefore allowed (and several scopes do); under-declaring is what fails.
+
+    It also cannot check a dependency this walker fails to RESOLVE — so the walker
+    now asserts rather than dropping, because a silently shrinking closure makes
+    the test pass for the wrong reason (F-77). That is the same failure this class
+    exists to prevent, one level up: the guard claiming more than it checks.
+    """
+
+    @staticmethod
+    def _module_file(module: str) -> Path | None:
+        import amcd
+
+        src_root = Path(amcd.__file__).resolve().parent.parent
+        rel = Path(*module.split("."))
+        for candidate in (src_root / rel.with_suffix(".py"), src_root / rel / "__init__.py"):
+            if candidate.exists():
+                return candidate
+        return None
+
+    @classmethod
+    def _amcd_imports(cls, module: str) -> set[str]:
+        """Every `amcd.*` module `module` imports, absolute or relative.
+
+        Relative imports are anchored on the module's PACKAGE, and a package's
+        `__init__.py` is its own anchor while a plain module's anchor is its
+        parent. Getting that wrong is not a near-miss: resolving `from .foo import
+        x` inside `amcd/data/__init__.py` against `amcd` instead of `amcd.data`
+        yields a module that does not exist, which then vanished through the
+        resolvability filter below and took the whole subtree out of the closure
+        (F-77 — `amcd.representations`'s four imports, including the encoder that
+        is F-64's own reproduction, were invisible).
+        """
+        path = cls._module_file(module)
+        if path is None:
+            return set()
+        parts = module.split(".")
+        anchor = parts if path.name == "__init__.py" else parts[:-1]
+        found: set[str] = set()
+        unresolved: list[str] = []
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Import):
+                found.update(a.name for a in node.names if a.name.startswith("amcd"))
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:  # relative: resolve against this module's package
+                    base = anchor[: len(anchor) - (node.level - 1)]
+                    prefix = base + (node.module.split(".") if node.module else [])
+                elif node.module and node.module.startswith("amcd"):
+                    prefix = node.module.split(".")
+                else:
+                    continue
+                if not prefix or prefix[0] != "amcd":
+                    continue
+                stem = ".".join(prefix)
+                if cls._module_file(stem) is None:
+                    # The module an import statement names MUST resolve. Dropping
+                    # it silently is how F-77 hid 60 edges.
+                    unresolved.append(f"{module} -> {stem}")
+                    continue
+                found.add(stem)
+                # `from .base import X` — X may be a submodule or an ordinary name.
+                # Unresolvable ones here are names, which is expected, so these are
+                # filtered rather than reported.
+                found.update(f"{stem}.{a.name}" for a in node.names)
+        assert not unresolved, (
+            f"the import walker could not resolve {unresolved}; it is under-"
+            f"reporting the closure, so this test is not checking what it claims"
+        )
+        return {m for m in found if cls._module_file(m) is not None}
+
+    @classmethod
+    def _closure(cls, entry: str) -> set[str]:
+        seen: set[str] = set()
+        stack = [entry]
+        while stack:
+            module = stack.pop()
+            if module in seen:
+                continue
+            seen.add(module)
+            stack.extend(cls._amcd_imports(module) - seen)
+        return seen
+
+    def test_every_declared_scope_covers_the_stages_import_closure(self) -> None:
+        import amcd
+        import amcd.provenance as prov
+        from amcd.pipeline import _dispatch
+
+        package_root = Path(amcd.__file__).resolve().parent
+        for stage, scope in STAGE_CODE_SCOPE.items():
+            covered = set(scope) | set(prov._CORE_SOURCES)
+            missing = []
+            for module in self._closure(_dispatch(stage).__module__):
+                rel = self._module_file(module).relative_to(package_root).as_posix()
+                if any(rel == e or rel.startswith(f"{e}/") for e in covered):
+                    continue
+                missing.append(rel)
+            assert not missing, (
+                f"stage {stage!r} imports {sorted(missing)}, which its declared "
+                f"scope {scope} does not cover — an edit there would not "
+                f"invalidate its cached artifacts"
+            )
+
+    def test_eval_and_infer_declare_the_module_they_denormalize_with(self) -> None:
+        """The specific omission F-66 names, pinned so it cannot silently return."""
+        for stage in ("eval", "infer"):
+            assert "data" in STAGE_CODE_SCOPE[stage]
+
+    def test_patching_denormalize_moves_eval_and_infer(self) -> None:
+        import amcd.provenance as prov
+        from amcd.pipeline import _code_version
+
+        target = Path(prov.__file__).resolve().parent / "data" / "normalization.py"
+        original = target.read_bytes()
+        before = {s: _code_version(s) for s in ("eval", "infer", "train")}
+        try:
+            target.write_bytes(original + b"\n# F-66 probe\n")
+            for stage in ("eval", "infer", "train"):
+                assert _code_version(stage) != before[stage], stage
+        finally:
+            target.write_bytes(original)
+
+    def test_the_package_init_is_in_every_scope(self) -> None:
+        """`amcd/__init__.py` is imported through by every stage and was in no
+        scope, so an edit to it invalidated nothing."""
+        import amcd.provenance as prov
+        from amcd.pipeline import _code_version
+
+        target = Path(prov.__file__).resolve().parent / "__init__.py"
+        original = target.read_bytes()
+        before = {s: _code_version(s) for s in STAGE_CODE_SCOPE}
+        try:
+            target.write_bytes(original + b"\n# init probe\n")
+            for stage in STAGE_CODE_SCOPE:
+                assert _code_version(stage) != before[stage], stage
+        finally:
+            target.write_bytes(original)
+
+
+class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
+    """F-65's real deliverable: the guard the CLASS needs.
+
+    `metric_edt_variance_limited_s` was added in cycle 3 to fix RD-78 and reached
+    no fingerprint, so a REPORTED disclosure column was served under the wrong
+    threshold's stamp. Adding the key fixes one instance; this test is what stops
+    the next one.
+
+    Coverage is proved by PERTURBATION, not by matching field names against
+    payload keys: a payload can carry a field under a different name or nested
+    inside `representation.params`, and a name match would pass while the
+    fingerprint never moves.
+
+    LIMIT, stated rather than implied: the field sweep proves coverage at
+    TOP-LEVEL `Config` field granularity. A new leaf inside a nested model is
+    covered only where some fingerprint dumps that model WHOLESALE — true of
+    `SplitSpec` (via `_preprocess_fingerprint`), `Scenes`, `SimulatorSpec`,
+    `ModelSpec` and `RepresentationSpec`.
+
+    `Seeds` is the exception, and it is swept separately below. NO fingerprint
+    dumps it wholesale — every stage names individual leaves (`config.seed(...)`)
+    — so perturbing `seeds.master` moves everything downstream and would let a new
+    per-aspect seed pass unguarded (F-78). That is the worst place to have a blind
+    spot: per-aspect seeds are invariant #5, and `split_assignment` is the
+    leakage-critical one.
+    """
+
+    #: field → a value differing from the tiny config's, chosen to satisfy that
+    #: field's validators. These are PERTURBATION PROBES for the guard below, never
+    #: a run's parameters: no pipeline stage ever sees them, so they are not
+    #: experiment-governing values living in a test fixture.
+    PROBES: dict[str, object] = {
+        "seeds": {"master": 4242},
+        "simulator": {"params": {"speed_of_sound_m_s": 300.0}},
+        "representation": {"params": {"n_fft": 512}},
+        "model": {"params": {"hidden_channels": 16}},
+        "sample_rate": 16000,
+        "ir_duration": 0.2,
+        "ambisonics_order": 2,
+        "low_ray_budget": 77,
+        "high_ray_budget": 7777,
+        "scenes": {"n_id": 9},
+        "splits": {"test_material_shift": {"count": 4}},
+        "n_epochs": 3,
+        "batch_size": 3,
+        "learning_rate": 0.05,
+        "huber_delta": 3.0,
+        "early_stopping_patience": 9,
+        "report_format": "markdown",
+        "iso_eval_freqs": [500, 1000, 2000],
+        "metric_onset_rel_db": -25.0,
+        "metric_band_resolvability_margin": 0.07,
+        "metric_edt_variance_limited_s": 0.3,
+        "bootstrap_n_resamples": 500,
+        "bootstrap_alpha": 0.1,
+        "bootstrap_power": 0.9,
+    }
+
+    def _all_fingerprints(self, config: Config) -> dict:
+        return {
+            stage: fp(config)
+            for stage, fp in STAGE_FINGERPRINT.items()
+            if fp is not None
+        }
+
+    def test_every_config_field_is_either_probed_or_exempt(self) -> None:
+        """A newly added `Config` field fails HERE until someone decides which it
+        is — which is the whole point of the row."""
+        fields = set(Config.model_fields)
+        classified = set(self.PROBES) | set(FINGERPRINT_EXEMPT_FIELDS)
+        assert fields - classified == set(), (
+            f"Config fields {sorted(fields - classified)} are in no stage "
+            f"fingerprint probe and in no exemption. Add a probe (if a change to "
+            f"the field must invalidate a stage) or an entry in "
+            f"FINGERPRINT_EXEMPT_FIELDS saying why it need not."
+        )
+        assert classified - fields == set(), (
+            f"{sorted(classified - fields)} are probed or exempted but are not "
+            f"Config fields — the guard is measuring something that no longer exists"
+        )
+
+    def test_a_field_is_never_both_probed_and_exempt(self) -> None:
+        overlap = set(self.PROBES) & set(FINGERPRINT_EXEMPT_FIELDS)
+        assert overlap == set(), f"{sorted(overlap)} are claimed as both"
+
+    @pytest.mark.parametrize("field", sorted(PROBES))
+    def test_perturbing_the_field_invalidates_at_least_one_stage(self, field) -> None:
+        base = self._all_fingerprints(tiny_config())
+        perturbed = self._all_fingerprints(tiny_config(**{field: self.PROBES[field]}))
+        moved = [stage for stage in base if base[stage] != perturbed[stage]]
+        assert moved, (
+            f"changing {field!r} moved no stage fingerprint, so a run_dir would be "
+            f"re-used under the new value and the artifacts would be the old "
+            f"value's — the F-65 failure mode. Either add it to a fingerprint or "
+            f"declare it in FINGERPRINT_EXEMPT_FIELDS with a reason."
+        )
+
+    @pytest.mark.parametrize("seed_name", SEED_NAMES)
+    def test_perturbing_each_named_seed_invalidates_at_least_one_stage(
+        self, seed_name: str
+    ) -> None:
+        """Every per-aspect seed individually, not just `master` (F-78).
+
+        `Seeds` is dumped by no fingerprint, so this is the only thing standing
+        between a newly appended `SEED_NAMES` entry and a stochastic aspect whose
+        change invalidates nothing.
+        """
+        base = self._all_fingerprints(tiny_config())
+        perturbed = self._all_fingerprints(tiny_config(seeds={seed_name: 4242}))
+        moved = [stage for stage in base if base[stage] != perturbed[stage]]
+        assert moved, (
+            f"seeds.{seed_name} moved no stage fingerprint. A run that differs in "
+            f"this aspect is a different run, so it must invalidate the stage that "
+            f"consumes it — name it in that stage's fingerprint via config.seed()."
+        )
+
+    def test_the_edt_disclosure_threshold_invalidates_eval(self) -> None:
+        """The specific key F-65 was raised about."""
+        assert STAGE_FINGERPRINT["eval"](tiny_config()) != STAGE_FINGERPRINT["eval"](
+            tiny_config(metric_edt_variance_limited_s=0.3)
+        )
+
+    def test_every_exemption_states_a_reason(self) -> None:
+        for field, reason in FINGERPRINT_EXEMPT_FIELDS.items():
+            assert isinstance(reason, str) and len(reason) > 40, (
+                f"exemption for {field!r} must say why it is absent today AND what "
+                f"would make it non-exempt"
+            )
+
+
+class TestAnUnprotectedStaleStageIsDisclosedNotVouchedFor:
+    """F-75: `gen-scenes` and `render` carry no `code_version` (RD-99, a deliberate
+    policy call — scoping `render` to `simulators/` forces a re-render, the
+    multi-hour artifact under emulation). The staleness that buys is accepted.
+
+    What was NOT acceptable: `versions.json` is re-stamped every invocation with
+    the current whole-package hash, so a run_dir whose renders predate an edit to
+    the render backend carried a provenance stamp positively asserting the new code
+    produced them — a false witness, worse than the staleness itself.
+
+    These tests pin the disclosure, not a refusal. The refusal is RD-99's to decide.
+    """
+
+    def test_the_sentinel_records_which_code_wrote_the_artifacts(
+        self, tmp_path: Path
+    ) -> None:
+        import amcd.provenance as prov
+
+        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        pipe._mark_done("gen-scenes")
+        recorded = json.loads(_sentinel(tmp_path, "gen-scenes").read_text())
+        assert recorded["code_version_unscoped"] == prov.code_version(prov.ALL_SOURCES)
+
+    def test_it_is_recorded_outside_the_fingerprint_so_it_never_invalidates(
+        self, tmp_path: Path
+    ) -> None:
+        """Recording it must not turn every stage into a whole-package hash — that
+        is exactly the guard-by-over-refusal the scoping rationale rejects."""
+        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        pipe._mark_done("gen-scenes")
+        recorded = json.loads(_sentinel(tmp_path, "gen-scenes").read_text())
+        assert "code_version_unscoped" not in (recorded["fingerprint"] or {})
+
+    def test_a_changed_package_warns_when_an_unprotected_stage_is_served(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        pipe._mark_done("gen-scenes")
+        sentinel = _sentinel(tmp_path, "gen-scenes")
+        recorded = json.loads(sentinel.read_text())
+        recorded["code_version_unscoped"] = "0" * 64  # as if built by older source
+        sentinel.write_text(json.dumps(recorded))
+
+        capsys.readouterr()
+        pipe._warn_if_unprotected_and_stale("gen-scenes")
+        err = capsys.readouterr().err
+        assert "gen-scenes" in err and "no code_version" in err, err
+
+    def test_a_fingerprinted_stage_does_not_warn(self, tmp_path: Path, capsys) -> None:
+        """`preprocess` refuses on a scoped change, so a whole-package drift there
+        is expected and a warning would be pure noise — which is how an operator is
+        taught to ignore warnings."""
+        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        for stage in ("gen-scenes", "render", "preprocess"):
+            pipe._mark_done(stage)
+        sentinel = _sentinel(tmp_path, "preprocess")
+        recorded = json.loads(sentinel.read_text())
+        recorded["code_version_unscoped"] = "0" * 64
+        sentinel.write_text(json.dumps(recorded))
+
+        capsys.readouterr()
+        pipe._warn_if_unprotected_and_stale("preprocess")
+        assert capsys.readouterr().err == ""
+
+    def test_versions_json_says_what_its_code_version_describes(
+        self, tmp_path: Path
+    ) -> None:
+        from amcd.config import Config
+
+        Config.load().stamp(tmp_path)
+        versions = json.loads((tmp_path / "versions.json").read_text())
+        assert "this invocation" in versions["code_version_describes"]
+
+
+class TestALegacySentinelIsRefusedActionablyNotWithATraceback:
+    """F-76: giving `report` a fingerprint made `{"fingerprint": null}` sentinels
+    reachable, and they crashed with a bare `TypeError` from `set(None)` instead of
+    the actionable "predates fingerprinted caching" message.
+
+    Generic, not a one-off migration wrinkle: it recurs for every stage that gains
+    a fingerprint later, `diagnostics` being the next candidate (RD-100/AC-45).
+    """
+
+    def _run_dir_with_a_legacy_report_sentinel(
+        self, tmp_path: Path, payload: dict
+    ) -> Pipeline:
+        """A run_dir whose chain is intact and whose `report.done` is cycle-3 shaped.
+
+        The upstream sentinels must be real, or `_is_done` refuses on the chain
+        before it ever reads report's own fingerprint — which is what the first
+        version of this test actually measured.
+        """
+        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        for stage in ("gen-scenes", "render", "preprocess", "train", "infer",
+                      "eval", "stats"):
+            pipe._mark_done(stage)
+        sentinel = _sentinel(tmp_path, "report")
+        sentinel.parent.mkdir(parents=True, exist_ok=True)
+        sentinel.write_text(json.dumps(payload))
+        return pipe
+
+    def test_a_null_recorded_fingerprint_gets_the_actionable_message(
+        self, tmp_path: Path
+    ) -> None:
+        # Exactly what cycle-3 `_mark_done` wrote for a stage with no fingerprint.
+        pipe = self._run_dir_with_a_legacy_report_sentinel(
+            tmp_path, {"completed_at": 1.0, "fingerprint": None}
+        )
+        with pytest.raises(RuntimeError, match="predates fingerprinted caching"):
+            pipe._is_done("report")
+
+    def test_a_sentinel_missing_the_key_entirely_is_treated_the_same(
+        self, tmp_path: Path
+    ) -> None:
+        pipe = self._run_dir_with_a_legacy_report_sentinel(
+            tmp_path, {"completed_at": 1.0}
+        )
+        with pytest.raises(RuntimeError, match="predates fingerprinted caching"):
+            pipe._is_done("report")
+
+
+class TestTheCacheKeyDescribesTheSourceNotTheHost:
+    """F-69: `rglob("*.py")` hashed macOS AppleDouble `._*.py` sidecars.
+
+    They are real files on an exFAT volume and absent on APFS or the project's
+    declared second host, so the same source hashed differently there and a run_dir
+    carried between hosts was refused with a `code_version: <sha> → <sha>` diff
+    naming no leaf — leaving `--force` as the only remedy, which is the compliance
+    failure the scoping rationale exists to avoid.
+    """
+
+    def test_an_appledouble_sidecar_does_not_change_any_stages_version(self) -> None:
+        import amcd.provenance as prov
+        from amcd.pipeline import _code_version
+
+        sidecar = Path(prov.__file__).resolve().parent / "data" / "._probe.py"
+        before = {stage: _code_version(stage) for stage in STAGE_CODE_SCOPE}
+        try:
+            sidecar.write_bytes(b"\x00\x05\x16\x07 not python at all\n")
+            for stage in STAGE_CODE_SCOPE:
+                assert _code_version(stage) == before[stage], (
+                    f"{stage}'s cache key moved because of a macOS sidecar, so the "
+                    f"same source yields a different key on another host"
+                )
+        finally:
+            sidecar.unlink(missing_ok=True)
+
+    def test_a_real_source_file_still_changes_the_version(self) -> None:
+        """The filter must not be so broad that it stops seeing code (a filter that
+        excluded everything would pass the test above)."""
+        import amcd.provenance as prov
+        from amcd.pipeline import _code_version
+
+        probe = Path(prov.__file__).resolve().parent / "data" / "probe_module.py"
+        before = _code_version("preprocess")
+        try:
+            probe.write_text("# a real module\n")
+            assert _code_version("preprocess") != before
+        finally:
+            probe.unlink(missing_ok=True)
+
+    def test_pycache_is_not_hashed(self) -> None:
+        import amcd.provenance as prov
+        from amcd.pipeline import _code_version
+
+        cache_dir = Path(prov.__file__).resolve().parent / "data" / "__pycache__"
+        cache_dir.mkdir(exist_ok=True)
+        stray = cache_dir / "stray.py"
+        before = _code_version("preprocess")
+        try:
+            stray.write_text("# build output, not source\n")
+            assert _code_version("preprocess") == before
+        finally:
+            stray.unlink(missing_ok=True)
 
 
 class TestArtifactResidue:
