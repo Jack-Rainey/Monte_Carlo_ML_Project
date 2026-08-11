@@ -143,6 +143,7 @@ def test_no_row_id_appears_in_two_places(path: Path, spec: dict) -> None:
     seen: dict[str, str] = {}
     buckets = [
         *((lane["id"], [row["id"] for row in lane["rows"]]) for lane in spec["lanes"]),
+        ("serial_queue", [row["id"] for row in spec.get("serial_queue", [])]),
         ("integrator_queue", [row["id"] for row in spec.get("integrator_queue", [])]),
         ("awaiting_re_review", spec.get("awaiting_re_review", [])),
         ("raised_against_this_partition", spec.get("raised_against_this_partition", [])),
@@ -266,6 +267,7 @@ def test_the_partition_covers_exactly_the_ledgers_open_rows(path: Path, spec: di
     planned: set[str] = set()
     for lane in spec["lanes"]:
         planned |= {row["id"] for row in lane["rows"]}
+    planned |= {row["id"] for row in spec.get("serial_queue", [])}
     planned |= {row["id"] for row in spec.get("integrator_queue", [])}
     planned |= set(spec.get("awaiting_re_review", []))
     planned |= set(spec.get("raised_against_this_partition", []))

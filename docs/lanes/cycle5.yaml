@@ -1,253 +1,347 @@
-# Cycle-5 partition — STAGING, not yet drawn into lanes.
+# Cycle-5 partition — drawn from the GATE, not from the ledger.
 #
-# Written by the integrator at the close of cycle 4 so the coverage identity in
-# tests/test_lane_partition.py is RE-ESTABLISHED rather than suspended (RD-88 forbids
-# weakening that assertion; research-director raised the sequencing as RD-132 and
-# confirmed on review that this is a genuine re-establishment, not a dressed-up one).
+# Planning step 1: start from what the gate needs. RD-33a condition (ii) is
+# unblocked (render() is live); condition (i) is now scoped by SEVERITY (RD-128,
+# decided 2026-08-11) and needs zero OPEN blocker/major on the path list.
 #
-# WHY THERE ARE NO LANES YET. Three things must happen first, none of them the
-# builder's to decide:
+# ITEM 0 IS THE WHOLE POINT OF THIS CYCLE. AC-54 + AC-55 + AC-56 (+AC-66, AC-67,
+# RD-144) are ONE question — is the declared scene population renderable by this
+# backend at ISO-3382 fidelity? As configured the answer looks like NO:
+#   * effective absorption is 1-sqrt(1-alpha), CONFIRMED by render AND re-derived
+#     from pinned upstream source, so T60 realizes 1.14-1.98x nominal and every
+#     closed form in scenes/generator.py describes a room never rendered;
+#   * pygsound compiles maxIRLength = 3.0 s and does not expose it, so
+#     ir_duration 4.25 can never be filled and RD-21's truncation QC is dead;
+#   * diffuse_depth 100 is physically a TIME bound that kills the diffuse field
+#     before the T30 window closes for ~14% of `mixed` scenes under AC-54.
+# Deciding them separately invites three inconsistent partial fixes to one
+# physical inconsistency (RD-143).
 #
-#   1. RD-128 — RD-33a condition (i) REGRESSED in cycle 4 and its reachability is a
-#      USER decision. The protocol says to plan a partition FROM THE GATE, so lanes
-#      drawn before that decision would be drawn from the ledger alone: the RD-81
-#      mistake cycle 4 was replanned to avoid.
-#   2. RD-143 — the serial queue does not yet contain the cycle's own blocker.
-#      AC-54 + AC-55 + AC-56 are ONE question (is the declared scene population
-#      renderable by this backend at ISO-3382 fidelity?) and must be item 0.
-#   3. RD-126 — the id-allocation rule. Four lanes collided four ways in cycle 4
-#      because the protocol assigns no disjoint id blocks. Do NOT open cycle-5
-#      worktrees until docs/parallel_protocol.md says how ids are allocated.
+# RULE 6 (new this cycle): every lane allocates NEW row ids only from its own
+# id_block below. Cycle 4 had no such rule and four lanes collided four ways —
+# RD-93..RD-100 named four different findings, and one lane's new AC ids landed
+# on live OPEN rows. tests/test_lane_partition.py now asserts the blocks are
+# disjoint from each other and from every id the ledger already uses.
 #
-# KNOWN DEFECT OF THIS FILE, recorded rather than hidden (RD-146): the ~22 rows that
-# are FIX APPLIED / awaiting re-review are pooled into the queue below and
-# `awaiting_re_review` is empty. Planning step 3 depends on exactly that distinction,
-# so it must be restored before lanes are drawn.
+# Lane R is renamed B and put FIRST because it carries item 0. Lanes M/P/S keep
+# cycle 4's boundaries, which held: zero textual merge conflicts across four
+# lanes, and the fixed-seed ci_table.csv A/B moved exactly one row.
+#
+# ROW COUNT IS NOT A WORK ESTIMATE. The ledger's OPEN rows collapse into twelve
+# clusters (see "FINDING CLUSTERS" in docs/review_ledger.md): ~30-40 independent
+# work items. Rows in one cluster must close together or not at all.
 
 cycle: cycle5
 base_branch: v3-rebuild
 
-lanes: []
+lanes:
+  - id: B
+    title: render backend — is the declared population renderable?
+    brief: docs/lanes/cycle5-B.md
+    inbox: docs/ledger_inbox/B.md
+    id_block:
+      RD: "150..174"
+      F: "110..134"
+      AC: "75..99"
+      RR: "90..114"
+    owns:
+      - src/amcd/simulators/base.py
+      - src/amcd/simulators/gsound_sir.py
+      - src/amcd/simulators/render.py
+      - src/amcd/runtime.py
+      - configs/simulators/**
+      - tests/test_simulator_seam.py
+      - tests/test_setup_gsound_sir.py
+      - tests/test_runtime.py
+    rows:
+      - {id: RD-33a, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-67, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-08, fix: [src/amcd/simulators/base.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-21, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-24, fix: [src/amcd/simulators/base.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-114, fix: [configs/simulators/gsound_sir.yaml, src/amcd/simulators/render.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-116, fix: [src/amcd/simulators/gsound_sir.py, tests/test_simulator_seam.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-117, fix: [src/amcd/simulators/render.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-120, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-121, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-122, fix: [src/amcd/simulators/render.py], test: [tests/test_simulator_seam.py]}
+      - {id: RD-123, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-84, fix: [src/amcd/simulators/gsound_sir.py, src/amcd/simulators/render.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-85, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-86, fix: [src/amcd/simulators/render.py, tests/test_simulator_seam.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-87, fix: [src/amcd/simulators/gsound_sir.py, tests/test_simulator_seam.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-88, fix: [src/amcd/simulators/base.py, src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-90, fix: [src/amcd/simulators/gsound_sir.py, src/amcd/simulators/render.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-91, fix: [src/amcd/simulators/gsound_sir.py, tests/test_simulator_seam.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-92, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-93, fix: [src/amcd/simulators/gsound_sir.py, tests/test_simulator_seam.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-94, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-95, fix: [src/amcd/simulators/base.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-96, fix: [tests/test_simulator_seam.py], test: [tests/test_simulator_seam.py]}
+      - {id: F-98, fix: [src/amcd/simulators/render.py], test: [tests/test_simulator_seam.py]}
+      - {id: AC-57, fix: [src/amcd/simulators/base.py, src/amcd/simulators/gsound_sir.py, tests/test_simulator_seam.py], test: [tests/test_simulator_seam.py]}
+      - {id: AC-59, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: AC-62, fix: [src/amcd/simulators/base.py], test: [tests/test_simulator_seam.py]}
+      - {id: AC-63, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-69, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-70, fix: [src/amcd/simulators/base.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-71, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-72, fix: [tests/test_simulator_seam.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-74, fix: [src/amcd/simulators/base.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-75, fix: [src/amcd/simulators/base.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-76, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-77, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-78, fix: [tests/test_simulator_seam.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-83, fix: [src/amcd/simulators/gsound_sir.py], test: [tests/test_simulator_seam.py]}
+      - {id: RR-84, fix: [src/amcd/simulators/base.py], test: [tests/test_simulator_seam.py]}
+  - id: M
+    title: metric computation path
+    brief: docs/lanes/cycle5-M.md
+    inbox: docs/ledger_inbox/M.md
+    id_block:
+      RD: "175..199"
+      F: "135..159"
+      AC: "100..124"
+      RR: "115..139"
+    owns:
+      - src/amcd/evaluation/**
+      - src/amcd/representations/**
+      - src/amcd/acoustics.py
+      - src/amcd/simulators/dry_run.py
+      - configs/base.yaml
+      - configs/research_i.yaml
+      - configs/representations/**
+      - tests/test_metrics.py
+      - tests/test_filterbank.py
+      - tests/test_acoustic_validity.py
+      - tests/test_eval_improvement.py
+      - tests/test_signal_domain.py
+    rows:
+      - {id: F-68, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: AC-26, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: AC-28, fix: [src/amcd/simulators/dry_run.py], test: [tests/test_metrics.py]}
+      - {id: AC-30, fix: [configs/base.yaml], test: [tests/test_metrics.py]}
+      - {id: AC-37, fix: [src/amcd/evaluation/evaluator.py, src/amcd/representations/spectrogram.py], test: [tests/test_metrics.py]}
+      - {id: AC-38, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: AC-39, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: AC-43, fix: [src/amcd/simulators/dry_run.py], test: [tests/test_metrics.py]}
+      - {id: AC-36, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: AC-65, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: AC-68, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: RR-37, fix: [src/amcd/simulators/dry_run.py], test: [tests/test_metrics.py]}
+      - {id: RR-38, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: RR-45, fix: [src/amcd/representations/spectrogram.py], test: [tests/test_metrics.py]}
+      - {id: F-M3, fix: [src/amcd/representations/spectrogram.py], test: [tests/test_metrics.py]}
+      - {id: F-M9, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: F-M10, fix: [configs/representations/spectrogram.yaml, src/amcd/representations/spectrogram.py], test: [tests/test_metrics.py]}
+      - {id: F-68-R2, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: F-68-R3, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: AC-37-R4, fix: [src/amcd/representations/spectrogram.py], test: [tests/test_metrics.py]}
+      - {id: AC-26-R6, fix: [configs/base.yaml], test: [tests/test_metrics.py]}
+      - {id: AC-19-R7, fix: [src/amcd/representations/spectrogram.py], test: [tests/test_metrics.py]}
+      - {id: RD-93, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: RD-96, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: RD-98, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: RD-99, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: S-1, fix: [src/amcd/acoustics.py], test: [tests/test_metrics.py]}
+      - {id: AC-60, fix: [configs/base.yaml], test: [tests/test_metrics.py]}
+      - {id: RR-85, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: AC-69, fix: [src/amcd/representations/spectrogram.py, tests/test_filterbank.py, tests/test_metrics.py], test: [tests/test_metrics.py]}
+      - {id: AC-70, fix: [src/amcd/evaluation/room_acoustic.py], test: [tests/test_metrics.py]}
+      - {id: F-106, fix: [tests/test_metrics.py], test: [tests/test_metrics.py]}
+  - id: P
+    title: provenance, stage cache and reported tables
+    brief: docs/lanes/cycle5-P.md
+    inbox: docs/ledger_inbox/P.md
+    id_block:
+      RD: "200..224"
+      F: "160..184"
+      AC: "125..149"
+      RR: "140..164"
+    owns:
+      - src/amcd/pipeline.py
+      - src/amcd/provenance.py
+      - src/amcd/config.py
+      - src/amcd/data/**
+      - src/amcd/stats/**
+      - src/amcd/reporting/**
+      - src/amcd/training/**
+      - tests/test_stage_cache.py
+      - tests/test_config.py
+      - tests/test_dataset_integrity.py
+      - tests/test_stats.py
+      - tests/test_report.py
+    rows:
+      - {id: RD-66, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: RD-20, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: F-63, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: F-64, fix: [src/amcd/data/preprocess.py, src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: F-66, fix: [src/amcd/pipeline.py, src/amcd/provenance.py], test: [tests/test_stage_cache.py]}
+      - {id: F-69, fix: [src/amcd/provenance.py], test: [tests/test_stage_cache.py]}
+      - {id: F-73, fix: [src/amcd/config.py], test: [tests/test_stage_cache.py]}
+      - {id: F-74, fix: [src/amcd/config.py, src/amcd/training/infer.py, src/amcd/training/trainer.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-35, fix: [src/amcd/config.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-36, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-42, fix: [src/amcd/provenance.py], test: [tests/test_stage_cache.py]}
+      - {id: F-M11, fix: [src/amcd/data/normalization.py, src/amcd/data/preprocess.py], test: [tests/test_stage_cache.py]}
+      - {id: F-69-B4, fix: [src/amcd/provenance.py], test: [tests/test_stage_cache.py]}
+      - {id: RD-101, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: RD-102, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: RD-103, fix: [tests/test_stage_cache.py], test: [tests/test_stage_cache.py]}
+      - {id: RD-105, fix: [src/amcd/pipeline.py, tests/test_stage_cache.py], test: [tests/test_stage_cache.py]}
+      - {id: RD-106, fix: [src/amcd/reporting/tables.py, src/amcd/stats/aggregate.py], test: [tests/test_stage_cache.py]}
+      - {id: F-76, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: F-77, fix: [tests/test_stage_cache.py], test: [tests/test_stage_cache.py]}
+      - {id: F-78, fix: [tests/test_stage_cache.py], test: [tests/test_stage_cache.py]}
+      - {id: F-79, fix: [src/amcd/provenance.py], test: [tests/test_stage_cache.py]}
+      - {id: F-80, fix: [src/amcd/config.py], test: [tests/test_stage_cache.py]}
+      - {id: AC-47, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: AC-48, fix: [src/amcd/reporting/tables.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-46, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-47, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-48, fix: [tests/test_stage_cache.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-49, fix: [src/amcd/provenance.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-50, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-51, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-52, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-53, fix: [tests/test_stage_cache.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-54, fix: [src/amcd/config.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-55, fix: [src/amcd/config.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-56, fix: [src/amcd/config.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-57, fix: [src/amcd/provenance.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-59, fix: [tests/test_stage_cache.py], test: [tests/test_stage_cache.py]}
+      - {id: RR-68, fix: [src/amcd/config.py], test: [tests/test_stage_cache.py]}
+      - {id: F-102, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+  - id: S
+    title: scenes, QC and diagnostics
+    brief: docs/lanes/cycle5-S.md
+    inbox: docs/ledger_inbox/S.md
+    id_block:
+      RD: "225..249"
+      F: "185..209"
+      AC: "150..174"
+      RR: "165..189"
+    owns:
+      - src/amcd/scenes/**
+      - src/amcd/diagnostics/**
+      - tests/test_scene_placement.py
+      - tests/test_min_separation.py
+      - tests/test_invariants.py
+      - tests/test_probe.py
+    rows:
+      - {id: RD-65, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: F-60, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: F-71, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: F-72, fix: [src/amcd/diagnostics/probe.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-44, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: RD-112, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: S-F4, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: S-F5, fix: [src/amcd/scenes/generator.py, tests/test_scene_placement.py], test: [tests/test_scene_placement.py]}
+      - {id: S-F6, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: S-F7, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: AC-51, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: AC-52, fix: [src/amcd/scenes/generator.py, tests/test_scene_placement.py], test: [tests/test_scene_placement.py]}
+      - {id: AC-53, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-60, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-61, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-62, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-63, fix: [src/amcd/diagnostics/probe.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-64, fix: [src/amcd/diagnostics/probe.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-65, fix: [tests/test_scene_placement.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-66, fix: [tests/test_probe.py], test: [tests/test_scene_placement.py]}
+      - {id: RR-67, fix: [src/amcd/scenes/generator.py], test: [tests/test_scene_placement.py]}
+
+# ORDERED (RD-147). The prose resume note is NOT the authority — this is.
+serial_queue:
+  - {id: AC-54, reason: "ITEM 0 — C6 backend renderability, decided as ONE change with AC-55/AC-56"}
+  - {id: AC-55, reason: "ITEM 0 — C6, with AC-54"}
+  - {id: AC-56, reason: "ITEM 0 — C6, with AC-54"}
+  - {id: AC-66, reason: "ITEM 0 — C6, air absorption; AC-54's remedy does not reach it"}
+  - {id: AC-67, reason: "ITEM 0 — C6, the source-derived confirmation and its two caveats"}
+  - {id: RD-144, reason: "ITEM 0 — the absorption convention belongs in the BACKEND's config"}
+  - {id: AC-64, reason: "ITEM 0b — re-measure the truncation index with the artifact RETAINED"}
+  - {id: AC-58, reason: "ITEM 0b — the gain-invariance half needs no render and fails today"}
+  - {id: F-89, reason: "ITEM 0b — C5, with AC-58/AC-64/RD-55"}
+  - {id: RD-55, reason: "ITEM 0b — C5; predicted this at E4 and a real render has now reached it"}
+  - {id: F-99, reason: "ITEM 1 — C1: unbounded pred C50 scored on test_material_shift's own axis"}
+  - {id: F-M2, reason: "ITEM 1 — C7: the caveat column that would flag F-99"}
+  - {id: F-70, reason: "ITEM 1 — C7, prerequisite of AC-38's disclosure"}
+  - {id: AC-42, reason: "ITEM 1 — C1: its own acceptance test fails; F-99 is the live successor"}
+  - {id: F-M7, reason: "ITEM 2 — C8, with F-105"}
+  - {id: F-105, reason: "ITEM 2 — C8"}
+  - {id: F-81, reason: "ITEM 3 — C3, one edit site with F-82/F-100"}
+  - {id: F-82, reason: "ITEM 3 — C3"}
+  - {id: F-100, reason: "ITEM 3 — C3, and it is the chain root"}
+  - {id: RD-107, reason: "ITEM 4 — C2, with the per-backend scope RD-133 requires"}
+  - {id: F-75, reason: "ITEM 4 — C2"}
+  - {id: AC-44, reason: "ITEM 4 — C2, the physics side"}
+  - {id: RD-104, reason: "ITEM 4 — the device.py split RD-107 needs"}
+  - {id: AC-45, reason: "ITEM 5 — C4 false clearance, all five together"}
+  - {id: RD-108, reason: "ITEM 5 — C4"}
+  - {id: S-F1, reason: "ITEM 5 — C4"}
+  - {id: F-101, reason: "ITEM 5 — C4"}
+  - {id: F-M6, reason: "ITEM 5 — C4, narrowed half"}
+  - {id: RD-126, reason: "ITEM 6 — C9 accounting machine, with RD-142/F-103/RD-148/RD-149"}
+  - {id: RD-142, reason: "ITEM 6 — C9"}
+  - {id: F-103, reason: "ITEM 6 — C9"}
+  - {id: RD-148, reason: "ITEM 6 — C9"}
+  - {id: RD-149, reason: "ITEM 6 — C9"}
+  - {id: RD-147, reason: "ITEM 6 — C9, this file's own shape"}
+  - {id: RD-146, reason: "ITEM 6 — C9, repopulate awaiting_re_review"}
+  - {id: RR-80, reason: "ITEM 7 — the inbox-emptying data-loss instruction (already applied; confirm)"}
 
 integrator_queue:
-  - {id: AC-19-R7, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-26, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-26-R6, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-28, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-28-B2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-30, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-36, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-37, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-37-R4, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-38, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-39, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-41, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-42, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-43, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-44, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-45, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-46, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-47, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-48, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-49, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-50, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-51, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-52, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-53, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-54, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-55, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-56, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-57, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-58, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-59, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-60, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-61, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-62, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-63, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-64, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-65, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-66, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-67, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-68, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-69, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-70, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-100, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-101, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-102, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-103, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-105, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-106, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-60, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-63, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-64, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-65, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-66, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-68, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-68-R2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-68-R3, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-69, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-69-B4, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-70, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-71, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-72, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-73, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-74, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-75, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-76, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-77, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-78, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-79, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-80, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-81, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-82, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-83, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-84, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-85, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-86, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-87, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-88, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-89, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-90, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-91, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-92, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-93, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-94, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-95, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-96, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-97, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-98, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-99, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M10, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M11, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M3, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M4, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M5, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M6, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M7, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M8, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M9, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-08, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-100, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-101, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-102, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-103, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-104, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-105, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-106, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-107, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-108, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-109, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-110, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-111, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-112, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-113, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-114, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-115, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-116, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-117, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-118, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-119, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-120, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-121, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-122, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-123, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-124, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-125, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-126, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-127, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-128, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-129, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-130, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-131, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-132, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-133, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-134, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-135, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-136, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-142, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-144, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-145, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-146, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-147, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-148, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-149, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-18, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-20, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-21, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-24, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-33a, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-65, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-66, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-67, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-69, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-93, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-94, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-96, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-97, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-98, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RD-99, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-24, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-32, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-33, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-35, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-36, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-37, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-38, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-42, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-43, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-44, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-45, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-46, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-47, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-48, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-49, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-50, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-51, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-52, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-53, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-54, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-55, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-56, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-57, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-58, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-59, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-60, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-61, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-62, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-63, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-64, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-65, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-66, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-67, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-68, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-69, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-70, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-71, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-72, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-73, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-74, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-75, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-76, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-77, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-78, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-79, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-80, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-81, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-82, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-83, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-84, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-85, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-86, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-87, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: RR-88, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: S-1, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: S-2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: S-F1, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: S-F4, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: S-F5, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: S-F6, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: S-F7, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-18, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-69, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: F-65, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: AC-41, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-32, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-33, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-43, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: AC-50, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-111, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-128, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-129, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: F-M4, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: F-M5, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: F-M8, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: AC-28-B2, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-94, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-97, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-100, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-109, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-110, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: AC-46, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-58, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-113, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: S-2, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: AC-49, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-115, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-118, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-119, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-124, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-125, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: F-83, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: F-97, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: AC-61, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-73, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-79, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-127, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-130, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-131, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-132, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-133, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-134, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-135, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-136, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RD-145, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-81, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-82, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-86, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-87, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
+  - {id: RR-88, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
 
-awaiting_re_review: []
+awaiting_re_review:
+  [RR-24]
+
 raised_against_this_partition: []
