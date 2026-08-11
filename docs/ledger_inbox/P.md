@@ -263,7 +263,146 @@ RD-102 | lane P | minor | OPEN | .git/objects/pack/._pack-*.idx | Every git comm
 
 `research-director` was run **on the plan, before implementation**, per the
 implementation loop; its six findings are RD-93…98 above, all folded into the work
-rather than deferred. `falsifier`, `acoustics-reviewer` and `readability-reviewer`
-have **not** been run on this branch — and a lane-branch review would be a
-self-check regardless (rule 5). The reviewer set that counts is the integrator's,
-over the merged tree.
+rather than deferred.
+
+`falsifier`, `acoustics-reviewer` and `readability-reviewer` were then run over
+the CURRENT state at b992a78 — a **self-check on an unintegrated branch, not a
+clean pass** (rule 5). They raised 22 findings between them. **The lane is NOT
+done**: what follows is what I fixed in response, and what remains OPEN.
+
+### The headline claim was overstated, and I am withdrawing it
+
+My write-up above said the four routes to a cached reported number are closed.
+Four SPECIFIC routes are. The CLASS claim — "a reported number is no longer
+reachable through a cached stage" — **is false**, and the falsifier proved it by
+running the probe I had declined to run: a two-character edit to
+`simulators/dry_run.py` leaves all nine stages `[skip]` at exit 0 while a fresh
+run_dir under the same code reports different CIs (`test_geometry_shift` C50
+`improvement_mean` −0.6815340 cached vs −0.6824248 fresh).
+
+I filed that gap myself as RD-99 and deferred it as a policy call. Two things I
+got wrong in doing so:
+
+1. I scoped it to "simulators/". It is also `scenes/generator.py` (placement and
+   admission sampling) and `simulators/render.py` (QC gates, pruning) — in no
+   stage's scope either.
+2. I missed that `versions.json` is **re-stamped** on the all-cached run with a
+   whole-package `code_version` byte-equal to the fresh run's, and
+   `reporting/tables.py` copies it into `report/`. The canonical provenance
+   channel positively vouches that the new code produced the old numbers. That is
+   worse than the F-53 pattern this cycle was convened to close, and it is the
+   part I had not seen. Filed as **F-75 (blocker)** / **AC-44** and awaiting the
+   policy decision — a re-render under emulation is the cost on the other side.
+
+### Fixed in response (commit follows this write-up)
+
+* **F-76 (major, a regression I introduced)** — giving `report` a fingerprint made
+  cycle-3 `{"fingerprint": null}` sentinels reachable on a path that did
+  `set(None)`, so every pre-b992a78 run_dir died with a bare `TypeError` instead
+  of the actionable "predates fingerprinted caching" message. `_is_done` now
+  treats a recorded `null` as the legacy case. Two regression tests; the fix is
+  generic, so `diagnostics` gaining a fingerprint later cannot repeat it.
+* **F-77 (major)** — my F-66 closure test resolved relative imports off-by-one for
+  a package `__init__.py` and then DROPPED whatever failed to resolve, silently.
+  Measured before: `_amcd_imports("amcd.data")` returned nothing at all, and
+  preprocess's closure did not contain `representations.spectrogram` — the encoder
+  that is F-64's own reproduction. 60 edges were invisible. The walker now anchors
+  relative imports on the package and ASSERTS rather than dropping; `amcd.data`
+  yields 4 modules, preprocess's closure 11 → 15, and it now contains the encoder.
+  **No scope was actually under-declared** (confirmed independently by the
+  falsifier's corrected walker and by the test passing), so this was a broken
+  guard, not a live hole — but it was my docstring claiming more than my test
+  checked, which is precisely F-66 one cycle later. Docstring corrected to say so.
+* **F-78 (major)** — the F-65 guard's stated limit was wrong about the one nested
+  model that matters: `Seeds` is dumped wholesale by NO fingerprint, and the
+  `seeds` probe perturbed only `master`, which moves everything downstream. A new
+  per-aspect seed — invariant #5, and `split_assignment` is the leakage-critical
+  one — was entirely unguarded. Now swept per-seed over `SEED_NAMES`.
+* **F-79 (major)** — `code_version` could hash NOTHING without raising, the exact
+  outcome its own ValueError text exists to prevent, because the existence check
+  sat inside the per-path loop. Two triggers: a scope entry naming an existing
+  `.py`-less directory, and `__pycache__` matched against the ABSOLUTE path so an
+  ancestor of that name collapsed every scope to one constant. `_hashable_sources`
+  now matches relative and raises on an empty directory.
+* **F-80 (minor)** — `_require_configs` checked `base.yaml` only, so a configs root
+  missing `models/`/`representations/`/`simulators/` loaded a VALIDATED Config with
+  empty plugin params and failed later on a pydantic error naming neither. Now
+  checked and named.
+* **AC-47 (minor)** — `STAGE_CODE_SCOPE["eval"]`'s rationale was false: eval does
+  not decode, `infer` does. The scope entry is right and stays; the reason is now
+  the true one (registry-resolved, invisible to the closure test). Same
+  over-claiming class as F-66, in the module whose premise is "that claim is
+  auditable".
+* **AC-46 (minor)** — the `d0b_t30_jnd_frac` exemption now records that it is also
+  the calibration criterion behind the eval-fingerprinted
+  `metric_band_resolvability_margin`.
+* **AC-48 (minor)** — `summary.txt` now prints the threshold's VALUE and unit:
+  `high-variance: EDT below metric_edt_variance_limited_s = 0.15 s`. It named the
+  key symbolically before, and F-65's evidence is that this key was served at 0.15
+  while `config.yaml` stamped 5.0.
+
+**Suite after these fixes: 422 passed, 1 failed** — the failure is still only the
+cross-lane `test_simulator_seam.py` row at the top of this file. Canonical dry run
+still completes, exit 0.
+
+### OPEN, not fixed
+
+* **F-75 / AC-44 (blocker)** — awaiting the policy decision above. Until it is
+  taken, **the cycle's claim must be stated as "for preprocess…report only"**, not
+  as the class claim.
+* **AC-45 (major)** — acoustics-reviewer rates the unfingerprinted `diagnostics`
+  higher than my RD-100 did, and is right about why: the D0b output is a physical
+  VERDICT ("CARRIER CEILING CLEARS … Proceed to E1"), invalidated by nothing, and
+  measured stale under changed `ir_duration`, `ambisonics_order`, ray budgets and
+  `sample_rate`. A stale clearance is a false clearance of the project's own
+  premise. RD-100 should be re-rated major.
+* **RR-46…RR-59 (readability-reviewer)** — largely NOT addressed, and one is a
+  fair hit I should own: **RR-36 is not closed**. I cut four reproduction
+  transcripts and wrote four new ones for the reproductions I ran this cycle, which
+  is the same pattern by the same standard. The abstract-sentence half IS closed
+  (stated once at `STAGE_CODE_SCOPE`). Also unclosed: F-53 still narrated twice,
+  and the RD-41 "report is terminal" rebuttal now appears four times. RR-58
+  (README) is cross-lane.
+
+---
+
+## acoustics-reviewer pass on `lane/P-cycle4` @ b992a78 (self-check, not a clean pass)
+
+Scope: the DECLARATIONS lane P changed (`_eval_fingerprint`, `STAGE_CODE_SCOPE`,
+`STAGE_UPSTREAM`, `FINGERPRINT_EXEMPT_FIELDS`), judged on whether they are
+PHYSICALLY sufficient to keep a room-acoustic metric from being served from cache
+under changed physics. No files modified.
+
+**Confirmed correct (do not re-litigate):**
+
+* Chain-only coverage IS physically sufficient for `ir_duration`, `n_samples`,
+  `ambisonics_order`/`n_channels`, `low_ray_budget`, `high_ray_budget` and
+  `sample_rate`. Measured on a complete run_dir: each perturbation gives
+  `eval=REFUSED  stats=REFUSED  report=REFUSED`, because
+  `Pipeline._effective_fingerprint` (src/amcd/pipeline.py:577-593) recurses the
+  whole ancestor chain from the current config. None of these belongs in eval's
+  own payload; duplicating them would create a second declaration site that can
+  drift from `_render_fingerprint`.
+* Sub-sample `ir_duration` aliasing (`n_samples = int(sr*ir_duration)` truncates)
+  is covered: 3.0 vs 3.000001 leaves `render`/`preprocess` identical but moves
+  `gen-scenes`, and the chain carries it to `eval`.
+* `metric_edt_variance_limited_s` in `_eval_fingerprint` ONLY is right and
+  complete. `stats` reads the boolean column from metrics.parquet
+  (src/amcd/stats/aggregate.py:280-281) and `report` the count from ci_table
+  (src/amcd/reporting/tables.py:48-51); neither reads the config key, and both
+  refuse through the chain.
+* The reported ISO-3382 path is the decoded-waveform path
+  (src/amcd/training/infer.py:93-97 → src/amcd/evaluation/evaluator.py:103-119),
+  not energy directly, and every module `evaluation/` imports is in eval's scope.
+* Both band ladders are config-declared, not hardcoded per call site: the ISO
+  octave centers in configs/base.yaml:190 (`iso_eval_freqs`, fingerprinted at
+  eval) and the third-octave rep ladder in configs/representations/spectrogram.yaml
+  (fingerprinted through `representation.params` at preprocess/train/infer/eval).
+
+```
+AC-44 | acoustics-reviewer | major | OPEN | src/amcd/pipeline.py:82-89 (`_render_fingerprint`), :283 (`STAGE_CODE_SCOPE["preprocess"]`), :322-326; src/amcd/evaluation/evaluator.py:104-110 | CONFIRMS RD-99 FROM THE PHYSICS SIDE, AND WIDENS ITS BLAST RADIUS. `simulators/` is in NO stage's code scope (preprocess names only `simulators/base.py`, deliberately excluding backends) and `_render_fingerprint` carries no `code_version`. eval reads `renders/<scene>/high.npy` as the ISO-3382 REFERENCE leg and `preprocessed/carrier/<scene>.npy` (a copy of the render's low leg) as the baseline leg, so an edit to `simulators/dry_run.py` — the module that synthesises the decay whose T30/EDT/C50 ARE the ground truth, and a file the metric-computation lane owns — changes every reported absolute AND every paired improvement while all nine stages print `[skip] (cached)` at exit 0. Because render is the chain anchor, preprocess/train/infer/eval/stats/report are all unprotected against it: this is not "the renders are stale", it is "the reference the improvement is measured against is stale". | Decide RD-99 as a policy call (scope `render` to `simulators/`, accepting a re-render on backend edits), or declare the exemption explicitly with the physical consequence stated. CONFIRMING TEST: in a scratch copy of the package, halve the dry_run synthetic IR's decay constant (T60/2), re-run `amcd all` on an existing run_dir — expect nine `[skip]`, exit 0, and `metrics.parquet` `high_ref` for T30 byte-identical to the old decay's.
+AC-45 | acoustics-reviewer | major | OPEN | src/amcd/pipeline.py:337 (`STAGE_FINGERPRINT["diagnostics"] = None`), :400-406 (`_DIAGNOSTICS_EXEMPTION`); src/amcd/diagnostics/probe.py:30-34, :351-353, :386-394 | RD-100 IS FILED AT THE WRONG SEVERITY AND THE EXEMPTION UNDERSTATES THE EXPOSURE. The D0b output is not a threshold report, it is a PHYSICAL VERDICT — "CARRIER CEILING CLEARS … Proceed to E1" vs "CARRIER BOTTLENECK" — produced by comparing measured T30/EDT/C50 residuals against JND tolerances. With no fingerprint, `_is_done` returns True on the bare sentinel, so NOTHING invalidates it. Measured on a complete run_dir: `diagnostics=SKIP(cached)` under doubled `ir_duration`, changed `ambisonics_order`, changed `low_ray_budget`/`high_ray_budget` and changed `sample_rate` — every one of which changes the residuals being compared. `probe.py` also imports `evaluation.room_acoustic` with no `code_version`, so a change to the Schroeder window or the octave filter leaves the verdict standing too. The five `d0b_*`/`d0a_*` exemptions read as "five thresholds at risk"; the true exposure is every acoustic key plus the metric code. A stale CARRIER CEILING CLEARS is a false clearance of the project's own physical premise. | Wire `diagnostics` with `code_version(("diagnostics", "evaluation", "representations", "data"))` + the d0a/d0b keys + `iso_eval_freqs`/`metric_onset_rel_db`/`metric_band_resolvability_margin`/`sample_rate`, chained to `preprocess`. Until then the exemption text should name the full exposure, not only the five fields. CONFIRMING TEST: run `amcd all`, then re-run `amcd diagnostics` with `ir_duration` doubled — `d0b_oracle.json` is unchanged while `config.yaml` stamps the new record length.
+AC-46 | acoustics-reviewer | minor | OPEN | src/amcd/pipeline.py:436 (`FINGERPRINT_EXEMPT_FIELDS["d0b_t30_jnd_frac"]`); configs/base.yaml:203-207 | The exemption says `d0b_t30_jnd_frac` is "Consumed only by `diagnostics`". It is also the CALIBRATION CRITERION for `metric_band_resolvability_margin`, which IS an eval fingerprint key: base.yaml states margin 2.0 was chosen because "the 500 Hz T30 estimator's bias … lands where the bias crosses this project's own d0b_t30_jnd_frac of 0.05". No code path, so no cache hole — but moving the JND without re-deriving the margin leaves an eval-fingerprinted constant justified by a number that no longer exists, and nothing in the exemption says so. | Extend the re-entry condition: "…and if this moves, `metric_band_resolvability_margin` must be re-derived (configs/base.yaml:203-207)". No code change.
+AC-47 | acoustics-reviewer | minor | OPEN | src/amcd/pipeline.py:291-294 (`STAGE_CODE_SCOPE["eval"]` rationale) | The stated reason is false as written: "`representations` is in scope because eval decodes before measuring". eval does NOT decode — `infer` does (src/amcd/training/infer.py:93-97 writes `<scene>_decoded_ir.npy`), and eval loads that array (evaluator.py:103,108). `evaluation/` imports nothing from `representations`. The SCOPE ENTRY IS FINE AND SHOULD STAY (conservative direction, and the rep is loaded BY NAME through the registry, which provenance.py:110-118 says static analysis cannot see) — the RATIONALE is what is wrong, and F-66 was itself an over-claiming provenance docstring, so this is the same class one cycle later, in the module whose premise is "that claim is auditable". | Reword to the true reason: the decoded waveform eval measures is produced by the representation, which is registry-resolved and therefore invisible to the closure test, so the scope is a declared judgement. Docstring only.
+AC-48 | acoustics-reviewer | minor | OPEN | src/amcd/reporting/tables.py:138-139, :48-51, :72-81 | UNIT/REFERENCE DISCLOSURE ON A REPORTED ACOUSTIC QUANTITY. The Caveats legend names `metric_edt_variance_limited_s` symbolically and never renders its value or unit, so a reader of summary.txt sees "3 high-variance" with no way to know whether the bound was 0.15 s or 5.0 s — and F-65's own evidence is that this exact key was served at 0.15 while config.yaml stamped 5.0. The CI label two blocks up (tables.py:84) does render its config value numerically (RR-17's rule), so the file is inconsistent with itself. Secondarily, the `Imp mean` / CI / MDES columns carry no unit while their rows mix seconds (T30, EDT) and dB (C50) — `paired_improvement` returns the metric's own units (evaluation/metric_row.py:119-127). | One f-string: `f"  high-variance: EDT below metric_edt_variance_limited_s = {config.metric_edt_variance_limited_s:g} s, where …"`, and a unit column or per-row unit suffix for the improvement columns. Lane-P-owned file; not part of the declaration work, raised because the reviewer judges CURRENT state.
+```

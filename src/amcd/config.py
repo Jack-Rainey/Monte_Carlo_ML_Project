@@ -78,17 +78,34 @@ def _require_configs() -> None:
     layer, so there is no default to degrade to — the only useful response is to
     say where we looked and what would fix it.
     """
-    if _BASE_YAML.is_file():
-        return
-    tried = "\n".join(f"    {c / 'base.yaml'}" for c in _CONFIG_ROOT_CANDIDATES)
-    raise FileNotFoundError(
-        "amcd cannot find `configs/base.yaml`, which holds every default a run "
-        f"is built from.\n  Tried:\n{tried}\n"
-        "  Run from a source checkout (where `configs/` sits beside `src/`), or "
-        "install a build that ships `configs/` as package data. There is no "
-        "built-in fallback: a value that governs an experiment never has a "
-        "default in Python."
-    )
+    if not _BASE_YAML.is_file():
+        tried = "\n".join(f"    {c / 'base.yaml'}" for c in _CONFIG_ROOT_CANDIDATES)
+        raise FileNotFoundError(
+            "amcd cannot find `configs/base.yaml`, which holds every default a run "
+            f"is built from.\n  Tried:\n{tried}\n"
+            "  Run from a source checkout (where `configs/` sits beside `src/`), or "
+            "install a build that ships `configs/` as package data. There is no "
+            "built-in fallback: a value that governs an experiment never has a "
+            "default in Python."
+        )
+    # The plugin params directories too, not just base.yaml (F-80). A root holding
+    # base.yaml but none of these — precisely the half-finished "ship configs/ as
+    # package data" the message above recommends — used to win the candidate race
+    # and then load a VALIDATED Config with `representation.params={}` and
+    # `simulator.params={}`, because `_attach_params_block` cannot distinguish a
+    # missing DIRECTORY from "this registered plugin needs no params file". The run
+    # died later on a pydantic missing-field error naming neither, which is the
+    # confusion F-73 exists to end.
+    missing = [d.name for d in (_MODELS_DIR, _REPS_DIR, _SIMS_DIR) if not d.is_dir()]
+    if missing:
+        raise FileNotFoundError(
+            f"amcd found `base.yaml` in {_CONFIGS_DIR} but not the plugin parameter "
+            f"director{'y' if len(missing) == 1 else 'ies'} {missing}. Each plugin's "
+            f"concrete parameters live beside it there, and a missing directory is "
+            f"indistinguishable from a parameter-free plugin, so the run would load "
+            f"with empty params and fail later without naming this. Install a build "
+            f"that ships the whole `configs/` tree, or run from a source checkout."
+        )
 
 
 _CONFIGS_DIR = _resolve_configs_dir()

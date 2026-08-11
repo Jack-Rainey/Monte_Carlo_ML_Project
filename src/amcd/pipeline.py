@@ -287,11 +287,14 @@ STAGE_CODE_SCOPE: dict[str, tuple[str, ...]] = {
     # Loads the checkpoint, decodes through the representation, and denormalizes
     # every predicted leg — hence `data` (F-66).
     "infer": ("training", "models", "data", "representations"),
-    # The stage whose output IS the research claim. `representations` is in scope
-    # because eval decodes before measuring; `data` because it denormalizes every
-    # reported leg (F-66). `data` was previously omitted from both this scope and
-    # infer's, and was masked only by `data` being in TRAIN's scope so the chain
-    # refused upstream first — a coincidence of ordering, not a guarantee.
+    # The stage whose output IS the research claim. `data` because it denormalizes
+    # every reported leg (F-66) — previously omitted here and from infer's scope,
+    # masked only by `data` being in TRAIN's scope so the chain refused upstream
+    # first, a coincidence of ordering rather than a guarantee.
+    # `representations` is a DECLARED JUDGEMENT, not an import: eval measures the
+    # decoded waveform that `infer` wrote, and the representation that produced it
+    # is resolved by NAME through the registry, which the closure test cannot see
+    # (AC-47 corrected an earlier claim here that "eval decodes before measuring").
     "eval": ("evaluation", "representations", "data"),
     # Computes the reported CIs and MDES over `evaluation.metric_row`'s paired
     # improvements, which is why `evaluation` is in scope and not just `stats`.
@@ -433,7 +436,14 @@ FINGERPRINT_EXEMPT_FIELDS: dict[str, str] = {
     ),
     "d0a_gap_large_db": _DIAGNOSTICS_EXEMPTION,
     "d0a_gap_small_db": _DIAGNOSTICS_EXEMPTION,
-    "d0b_t30_jnd_frac": _DIAGNOSTICS_EXEMPTION,
+    "d0b_t30_jnd_frac": _DIAGNOSTICS_EXEMPTION + (
+        " ALSO: this JND is the calibration criterion behind "
+        "`metric_band_resolvability_margin`, which IS an eval fingerprint key — "
+        "base.yaml derives the margin from where the 500 Hz T30 estimator's bias "
+        "crosses 0.05. No code path, so no cache hole, but moving this without "
+        "re-deriving the margin leaves a fingerprinted constant justified by a "
+        "number that no longer exists (AC-46)."
+    ),
     "d0b_edt_jnd_frac": _DIAGNOSTICS_EXEMPTION,
     "d0b_c50_jnd_db": _DIAGNOSTICS_EXEMPTION,
 }
@@ -613,11 +623,21 @@ class Pipeline:
             recorded = json.loads(sentinel.read_text())
             found = recorded["fingerprint"]
         except (json.JSONDecodeError, TypeError, KeyError):
+            found = None
+        # A RECORDED `null` is the realistic legacy shape, not a corrupt file: it is
+        # exactly what `_mark_done` wrote for a stage that declared no fingerprint
+        # at the time. So it must reach the same actionable message as a sentinel
+        # with the key absent — before F-75 it fell through to `_diff_fingerprints`,
+        # which did `set(None)` and raised a bare TypeError with a traceback. This
+        # recurs for EVERY stage that gains a fingerprint later (`diagnostics` next,
+        # RD-100/AC-45), so it is guarded here rather than at the call site.
+        if found is None:
             raise RuntimeError(
                 f"Stage {stage!r} has a cached sentinel with no fingerprint "
-                f"({sentinel}). It predates fingerprinted caching, so whether its "
-                f"artifacts match the current config cannot be established. "
-                f"Re-run with --force to rebuild, or use a fresh --run-dir."
+                f"({sentinel}). It predates fingerprinted caching for this stage, so "
+                f"whether its artifacts match the current config cannot be "
+                f"established. Re-run with --force to rebuild {stage!r} (this "
+                f"discards its existing artifacts), or use a fresh --run-dir."
             ) from None
 
         if found != expected:

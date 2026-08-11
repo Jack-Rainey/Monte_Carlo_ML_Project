@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from amcd.config import Config
+from amcd.config import SEED_NAMES, Config
 from amcd.pipeline import (
     FINGERPRINT_EXEMPT_FIELDS,
     STAGE_CODE_SCOPE,
@@ -536,6 +536,11 @@ class TestDeclaredScopeCoversWhatTheStageImports:
     plugin registry loads `representations`, `models` and `simulators` BY NAME, so
     those edges are invisible here and remain a declared judgement. Over-declaring
     is therefore allowed (and several scopes do); under-declaring is what fails.
+
+    It also cannot check a dependency this walker fails to RESOLVE — so the walker
+    now asserts rather than dropping, because a silently shrinking closure makes
+    the test pass for the wrong reason (F-77). That is the same failure this class
+    exists to prevent, one level up: the guard claiming more than it checks.
     """
 
     @staticmethod
@@ -551,18 +556,30 @@ class TestDeclaredScopeCoversWhatTheStageImports:
 
     @classmethod
     def _amcd_imports(cls, module: str) -> set[str]:
-        """Every `amcd.*` module `module` imports, absolute or relative."""
+        """Every `amcd.*` module `module` imports, absolute or relative.
+
+        Relative imports are anchored on the module's PACKAGE, and a package's
+        `__init__.py` is its own anchor while a plain module's anchor is its
+        parent. Getting that wrong is not a near-miss: resolving `from .foo import
+        x` inside `amcd/data/__init__.py` against `amcd` instead of `amcd.data`
+        yields a module that does not exist, which then vanished through the
+        resolvability filter below and took the whole subtree out of the closure
+        (F-77 — `amcd.representations`'s four imports, including the encoder that
+        is F-64's own reproduction, were invisible).
+        """
         path = cls._module_file(module)
         if path is None:
             return set()
         parts = module.split(".")
+        anchor = parts if path.name == "__init__.py" else parts[:-1]
         found: set[str] = set()
+        unresolved: list[str] = []
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.Import):
                 found.update(a.name for a in node.names if a.name.startswith("amcd"))
             elif isinstance(node, ast.ImportFrom):
                 if node.level:  # relative: resolve against this module's package
-                    base = parts[: len(parts) - node.level]
+                    base = anchor[: len(anchor) - (node.level - 1)]
                     prefix = base + (node.module.split(".") if node.module else [])
                 elif node.module and node.module.startswith("amcd"):
                     prefix = node.module.split(".")
@@ -571,9 +588,20 @@ class TestDeclaredScopeCoversWhatTheStageImports:
                 if not prefix or prefix[0] != "amcd":
                     continue
                 stem = ".".join(prefix)
+                if cls._module_file(stem) is None:
+                    # The module an import statement names MUST resolve. Dropping
+                    # it silently is how F-77 hid 60 edges.
+                    unresolved.append(f"{module} -> {stem}")
+                    continue
                 found.add(stem)
-                # `from .base import X` — X may itself be a module, not a name.
+                # `from .base import X` — X may be a submodule or an ordinary name.
+                # Unresolvable ones here are names, which is expected, so these are
+                # filtered rather than reported.
                 found.update(f"{stem}.{a.name}" for a in node.names)
+        assert not unresolved, (
+            f"the import walker could not resolve {unresolved}; it is under-"
+            f"reporting the closure, so this test is not checking what it claims"
+        )
         return {m for m in found if cls._module_file(m) is not None}
 
     @classmethod
@@ -660,12 +688,18 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
     inside `representation.params`, and a name match would pass while the
     fingerprint never moves.
 
-    LIMIT, stated rather than implied: this proves coverage at TOP-LEVEL `Config`
-    field granularity. A new leaf inside a nested model (e.g. a new `SplitSpec`
-    field) is covered only because `_preprocess_fingerprint` dumps `SplitSpec`
-    wholesale — `_gen_scenes_fingerprint` deliberately dumps it selectively
-    (`count`/`seed`/`axes`, F-50). This test would not catch a nested leaf that
-    both dumps missed.
+    LIMIT, stated rather than implied: the field sweep proves coverage at
+    TOP-LEVEL `Config` field granularity. A new leaf inside a nested model is
+    covered only where some fingerprint dumps that model WHOLESALE — true of
+    `SplitSpec` (via `_preprocess_fingerprint`), `Scenes`, `SimulatorSpec`,
+    `ModelSpec` and `RepresentationSpec`.
+
+    `Seeds` is the exception, and it is swept separately below. NO fingerprint
+    dumps it wholesale — every stage names individual leaves (`config.seed(...)`)
+    — so perturbing `seeds.master` moves everything downstream and would let a new
+    per-aspect seed pass unguarded (F-78). That is the worst place to have a blind
+    spot: per-aspect seeds are invariant #5, and `split_assignment` is the
+    leakage-critical one.
     """
 
     #: field → a value differing from the tiny config's, chosen to satisfy that
@@ -738,6 +772,25 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
             f"declare it in FINGERPRINT_EXEMPT_FIELDS with a reason."
         )
 
+    @pytest.mark.parametrize("seed_name", SEED_NAMES)
+    def test_perturbing_each_named_seed_invalidates_at_least_one_stage(
+        self, seed_name: str
+    ) -> None:
+        """Every per-aspect seed individually, not just `master` (F-78).
+
+        `Seeds` is dumped by no fingerprint, so this is the only thing standing
+        between a newly appended `SEED_NAMES` entry and a stochastic aspect whose
+        change invalidates nothing.
+        """
+        base = self._all_fingerprints(tiny_config())
+        perturbed = self._all_fingerprints(tiny_config(seeds={seed_name: 4242}))
+        moved = [stage for stage in base if base[stage] != perturbed[stage]]
+        assert moved, (
+            f"seeds.{seed_name} moved no stage fingerprint. A run that differs in "
+            f"this aspect is a different run, so it must invalidate the stage that "
+            f"consumes it — name it in that stage's fingerprint via config.seed()."
+        )
+
     def test_the_edt_disclosure_threshold_invalidates_eval(self) -> None:
         """The specific key F-65 was raised about."""
         assert STAGE_FINGERPRINT["eval"](tiny_config()) != STAGE_FINGERPRINT["eval"](
@@ -750,6 +803,53 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
                 f"exemption for {field!r} must say why it is absent today AND what "
                 f"would make it non-exempt"
             )
+
+
+class TestALegacySentinelIsRefusedActionablyNotWithATraceback:
+    """F-76: giving `report` a fingerprint made `{"fingerprint": null}` sentinels
+    reachable, and they crashed with a bare `TypeError` from `set(None)` instead of
+    the actionable "predates fingerprinted caching" message.
+
+    Generic, not a one-off migration wrinkle: it recurs for every stage that gains
+    a fingerprint later, `diagnostics` being the next candidate (RD-100/AC-45).
+    """
+
+    def _run_dir_with_a_legacy_report_sentinel(
+        self, tmp_path: Path, payload: dict
+    ) -> Pipeline:
+        """A run_dir whose chain is intact and whose `report.done` is cycle-3 shaped.
+
+        The upstream sentinels must be real, or `_is_done` refuses on the chain
+        before it ever reads report's own fingerprint — which is what the first
+        version of this test actually measured.
+        """
+        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        for stage in ("gen-scenes", "render", "preprocess", "train", "infer",
+                      "eval", "stats"):
+            pipe._mark_done(stage)
+        sentinel = _sentinel(tmp_path, "report")
+        sentinel.parent.mkdir(parents=True, exist_ok=True)
+        sentinel.write_text(json.dumps(payload))
+        return pipe
+
+    def test_a_null_recorded_fingerprint_gets_the_actionable_message(
+        self, tmp_path: Path
+    ) -> None:
+        # Exactly what cycle-3 `_mark_done` wrote for a stage with no fingerprint.
+        pipe = self._run_dir_with_a_legacy_report_sentinel(
+            tmp_path, {"completed_at": 1.0, "fingerprint": None}
+        )
+        with pytest.raises(RuntimeError, match="predates fingerprinted caching"):
+            pipe._is_done("report")
+
+    def test_a_sentinel_missing_the_key_entirely_is_treated_the_same(
+        self, tmp_path: Path
+    ) -> None:
+        pipe = self._run_dir_with_a_legacy_report_sentinel(
+            tmp_path, {"completed_at": 1.0}
+        )
+        with pytest.raises(RuntimeError, match="predates fingerprinted caching"):
+            pipe._is_done("report")
 
 
 class TestTheCacheKeyDescribesTheSourceNotTheHost:

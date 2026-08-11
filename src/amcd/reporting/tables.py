@@ -135,7 +135,12 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         "  this split's CI pools improvements computed over DIFFERENT band sets (F-62).",
         "  pred-unresolved: the model produced no measurable value in a band the physical",
         "  legs resolve; the physical legs keep their own values (AC-25).",
-        "  high-variance: EDT below metric_edt_variance_limited_s, where the ESTIMATOR's",
+        # The VALUE, not just the key name (AC-48). A reader seeing "3 high-variance"
+        # cannot judge it without the bound, and F-65's own evidence is that this
+        # key was served at 0.15 while config.yaml stamped 5.0. The CI label above
+        # already renders its config value numerically; this now matches it.
+        f"  high-variance: EDT below metric_edt_variance_limited_s = "
+        f"{config.metric_edt_variance_limited_s:g} s, where the ESTIMATOR's",
         "  sd is 24-31 % of T60 — a scored value, not a precise one (AC-27/RD-78).",
         "=" * 70,
     ]

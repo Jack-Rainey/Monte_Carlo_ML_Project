@@ -70,14 +70,31 @@ def _hashable_sources(target: Path) -> list[Path]:
       <sha> → <sha>` diff naming no leaf — leaving `--force` as the only remedy,
       which is exactly the compliance failure the scoping rationale exists to
       avoid. `evaluation/` already filters `._` elsewhere; this glob did not.
-    * `__pycache__` — build output, not source.
+    * `__pycache__` — build output, not source. Matched against the path RELATIVE
+      to `target`, never the absolute one: an ancestor directory that happens to be
+      named `__pycache__` (a checkout under a build tree, a packaging temp dir)
+      would otherwise exclude every file and collapse every scope to one constant.
+
+    Raises if a directory yields nothing, for the reason `code_version`'s own
+    ValueError gives: a scope entry that hashes to a constant silently stops
+    protecting the stage, and "the directory exists but holds no `.py`" reaches
+    that outcome without ever naming a missing path (F-79).
     """
     if not target.is_dir():
         return [target]
-    return sorted(
+    found = sorted(
         p for p in target.rglob("*.py")
-        if not p.name.startswith("._") and "__pycache__" not in p.parts
+        if not p.name.startswith("._")
+        and "__pycache__" not in p.relative_to(target).parts
     )
+    if not found:
+        raise ValueError(
+            f"code_version scope entry {target} is a directory containing no "
+            f"hashable .py source. It would contribute nothing to the hash, so the "
+            f"stage would keep serving cached artifacts under changed code. Name a "
+            f"module or a subpackage that holds source."
+        )
+    return found
 
 
 def code_version(scope: tuple[str, ...]) -> str:
