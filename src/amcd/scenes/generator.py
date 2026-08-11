@@ -10,6 +10,13 @@ is a config edit, not a code change.
 A generated scene carries its target split name in `split_regime` ("id" for the
 id pool, else the shift split name) so data/splits.py can route it with no
 name mapping.
+
+The stage's second canonical output is `placement_report.json`: per-split
+placement accounting plus three validity blocks — diffuse-field (AC-21),
+record-length (AC-22) and ISO 3382-1 §5.3 distance (AC-30) — and it enforces the
+record-length gate, which can abort the run. A geometry family declaring
+`characterization: none` is not an enclosure, so it is excluded from all three
+blocks and carries a reason instead of a number (RD-64).
 """
 from __future__ import annotations
 
@@ -24,11 +31,15 @@ from ..config import Config, Margins, PlacementRegime
 from ..runtime import Verbosity, emit
 from ..simulators.base import SceneSpec, simulator_min_separation
 
-#: c·SABINE_K, which is 24·ln10 by SABINE_K's own definition (`amcd.acoustics`).
-#: The ISO 3382-1 §5.3 minimum measurement distance d_min = 2·sqrt(V/(c·T60)) is
-#: therefore free of the speed of sound in BOTH its Sabine and its Eyring form —
-#: substituting either T60 leaves c only inside this product, and the volume
-#: cancels with it. No speed-of-sound value appears in this module (AC-30).
+#: c·SABINE_K — the only place either appears in the ISO 3382-1 §5.3 minimum
+#: measurement distance d_min = 2·sqrt(V/(c·T60)). Substituting either T60 leaves
+#: both inside this product and cancels the volume, so d_min needs neither
+#: separately (AC-30).
+#:
+#: Sabine's constant is exactly 24·ln10/c, but `acoustics.SABINE_K` ships the
+#: rounded 0.161 — so this assumes c = 343.24 m/s rather than being independent of
+#: c, and d_min runs a constant −0.035 % against one recomputed from this module's
+#: own published `t60_sabine_s` at c = 343. Stated, not claimed away (AC-45).
 _C_TIMES_SABINE_K = 24.0 * math.log(10.0)
 
 
@@ -339,7 +350,7 @@ def _room_acoustics(
 
     # ISO 3382-1 §5.3 minimum measurement distance (AC-30): d_min = 2·sqrt(V/(c·T60)),
     # which reduces to 2·sqrt(αS/(c·K)) for Sabine and the same with −ln(1−α) in place
-    # of α for Eyring — volume-independent, and free of c (see _C_TIMES_SABINE_K).
+    # of α for Eyring — volume-independent (constant and caveat: _C_TIMES_SABINE_K).
     # Reported and counted rather than enforced: the criterion is PER SCENE, varying
     # with each scene's own absorption and surface, while the config declares ONE
     # global placement floor, so the floor cannot satisfy it everywhere. The
@@ -423,20 +434,28 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     is UNSCORED, never passed.
     """
     corner = config.worst_case_t60()
-    emit(
-        verbosity, "progress",
-        f"  Declared-support corner: Sabine T60 {corner['t60_sabine_s']:.2f} s "
-        f"({corner['geometry_family']} {corner['dims_m']} m at alpha "
-        f"{corner['absorption']}) vs ir_duration {corner['ir_duration_s']:.2f} s"
-        + ("" if corner["covered_by_record"] else "  — NOT covered by the record"),
-    )
+    if corner["t60_sabine_s"] is None:
+        # No family declares `characterization: sabine`, so there is no closed-form
+        # decay corner to disclose — the same config RD-94's gate warning is about,
+        # and the one path that reached this line with nothing to format.
+        emit(
+            verbosity, "progress",
+            f"  Declared-support corner: UNSCORED — {corner['uncharacterized_reason']} "
+            f"(families skipped: {', '.join(corner['skipped_families'])})",
+        )
+    else:
+        emit(
+            verbosity, "progress",
+            f"  Declared-support corner: Sabine T60 {corner['t60_sabine_s']:.2f} s "
+            f"({corner['geometry_family']} {corner['dims_m']} m at alpha "
+            f"{corner['absorption']}) vs ir_duration {corner['ir_duration_s']:.2f} s"
+            + ("" if corner["covered_by_record"] else "  — NOT covered by the record"),
+        )
 
     limit = config.scenes.max_t60_over_ir_duration_frac
-    # (over-limit count, scenes SCORED, scenes ATTEMPTED) per split. An
-    # uncharacterized scene (RD-64) carries no `t60_exceeds_ir_duration`, so it
-    # leaves the denominator here exactly as `_flag_counts` already drops it from
-    # the reported fraction (F-71). `n_uncharacterized` is emitted only when
-    # nonzero, so its absence means every scene in the split was scored.
+    # (over-limit count, scenes SCORED, scenes ATTEMPTED) per split. `_flag_counts`
+    # emits `n_uncharacterized` only when nonzero, so its absence here means every
+    # scene in the split was scored — that contract is what the `.get` relies on.
     per_split = {}
     for name, entry in report.items():
         block = entry["t60_over_ir_duration"]
@@ -467,9 +486,8 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     total = sum(scored for _, scored, _ in per_split.values())
     attempted_total = sum(attempted for _, _, attempted in per_split.values())
     if not total:
-        # Scenes exist but none is characterized: the gate has nothing to measure,
-        # and falling through would pass silently — F-71's defect one level up, at
-        # the outdoor/partially-open config the RD-64 seam exists to enable (RD-94).
+        # Falling through here would be a silent pass over a gate that measured
+        # nothing (RD-94).
         if attempted_total:
             emit(verbosity, "warning",
                  f"  WARNING: the record-length gate scored 0 of {attempted_total} "
@@ -516,13 +534,10 @@ def _flag_counts(room_stats: list[dict], flags: tuple[str, ...], **context) -> d
     domain" and "one scene is" are very different disclosures, and the flag alone
     cannot tell them apart (AC-21/AC-22).
     """
-    # An uncharacterized scene (RD-64) has no closed-form quantities, so it cannot
-    # be counted for or against a diffuse-field flag. Excluded from BOTH numerator
-    # and denominator, and the exclusion is itself reported — a fraction whose
-    # denominator silently shrank is exactly the silent drop the project forbids.
-    #
-    # `n_uncharacterized` is emitted ONLY when nonzero, so its absence in a report
-    # entry means every scene in that split was characterized. That is the contract
+    # Uncharacterized scenes leave BOTH numerator and denominator — see
+    # `_scene_is_characterized` — and the exclusion is itself reported, because a
+    # fraction whose denominator silently shrank is the drop this project forbids.
+    # `n_uncharacterized` is emitted ONLY when nonzero; that is the contract
     # `_disclose_and_gate_record_length` reads to derive the gate's denominator.
     modelled = [r for r in room_stats if _scene_is_characterized(r, flags)]
     n_uncharacterized = len(room_stats) - len(modelled)

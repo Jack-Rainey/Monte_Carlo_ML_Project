@@ -12,8 +12,9 @@ run, because that is the only state in which the defect is visible: on a complet
 run the drop lists are empty and scored == attempted everywhere.
 
 The probe's F-45 tests live in `tests/test_dataset_integrity.py`
-(`TestD0bEnumeratesDeclaredSplits`) and are lane P's this cycle. Probe coverage
-split across two files is a one-cycle cost — see `docs/ledger_inbox/S.md` (RD-83).
+(`TestD0bEnumeratesDeclaredSplits`). Probe coverage split across two files is a
+known, temporary cost recorded as RD-83 in `docs/review_ledger.md`; consolidate
+here when that row is taken up.
 """
 from __future__ import annotations
 

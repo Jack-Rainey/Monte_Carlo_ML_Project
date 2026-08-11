@@ -5,10 +5,17 @@ config says), RD-32 (the RI overlay resolves to pure count mode despite YAML's
 inability to delete keys), RD-36 (unconstrained configs keep their exact RNG
 stream) and RD-37 (joint resampling + recorded acceptance rates).
 
+The second half of the file covers what the record-length gate SCORES and what it
+DISCLOSES: F-71 (uncharacterized scenes leave the gate's denominator), RD-65 (the
+per-split over-limit warning), RD-94 (a gate that scored nothing is unscored, not
+passed), RD-97 (the derived denominator is pinned to the published one) and AC-30
+(the realized shortfall against ISO 3382-1 §5.3's minimum distance).
+
 The load-bearing property here is that a config CANNOT quietly mean something
 other than it says: mixed sizing modes, colliding split seeds, inert overrides
 and unreachable placement constraints all raise.
 """
+import itertools
 import json
 from pathlib import Path
 
@@ -475,7 +482,10 @@ class TestGenerationPlan:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Cycle 4, lane S: what the record-length gate scores, and what it discloses.
+# The record-length gate: what it scores, and what it discloses
+# (F-71 / RD-65 / RD-94 / RD-97), plus the ISO 3382-1 §5.3 distance disclosure
+# (AC-30 / AC-46).
+#
 # Every test below constructs the population in which the defect is VISIBLE — a
 # healthy run has no uncharacterized scenes at all, so none of these fire on one.
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -649,6 +659,30 @@ class TestPerSplitOverLimitWarning:
         assert "UNSCORED, not passed" in warnings
         assert "0 of 3 scenes" in warnings
 
+    def test_the_same_config_survives_the_real_generation_path(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """The test above builds the report by hand, so it never exercised the
+        corner disclosure — which reached `f"{None:.2f}"` and raised TypeError
+        before RD-94's warning could be emitted. `Config.worst_case_t60` returns a
+        reasoned None for a config with no `sabine` family, which is the very
+        config RD-94 is about, so the warning was unreachable on it."""
+        cfg = tiny_config(scenes={"geometry_families": {
+            "shoebox": {"dims": [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]],
+                        "characterization": "none"},
+            "corridor": {"dims": [[15.0, 30.0], [1.5, 3.0], [2.4, 3.5]],
+                         "characterization": "none"}}})
+        run_gen_scenes(cfg, tmp_path, QUIET)
+        warnings = capsys.readouterr().err
+
+        assert "UNSCORED, not passed" in warnings
+        report = json.loads(
+            (tmp_path / "scenes" / "placement_report.json").read_text()
+        )
+        assert all(
+            e["t60_over_ir_duration"]["n_scenes"] == 0 for e in report.values()
+        )
+
 
 class TestIsoMinimumDistanceDisclosure:
     """AC-30: the config declares ONE global placement floor, but ISO 3382-1 §5.3's
@@ -663,10 +697,44 @@ class TestIsoMinimumDistanceDisclosure:
             alpha_limit=0.5, ir_duration_s=10.0, characterization="sabine",
         )
 
-    def test_the_declared_support_corners_reproduce(self) -> None:
-        """base.yaml's shoebox family, at its own extremes. These are the numbers
-        AC-30 verified by hand; d_min = 2*sqrt(V/(c*T60)) is volume-independent
-        once T60 is substituted, and free of the speed of sound entirely."""
+    @staticmethod
+    def _declared_support(cfg: Config) -> dict[str, tuple[float, float]]:
+        """Sweep every declared geometry x material corner, the way
+        `Config.worst_case_t60` sweeps them for the T60 corner.
+
+        DERIVED from the config, never hardcoded (AC-46): AC-30's own [0.41, 5.16] m
+        was computed over the `mixed` regime alone, so it missed
+        `ceiling_absorptive` (alpha up to 0.98) on the same shoebox family — and a
+        test that restated the literals could not see the omission.
+        """
+        out: dict[str, list[float]] = {"sabine": [], "eyring": []}
+        for spec in cfg.scenes.geometry_families.values():
+            if spec.characterization != "sabine":
+                continue
+            for dims in itertools.product(*[(a[0], a[1]) for a in spec.dims]):
+                for regime in cfg.scenes.material_regimes.values():
+                    for alpha in regime.absorption:
+                        room = TestIsoMinimumDistanceDisclosure._d_min(dims, alpha)
+                        out["sabine"].append(room["iso_min_distance_sabine_m"])
+                        out["eyring"].append(room["iso_min_distance_eyring_m"])
+        return {k: (min(v), max(v)) for k, v in out.items()}
+
+    def test_the_declared_support_spans_every_declared_material_regime(self) -> None:
+        """base.yaml declares `mixed` [0.05, 0.80] AND `ceiling_absorptive`
+        [0.85, 0.98] over the same shoebox family, and `test_material_shift`
+        selects the second. The support is the union, not one regime's span."""
+        support = self._declared_support(Config.load(Path("configs/base.yaml")))
+
+        assert support["sabine"] == pytest.approx((0.412, 5.712), abs=0.005)
+        assert support["eyring"] == pytest.approx((0.417, 11.413), abs=0.005)
+        assert support["sabine"][1] > 5.16, (
+            "5.16 m is the `mixed` regime's ceiling (alpha 0.80), not the declared "
+            "support's — ceiling_absorptive reaches alpha 0.98 (AC-46)"
+        )
+
+    def test_the_individual_corners_still_reproduce(self) -> None:
+        """AC-30's three hand-checked numbers, which are correct as far as they go —
+        they are corners of the `mixed` regime, not of the declared support."""
         assert self._d_min((3.0, 3.0, 2.4), 0.05)["iso_min_distance_sabine_m"] == \
             pytest.approx(0.41, abs=0.005)
         assert self._d_min((12.0, 10.0, 5.0), 0.05)["iso_min_distance_sabine_m"] == \
@@ -675,19 +743,21 @@ class TestIsoMinimumDistanceDisclosure:
             pytest.approx(5.16, abs=0.005)
 
     def test_the_declared_floor_sits_near_the_bottom_of_that_range(self) -> None:
-        """The claim AC-30 refuted: 1.0 m is not "inside the band" of a support
-        that spans [0.41, 5.16] m — it is near its bottom."""
-        lo = self._d_min((3.0, 3.0, 2.4), 0.05)["iso_min_distance_sabine_m"]
-        hi = self._d_min((12.0, 10.0, 5.0), 0.80)["iso_min_distance_sabine_m"]
+        """The claim AC-30 refuted: 1.0 m is not "inside the band" — it is near the
+        bottom of a support that reaches 5.71 m by Sabine and 11.41 m by Eyring."""
+        lo, hi = self._declared_support(Config.load(Path("configs/base.yaml")))["sabine"]
         assert lo < 1.0 < hi
         assert 1.0 < lo + 0.25 * (hi - lo), "1.0 m is not in the band's interior"
 
-    def test_eyring_is_the_stricter_criterion_at_high_absorption(self) -> None:
-        """Both estimates are carried because they disagree by a lot where it
-        matters — AC-30 measured 25.4 % below d_min by Sabine against 37.2 % by
-        Eyring on the same id split."""
-        room = self._d_min((12.0, 10.0, 5.0), 0.80)
-        assert room["iso_min_distance_eyring_m"] > room["iso_min_distance_sabine_m"]
+    def test_eyring_is_the_stricter_criterion_at_every_absorption(self) -> None:
+        """-ln(1-a) > a for all a in (0, 1), so Eyring's shorter T60 always gives the
+        larger d_min — by 0.5 % at alpha 0.02 and by ~2x at 0.98. Both are carried
+        because that spread is the disclosure: AC-30 measured 25.4 % of id below
+        d_min by Sabine against 37.2 % by Eyring."""
+        for alpha in (0.02, 0.05, 0.30, 0.80, 0.98):
+            room = self._d_min((12.0, 10.0, 5.0), alpha)
+            assert room["iso_min_distance_eyring_m"] > \
+                room["iso_min_distance_sabine_m"], alpha
 
     def test_the_report_records_the_realized_fraction_per_split(
         self, tmp_path: Path

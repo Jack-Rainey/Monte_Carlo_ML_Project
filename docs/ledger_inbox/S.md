@@ -198,21 +198,39 @@ zero-characterized split named as UNDEFINED rather than 0.0; and RD-94 below.
 `distance_range [1.0, null]` still states "~2.6 m at the largest", which is not a
 corner. (Lane M's file.)`
 
-**The correction to apply, with the arithmetic re-derived and re-verified here.**
-d_min = 2·sqrt(V/(c·T60)); substituting Sabine's T60 gives
-d_min = 2·sqrt(αS/(c·K)), and since `SABINE_K ≡ 24·ln10/c` the product is
-`24·ln10` — so d_min is independent of BOTH volume and the speed of sound. The
-shoebox family's real corners:
+**The correction to apply.** ⚠️ **AC-30's own [0.41, 5.16] m is WRONG, and so was
+my first transcription of it — do not write that range into base.yaml.** Caught
+independently by the falsifier (S-F2) and the acoustics-reviewer (AC-46) on this
+lane's diff. The row sweeps the `mixed` material regime only (α ≤ 0.80), but
+base.yaml declares `ceiling_absorptive` α ∈ [0.85, 0.98] over the **same** shoebox
+family, and `test_material_shift` selects exactly that regime.
 
-| corner | dims | α | d_min |
-|---|---|---|---|
-| smallest, least absorptive | 3.0 × 3.0 × 2.4 | 0.05 | **0.41 m** |
-| largest, least absorptive | 12.0 × 10.0 × 5.0 | 0.05 | 1.29 m |
-| largest, most absorptive | 12.0 × 10.0 × 5.0 | 0.80 | **5.16 m** |
+d_min = 2·sqrt(V/(c·T60)); substituting Sabine's T60 gives d_min = 2·sqrt(αS/(c·K)),
+and c and K appear only as the product `c·K = 24·ln10`, so d_min is independent of
+volume and needs neither constant separately. (Caveat AC-45: `SABINE_K` ships
+rounded, so using 24·ln10 assumes c = 343.24 m/s and biases d_min by a constant
+−0.035 % — immaterial, but "free of c" is true of the formula, not of the constant.)
 
-So the declared support spans d_min ∈ **[0.41, 5.16] m** and the declared 1.0 m
-floor sits near its BOTTOM, not "inside the band". All three reproduce to 2 d.p. in
-`TestIsoMinimumDistanceDisclosure::test_the_declared_support_corners_reproduce`.
+Swept over **every declared geometry × material corner**, the way
+`Config.worst_case_t60` already sweeps them:
+
+| corner | dims | α | regime | d_min Sabine | d_min Eyring |
+|---|---|---|---|---|---|
+| smallest, least absorptive | 3.0 × 3.0 × 2.4 | 0.05 | mixed | **0.41 m** | 0.42 m |
+| largest, least absorptive | 12.0 × 10.0 × 5.0 | 0.05 | mixed | 1.29 m | 1.31 m |
+| largest, `mixed` ceiling | 12.0 × 10.0 × 5.0 | 0.80 | mixed | 5.16 m | 7.32 m |
+| **largest, most absorptive** | 12.0 × 10.0 × 5.0 | 0.98 | ceiling_absorptive | **5.71 m** | **11.41 m** |
+
+So the declared support is d_min ∈ **[0.41, 5.71] m by Sabine and [0.42, 11.41] m
+by Eyring** — not [0.41, 5.16] m. The 1.0 m floor still sits near the BOTTOM (that
+half of the row holds, and more strongly), but writing 5.16 m into base.yaml would
+install a fresh understatement of 1.11× (Sabine) / **2.20× (Eyring)** on precisely
+the split whose realized shortfall is 92.5–100 %.
+
+Verified: `TestIsoMinimumDistanceDisclosure::test_the_declared_support_spans_every_declared_material_regime`,
+which now DERIVES the corners from the `Config` object. My first version pinned the
+literals `(3.0, 3.0, 2.4)` / `0.05` / `0.80` and so could not see the omission —
+that is why the error survived my own testing (S-F8).
 
 Done in `generator.py`: each characterized scene carries
 `iso_min_distance_sabine_m` / `_eyring_m` and the two `below_iso_min_distance_*`
@@ -275,15 +293,151 @@ files. Not mine to start this cycle (brief, "Not yours").
 ```
 $ PYTHONPATH=/Volumes/T7/Monte_Carlo_Research/v3-lane-S/src \
     /Users/nortonrainey/miniconda3/envs/amcd/bin/pytest -q
-382 passed in 51.71s          (362 before this lane's work; +20 new)
+384 passed in 51.25s          (362 before this lane's work; +22 new)
 
 $ PYTHONPATH=/Volumes/T7/Monte_Carlo_Research/v3-lane-S/src \
     /Users/nortonrainey/miniconda3/envs/amcd/bin/amcd all \
       -c configs/base.yaml -c configs/overlays/simulator_dry_run.yaml \
       -c configs/overlays/dry_run.yaml
 [done] gen-scenes / render / preprocess / diagnostics / train / infer / eval / stats / report
+
+$ diff baseline/stats/ci_table.csv after2/stats/ci_table.csv
+IDENTICAL — ci_table.csv still unchanged vs the pre-work baseline
 ```
 
-No reviewer has been run over this lane's finished diff. The
-`research-director` pass recorded above ran on the PLAN, before implementation,
-and is a self-check on `lane/S-cycle4` either way — not a clean pass.
+Three reviewers have since run over the finished diff — `falsifier`,
+`acoustics-reviewer` and `readability-reviewer`, sections below. All three are
+SELF-CHECKS on `lane/S-cycle4`; none is a clean pass (rule 5).
+
+---
+
+## acoustics-reviewer pass on lane/S-cycle4 @ 5e15293 (SELF-CHECK, not a clean pass)
+
+Scope: the AC-30 closed-form d_min physics and the F-71 gate treatment, reviewed
+against the CURRENT tree. Verdict on the core algebra: **correct**. The ISO
+3382-1 §5.3 reduction reproduces an independent numeric route to 0.035 % for both
+variants over 25 (room, α) combinations, and that residual is entirely SABINE_K's
+rounding (AC-45 below). Findings are about the constant's duplication, the stated
+support range, a convention juxtaposition, and test coverage — not the formula.
+
+| ID | agent | severity | status | anchor | finding | resolution |
+|---|---|---|---|---|---|---|
+| AC-45 | acoustics-reviewer | minor | OPEN | `src/amcd/scenes/generator.py:27-32` (`_C_TIMES_SABINE_K`) vs `src/amcd/acoustics.py:19` (`SABINE_K`) | **A SECOND DECLARATION OF SABINE'S CONSTANT THAT DISAGREES WITH THE FIRST — the AC-24 shape, at 0.07 %.** The docstring asserts "c·SABINE_K … is 24·ln10 by SABINE_K's own definition", but `SABINE_K` is the ROUNDED literal `0.161`, so c·SABINE_K = 343 × 0.161 = **55.2230** while `_C_TIMES_SABINE_K` = 24·ln10 = **55.2620** (+0.0707 %). Every reported `iso_min_distance_*_m` is therefore **0.0353 % smaller** than the value a reader recomputing 2·sqrt(V/(c·T60)) from the report's OWN `t60_sabine_s` at c = 343 obtains — no single declared c reconciles the two published numbers. Numerically immaterial (1.8 mm at the 5.16 m corner) but it is literally two expressions of one physical constant in two modules. Related: the speed of sound is declared NOWHERE in config; it survives only implicitly inside the rounded 0.161, so "free of c" is true of the formula and false of the constant. | Derive d_min from `SABINE_K` (`d_min = 2·sqrt(αS/(c·SABINE_K))` with a declared c) or state the rounding in the constant's docstring — "24·ln10, which differs from c·SABINE_K by 0.07 % because SABINE_K is rounded; the resulting d_min bias is 0.035 %". Folds into S-1's move to `acoustics.py`. |
+| AC-46 | acoustics-reviewer | major | OPEN | `docs/ledger_inbox/S.md` (AC-30 corner table); `tests/test_scene_placement.py:666-683`; residual target `configs/base.yaml:118-124` | **THE STATED SUPPORT RANGE [0.41, 5.16] m IS THE `mixed`-REGIME SPAN, NOT THE DECLARED SUPPORT.** All three corners reproduce exactly (0.412 / 1.290 / 5.161 m), but α = 0.80 is `mixed`'s ceiling; `ceiling_absorptive` declares α ∈ [0.85, 0.98] on the SAME shoebox family (`test_material_shift` overrides material only). MEASURED over every geometry × material corner of base.yaml: Sabine d_min spans **[0.412, 5.712] m** (max at shoebox 12×10×5, α 0.98) and Eyring **[0.417, 11.413] m** — against the 7.32 m Eyring value at the stated 5.16 m corner. So the correction AC-30 asks the integrator to write into base.yaml would install a NEW understatement, by 1.11× (Sabine) and 2.20× (Eyring), on exactly the split whose realized shortfall is 92.5-100 %. | State the range as computed over the full geometry × material product, both variants: Sabine [0.41, 5.71] m, Eyring [0.42, 11.41] m, max at shoebox 12×10×5 m, α = 0.98 (`ceiling_absorptive`). Have the corner test READ base.yaml's `geometry_families` / `material_regimes` instead of hardcoding (3.0,3.0,2.4)/0.05 and 0.80 — the current test claims "base.yaml's shoebox family at its own extremes" while pinning literals, so widening a declared range silently invalidates the claim without failing. |
+| AC-47 | acoustics-reviewer | minor | OPEN | `src/amcd/scenes/generator.py:338, 347-348, 357, 359-360, 371, 381, 385-386` | **TWO REVERBERANT-FIELD RADII ON INCOMPATIBLE ABSORPTION-AREA CONVENTIONS SIT SIDE BY SIDE IN ONE RECORD.** `critical_distance_m` uses the Hopkins–Stryker room constant R = Sα/(1−α); ISO's d_min descends from the Sabine absorption area A = Sα. Their ratio is d_min/r_c = 2·sqrt(16π/24ln10)·sqrt(1−α) = 1.907·sqrt(1−α), so the standard's "d_min ≈ 2× the reverberation radius" rationale holds only below α ≈ 0.725 and INVERTS above it. MEASURED, S = 460 m²: α 0.05 → d_min 1.29 m vs r_c 0.69 m (1.86×); α 0.90 → d_min 5.47 m vs r_c 9.08 m (**0.60×**); α 0.98 → 5.71 m vs 21.18 m (0.27×). The `ceiling_absorptive` split therefore publishes an ISO "minimum measurement distance" that lies deep INSIDE its own reported critical distance, and the two derived flags `receiver_inside_critical_distance` / `below_iso_min_distance_sabine` swap strictness at α = 0.725 with nothing in the record saying why. Neither number is wrong under its own definition; the record states neither definition. | Name the absorption-area convention in the comment for each key (`critical_distance_m`: R = Sα/(1−α); `iso_min_distance_*_m`: ISO's A = Sα), and note the 1.907·sqrt(1−α) relation so a reader is not left to infer a factor-2 that only holds at low α. Belongs beside S-1's `min_measurement_distance()` in `acoustics.py`. |
+| AC-48 | acoustics-reviewer | minor | OPEN | `tests/test_scene_placement.py:685-690` (`test_eyring_is_the_stricter_criterion_at_high_absorption`); docstring claim at `:666-669` and `src/amcd/scenes/generator.py:27-31` | **THE EYRING d_min — the variant that carries the headline shortfall — is pinned only by an INEQUALITY.** The Sabine variant has three known-answer corners; Eyring has `eyring > sabine`, which at α = 0.80 is satisfied by ANY denominator < 111 in place of 24·ln10 (the true value is 55.26), so a wrong constant or a wrong absorption term in that one line passes. The reported 100 % below-d_min on `test_material_shift` rides on it. Separately, the volume-independence and c-independence claims (asserted in both the module constant's docstring and the corner test's docstring) are stated and never tested. | Three assertions: (a) `iso_min_distance_eyring_m` at (12,10,5) m, α 0.80 == 7.32 m (abs 0.005); (b) two rooms with EQUAL surface and different volume — e.g. 12×10×5 (S=460) and a non-cuboid-equivalent pair matched on S — give identical d_min; (c) d_min == 2·sqrt(V/(c·T60)) recomputed from the same call's `t60_eyring_s` at c = 24·ln10/SABINE_K, to within the AC-45 rounding. |
+| AC-49 | acoustics-reviewer | minor | OPEN | `src/amcd/scenes/generator.py:288-306`, `:469-480` | F-71's omission is **acoustically correct** (see the pass note below), but it leaves a residual with no guard: a `characterization: none` scene is still RENDERED into a record of fixed `ir_duration`, and after F-71 nothing checks its truncation at all — a non-enclosure has a finite decay too, it merely is not Sabine's. The per-scene `uncharacterized_reason` enumerates T60/R/r_c/DRR as undefined but never names record length, and the per-split `uncharacterized_note` speaks only of "these fractions". Not reachable today (no shipped config declares a `none` family, verified) — a guard/known-answer test owed before one does, not a defect now. | Add "and its record-length adequacy is therefore UNCHECKED" to `uncharacterized_reason`, and a known-answer test that a mixed enclosure/non-enclosure config reports the non-enclosure count as unchecked rather than merely excluded. |
+
+**Confirmed correct, no finding (stated so it is not re-litigated):**
+
+- **The §5.3 formula and BOTH reductions.** d_min = 2·sqrt(V/(c·T)) is ISO 3382-1
+  §5.3 as written. Substituting Sabine (T = KV/(αS), K ≡ 24ln10/c) gives
+  2·sqrt(αS/(24ln10)); substituting Eyring (T = KV/(−S·ln(1−α))) gives
+  2·sqrt(−ln(1−α)·S/(24ln10)). Both verified against an INDEPENDENT numeric route
+  — 2·sqrt(V/(c·T60)) with the T60 the code itself reports at c = 343 — over 5
+  rooms × 5 α (0.05…0.98): agreement to −0.0353 % everywhere, constant across V,
+  S and α, i.e. exactly the AC-45 rounding and nothing else. Volume cancellation
+  and c cancellation each confirmed independently (the residual is invariant in V).
+- **Both variants reported.** Correct. Eyring is stricter at ALL α, not only high
+  α (ratio 1.005 at α 0.02 → 1.418 at 0.80 → 1.998 at 0.98) because
+  −ln(1−α) > α, and a shorter T60 gives a larger d_min. The code's comment claims
+  only "disagree substantially at high α", which is accurate.
+- **Omitted, not zeroed, for `characterization: none`.** Acoustically right: d_min
+  is a functional of the diffuse-field T60 of an enclosure, so for a non-enclosure
+  there is no V/(cT) to evaluate — a 0.0 would read as "no minimum distance
+  applies" and a NaN would poison `_summarize`. Omission + `_scene_is_characterized`
+  + `_summarize`'s `if any(key in r)` guard keeps it out of numerator, denominator
+  and per-split summary alike; `test_an_uncharacterized_split_reports_no_below_d_min_number`
+  pins all three.
+- **F-71's treatment of a non-enclosure.** Correct. Sabine T60 is undefined for a
+  non-enclosure, so `t60_exceeds_ir_duration` is unscorable, not False; scoring it
+  False admitted an unscored quantity to the gate denominator as passing. The
+  omission + RD-94's UNSCORED warning is the right pair.
+- **Units.** Every new key declares its unit in its name (`_m`), consistent with
+  `_s` / `_db` / dimensionless `d_over_rc`. No finding.
+- **S-1 (AC-24 home) confirmed acceptable for one cycle** on the evidence: grep
+  over `src/` shows NO other consumer of `iso_min_distance*` / `below_iso_min*`
+  and no other d_min computation, so there is no second implementation to diverge
+  from — except the constant itself, which is AC-45.
+
+---
+
+## falsifier pass on lane/S-cycle4 @ 5e15293 (SELF-CHECK, not a clean pass)
+
+Two of the lane's claims refuted; the rest held. What it could NOT break, stated
+because a clean bill is worth nothing without the attempt: the `.get`
+contract behind F-71's denominator is airtight (`_flag_counts` emits the key iff
+nonzero over a non-negative int, and no non-test consumer of
+`t60_exceeds_ir_duration` or of `placement_report.json` exists anywhere in `src/`
+or `scripts/`); population neutrality holds (zero diff lines touching
+`rng|seed|integers|uniform|_sample_*|_generation_plan`, and a failed gen-scenes
+leaves no sentinel, which `pipeline.py:442-449` refuses to render past); the RD-65
+warning cannot be suppressed; no split can vanish from either D0 artifact; and the
+new tests bind rather than being tautological.
+
+| ID | agent | severity | status | anchor | finding | resolution |
+|---|---|---|---|---|---|---|
+| S-F1 | falsifier | major | OPEN | `src/amcd/diagnostics/probe.py` D0b verdict loop | **F-72 CLOSED THE FILE-MISSING DROP AXIS ONLY; PER-METRIC NaN ATTRITION IS STILL INVISIBLE AND STILL CANNOT MOVE `all_clear`.** `_verdict` degrades to N/A only at `n == 0`, and the new coverage bracket is keyed on `len(dropped)`, so a metric averaged over a subset of SCORED scenes prints as a bare number with `(PASS)`. CONFIRMED on the canonical dry run: `train` reports `n_scenes=12 n_attempted=12 dropped=0` while `T30 n=11` and `C50 n=10`, and the stage prints `CARRIER CEILING CLEARS … Proceed to E1` with no indication of either. The comment above the verdict states the contract as "any missing metric is insufficient coverage"; the code implements "a metric with ZERO scenes". Sub-defect: `t30_thresh` scales a nanmean over SCORED scenes while `t30_r` averages over NON-NaN-RESIDUAL scenes — two populations on the two sides of one ratio test. | Not fixable in lane S: the remedy needs a config-declared minimum coverage (`configs/base.yaml`, lane M) so the verdict is a function of coverage rather than of a hardcoded threshold. Print per-metric `n`. Test: per (split, metric), `n == n_scenes == n_attempted` or the verdict is INDETERMINATE. |
+| S-F4 | falsifier | minor | OPEN | `src/amcd/scenes/generator.py` `_disclose_and_gate_record_length` | The gate iterates every top-level key of `report` and indexes `entry["t60_over_ir_duration"]` unconditionally, but `report` IS the `placement_report.json` artifact. A future non-split metadata key — which AC-30's own disclosure work invites — raises KeyError (probed). Loud rather than silent, hence minor. | Guard the shape, or state in the docstring that every top-level key is a split. |
+| S-F5 | falsifier | minor | OPEN | `src/amcd/scenes/generator.py` gate denominator; `tests/test_scene_placement.py` RD-97 pin | The derived denominator's interesting case, `0 < n_uncharacterized < n`, is unreachable from any config today — one geometry family per split makes characterization all-or-nothing — so RD-97's pinning test only ever sees 0 or n. The falsifier probed the mixed case directly and it is CORRECT (4 sabine + 6 none → derived 4 == published 4, gate raised at 4/4), but nothing guards it, and the roadmap's outdoor families make it reachable. | Unit test on `_flag_counts` + the gate with a hand-built mixed `room_stats` list. |
+| S-F6 | falsifier | minor | OPEN | `src/amcd/scenes/generator.py` per-split warning loop | The gate says nothing about a declared split with ZERO scenes (`attempted == 0` is skipped), while `probe.py` warns for the analogous case. Reachable: `scenes.n_id: 0` is accepted and yields `id: n_scenes 0`, silent in the gate. | Warn on any declared split with zero attempted scenes. |
+| S-F7 | falsifier | minor | OPEN | `src/amcd/scenes/generator.py` `_disclose_and_gate_record_length` docstring | RD-65's warning is per generation-plan REGIME, not per declared split: in frac mode `train`/`valid`/`test_id` are pooled under `id` (canonical run keys: `id, test_material_shift, …`). Genuinely per split for `research_i` (count mode), so RD-65's own scenario is covered. Structural — split assignment happens at preprocess, not here — but the docstring says "per split" without saying which split set, and a reader will read `id` as `train`. | One docstring clause naming the split set the warning ranges over. |
+
+## readability-reviewer pass on lane/S-cycle4 @ 5e15293 (SELF-CHECK, not a clean pass)
+
+**RR-32 (generator half) and RR-44 both confirmed closed as specified.** No new
+measured constants were introduced in this cycle's prose. Remaining rows below;
+RR-46/47/52/53/54 are addressed in the follow-up commit, RR-48/50/51 are
+pre-cycle-4 prose in lane-S files left for a later cycle, RR-55 is lane P's.
+
+| ID | agent | severity | status | anchor | finding | resolution |
+|---|---|---|---|---|---|---|
+| RR-48 | readability-reviewer | minor | OPEN | `src/amcd/scenes/generator.py` `_room_acoustics` docstring and the AC-29 flag comment | Exactly RR-32's charge, in the same module but predating cycle 4: the docstring pins "failed for 100 % of scenes (alpha median 0.894, Sabine/Eyring ratio median 2.51, 23 % with r_c larger than the room's longest dimension)" to a realized config, repeats "median 2.51 … max 3.90" nine lines later, and carries a 9-line AC-29 bug report ("MEASURED over the realized base.yaml set: 92.5 % of test_material_shift and 17.2 % of id … an under-report of ~2.6x"). The 2.51/23 % pair is a third copy of `configs/research_i.yaml`'s comment. | Cut each to the rule plus AC-21/AC-29; let the surviving copy of the measured percentages be the config comment, closest to the config state it describes. Not done this cycle — outside RR-32's stated scope, and it is the kind of edit that should be one row, not a drive-by. |
+| RR-50 | readability-reviewer | minor | OPEN | `src/amcd/diagnostics/probe.py` D0b enumeration comment | Same shape, also pre-cycle-4: 8 lines of F-45 reproduction transcript plus a note that the branch below "was DEAD CODE" — a statement about an implementation that no longer exists, sitting above the branch it now describes as live. Separately the `all_clear` point is made three times. | Cut to two lines (enumerate config-declared splits in declaration order; an undeclared split present in the data is appended, F-45) and keep the `all_clear` rule once, at the verdict loop that consumes it. |
+| RR-51 | readability-reviewer | minor | OPEN | `src/amcd/diagnostics/probe.py` — the per-split record schema | The record shape this cycle extended (`n_scenes` = SCORED, `n_attempted`, `dropped: [{scene, reason}]`, `unscored_reason` present iff `n_scenes == 0`) is constructed at six sites and declared at none. The two consumers disagree about whether the last key is guaranteed — D0a indexes `info["unscored_reason"]` directly while D0b defends with `.get(..., 'no scenes')` — so a reader cannot tell which is the contract. The artifact is read across lanes (`tests/test_dataset_integrity.py`), which is where an undeclared schema costs most. | Declare the four keys and the emit-iff invariant once in `probe.py`'s module docstring, or factor an `_unscored_split(...)` helper both probes call; make the two consumers agree. |
+| RR-55 | readability-reviewer | minor | OPEN | `src/amcd/config.py` `GeometryFamily.characterization` docstring | Says `"none"` means `_room_acoustics` records "a (split, reason) instead of a number". The record is per SCENE (`uncharacterized_reason` on the scene dict); split-level counts are a later aggregation in `_flag_counts`. A reader following this sentence looks for the wrong unit. **Lane P's file — not lane S's to fix.** | "(scene, reason)". |
+
+---
+
+## What I corrected in response (follow-up commit)
+
+Three of the findings above were errors in this lane's own work, not observations
+about it. All three are fixed; the rest are recorded, not actioned.
+
+1. **A crash I introduced exposure to, on the exact config RD-94 exists for.**
+   `_disclose_and_gate_record_length` formatted `corner['t60_sabine_s']:.2f`
+   unconditionally, but `Config.worst_case_t60` returns a reasoned `None` for a
+   config where no family declares `characterization: sabine`. So on an
+   all-uncharacterized config, gen-scenes raised
+   `TypeError: unsupported format string passed to NoneType.__format__` **before**
+   RD-94's "UNSCORED, not passed" warning could be emitted — the warning was
+   unreachable on the only config that triggers it. My RD-94 test built the report
+   by hand and so never exercised the real path. Fixed; the corner is now disclosed
+   as UNSCORED with its reason. New test
+   `test_the_same_config_survives_the_real_generation_path` drives the real
+   `run_gen_scenes` path. (Flagged by `readability-reviewer` as an aside, outside
+   its own remit.)
+
+2. **AC-30's declared-support range was wrong, and I had transcribed it into the
+   residual queued for lane M.** Corrected above: Sabine [0.41, **5.71**] m, Eyring
+   [0.42, **11.41**] m. The corner test now derives from the `Config` object
+   instead of restating literals, which is what let the error through
+   (S-F2 / AC-46 / S-F8).
+
+3. **The "free of the speed of sound" claim was overstated.** True of the formula,
+   false of the constant: `SABINE_K` ships rounded, so `24·ln10` assumes
+   c = 343.24 m/s and biases d_min by a constant −0.035 %. The constant's docstring
+   now states this rather than claiming independence (AC-45 / S-F3).
+
+Also applied: the readability trims for RR-46/47 (duplicated rule statements in
+`_disclose_and_gate_record_length` and `_flag_counts` cut back to one home each),
+RR-52 (test module docstring lists the new rows; the section banner is topical
+rather than cycle/lane-stamped), RR-53 (`test_probe.py` cites
+`docs/review_ledger.md` rather than this transient inbox) and RR-54 (the generator
+module docstring now names `placement_report.json` and the gate).
+
+**Not actioned, and why:** S-F1 needs a config-declared coverage floor in
+`configs/base.yaml` (lane M) — no hidden defaults, so it cannot be fixed inside
+lane S. AC-47/AC-48/AC-49, S-F4..S-F7 and RR-48/50/51 are recorded for a later
+cycle rather than swept into a lane whose six assigned rows are done; AC-49 and
+S-F5 are both unreachable from any shipped config today.
