@@ -5,10 +5,17 @@ config says), RD-32 (the RI overlay resolves to pure count mode despite YAML's
 inability to delete keys), RD-36 (unconstrained configs keep their exact RNG
 stream) and RD-37 (joint resampling + recorded acceptance rates).
 
+The second half of the file covers what the record-length gate SCORES and what it
+DISCLOSES: F-71 (uncharacterized scenes leave the gate's denominator), RD-65 (the
+per-split over-limit warning), RD-94 (a gate that scored nothing is unscored, not
+passed), RD-97 (the derived denominator is pinned to the published one) and AC-30
+(the realized shortfall against ISO 3382-1 §5.3's minimum distance).
+
 The load-bearing property here is that a config CANNOT quietly mean something
 other than it says: mixed sizing modes, colliding split seeds, inert overrides
 and unreachable placement constraints all raise.
 """
+import itertools
 import json
 from pathlib import Path
 
@@ -17,8 +24,10 @@ import pytest
 
 from amcd.config import Config, PlacementRegime
 from amcd.scenes.generator import (
+    _disclose_and_gate_record_length,
     _generation_plan,
     _placement_bounds,
+    _room_acoustics,
     _sample_positions,
     run_gen_scenes,
 )
@@ -470,3 +479,315 @@ class TestGenerationPlan:
         plan = _generation_plan(ri_config)
         assert {entry[0] for entry in plan} == set(RI_SPLITS)
         assert {entry[0]: (entry[1], entry[3]) for entry in plan} == RI_SPLITS
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# The record-length gate: what it scores, and what it discloses
+# (F-71 / RD-65 / RD-94 / RD-97), plus the ISO 3382-1 §5.3 distance disclosure
+# (AC-30 / AC-46).
+#
+# Every test below constructs the population in which the defect is VISIBLE — a
+# healthy run has no uncharacterized scenes at all, so none of these fire on one.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _openfield_config(**scene_overrides) -> Config:
+    """tiny_config plus a 3-scene split whose geometry declares no enclosure.
+
+    `openfield` is the RD-64 seam exercised: a family declaring
+    `characterization: none` gets a recorded reason instead of Sabine/Eyring
+    numbers, which is the state F-71 is about.
+    """
+    return tiny_config(
+        scenes={
+            "geometry_families": {
+                "openfield": {
+                    "dims": [[8.0, 12.0], [8.0, 12.0], [3.0, 4.0]],
+                    "characterization": "none",
+                },
+            },
+            **scene_overrides,
+        },
+        splits={
+            "test_openfield": {
+                "role": "test", "count": 3, "axes": {"geometry": "openfield"},
+            },
+        },
+    )
+
+
+class TestUncharacterizedScenesLeaveTheRecordLengthGate:
+    """F-71: the `characterization: none` branch set `t60_exceeds_ir_duration`
+    False rather than omitting it, so an unmodelled geometry entered the gate's
+    denominator as PASSING. N of them shrink the over-limit fraction by N/(N+M)."""
+
+    @staticmethod
+    def _report(run_dir: Path) -> dict:
+        return json.loads((run_dir / "scenes" / "placement_report.json").read_text())
+
+    def test_the_flag_block_excludes_them_instead_of_counting_them_as_passing(
+        self, tmp_path: Path
+    ) -> None:
+        run_gen_scenes(_openfield_config(), tmp_path, QUIET)
+        block = self._report(tmp_path)["test_openfield"]["t60_over_ir_duration"]
+
+        assert block["n_scenes"] == 0, (
+            "uncharacterized scenes are still in the denominator — the sibling "
+            "diffuse_field_validity block has honoured this rule all along (F-71)"
+        )
+        assert block["n_uncharacterized"] == 3
+        assert block["t60_exceeds_ir_duration"]["count"] == 0
+        assert block["t60_exceeds_ir_duration"]["fraction"] is None, (
+            "an unscored quantity was rendered as a number"
+        )
+
+    def test_the_scene_carries_a_reason_and_no_record_length_flag(
+        self, tmp_path: Path
+    ) -> None:
+        room = _room_acoustics(
+            (10.0, 10.0, 3.5), 0.3, 4.0,
+            alpha_limit=0.5, ir_duration_s=0.1, characterization="none",
+        )
+        assert "t60_exceeds_ir_duration" not in room, (
+            "present-and-False reads as 'measured, and within the record' (F-71)"
+        )
+        assert "uncharacterized_reason" in room
+
+    def test_non_enclosures_cannot_buy_a_pass_for_a_breaching_dataset(
+        self, tmp_path: Path
+    ) -> None:
+        """The dilution attack, at the tolerance where it decides the outcome.
+
+        Every one of the 26 enclosed scenes breaches the 0.1 s record, so the
+        honest fraction is 26/26 = 100 % against a declared tolerance of 0.9.
+        Counting the 3 openfield scenes as passing gives 26/29 = 89.7 %, under the
+        limit: the dataset would buy its pass with scenes nobody characterized.
+        """
+        cfg = _openfield_config(max_t60_over_ir_duration_frac=0.9)
+        with pytest.raises(ValueError, match="26 of 26 scenes") as exc:
+            run_gen_scenes(cfg, tmp_path, QUIET)
+        assert "3 of 29 scenes are excluded" in str(exc.value), (
+            "the gate must disclose what it did NOT score, not just what it did"
+        )
+
+    def test_the_derived_denominator_agrees_with_the_published_one(
+        self, tmp_path: Path
+    ) -> None:
+        """RD-97: the gate derives the characterized count that `_flag_counts`
+        already publishes. Two expressions for one number is how AC-24's pair
+        drifted apart, so they are pinned to each other here."""
+        run_gen_scenes(_openfield_config(), tmp_path, QUIET)
+        for name, entry in self._report(tmp_path).items():
+            block = entry["t60_over_ir_duration"]
+            derived = entry["n_scenes"] - block.get("n_uncharacterized", 0)
+            assert derived == block["n_scenes"], name
+
+
+class TestPerSplitOverLimitWarning:
+    """RD-65: the gate is the OVERALL fraction — right, because a per-split gate
+    lets the smallest split set the tolerance for train — but an overall pass can
+    hide a shift split far over on its own, and the per-shift breakdown IS the
+    research result. So every offending split is named, unconditionally."""
+
+    @staticmethod
+    def _report(train_over: int, shift_over: int) -> dict:
+        return {
+            "train": {"n_scenes": 500, "t60_over_ir_duration": {
+                "t60_exceeds_ir_duration": {"count": train_over}}},
+            "test_placement_shift": {"n_scenes": 30, "t60_over_ir_duration": {
+                "t60_exceeds_ir_duration": {"count": shift_over}}},
+        }
+
+    def test_a_split_over_its_own_limit_is_named_while_the_gate_passes(
+        self, ri_config: Config, capsys
+    ) -> None:
+        # 1 of 30 is 3.3 % per split but 0.19 % overall: the gate allows it.
+        _disclose_and_gate_record_length(ri_config, self._report(0, 1), QUIET)
+        warnings = capsys.readouterr().err
+
+        assert "test_placement_shift" in warnings
+        assert "1/30" in warnings and "3.333%" in warnings
+        assert "train" not in warnings, "a split within its own limit is not warned"
+
+    def test_the_warning_is_emitted_before_the_gate_can_raise(
+        self, ri_config: Config, capsys
+    ) -> None:
+        """Evidence a failing run still names the splits responsible."""
+        with pytest.raises(ValueError):
+            _disclose_and_gate_record_length(ri_config, self._report(16, 1), QUIET)
+        warnings = capsys.readouterr().err
+
+        assert "test_placement_shift" in warnings and "train" in warnings
+
+    def test_warnings_survive_the_quietest_verbosity(
+        self, ri_config: Config, capsys
+    ) -> None:
+        """QUIET is show=0. Warnings bypass the ladder entirely (F-24), which is
+        what makes "always-emitted" true rather than aspirational."""
+        _disclose_and_gate_record_length(ri_config, self._report(0, 1), QUIET)
+        assert "WARNING" in capsys.readouterr().err
+
+    def test_a_split_with_no_characterized_scene_is_named_as_undefined(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        run_gen_scenes(_openfield_config(), tmp_path, QUIET)
+        warnings = capsys.readouterr().err
+
+        assert "test_openfield" in warnings
+        assert "0 of 3 scenes are characterized" in warnings
+        assert "UNDEFINED" in warnings
+        # The artifact side of the same claim: null, never a number to average.
+        report = json.loads(
+            (tmp_path / "scenes" / "placement_report.json").read_text()
+        )
+        over = report["test_openfield"]["t60_over_ir_duration"]
+        assert over["t60_exceeds_ir_duration"]["fraction"] is None
+
+    def test_a_wholly_uncharacterized_config_is_unscored_not_passed(
+        self, capsys
+    ) -> None:
+        """RD-94: with every scene uncharacterized the gate has nothing to measure.
+        Falling through would be F-71's own defect one level up — a silent pass at
+        exactly the outdoor/partially-open configuration the RD-64 seam enables."""
+        report = {
+            "test_openfield": {"n_scenes": 3, "t60_over_ir_duration": {
+                "n_uncharacterized": 3,
+                "t60_exceeds_ir_duration": {"count": 0, "fraction": None}}},
+        }
+        _disclose_and_gate_record_length(tiny_config(), report, QUIET)
+        warnings = capsys.readouterr().err
+
+        assert "UNSCORED, not passed" in warnings
+        assert "0 of 3 scenes" in warnings
+
+    def test_the_same_config_survives_the_real_generation_path(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """The test above builds the report by hand, so it never exercised the
+        corner disclosure — which reached `f"{None:.2f}"` and raised TypeError
+        before RD-94's warning could be emitted. `Config.worst_case_t60` returns a
+        reasoned None for a config with no `sabine` family, which is the very
+        config RD-94 is about, so the warning was unreachable on it."""
+        cfg = tiny_config(scenes={"geometry_families": {
+            "shoebox": {"dims": [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]],
+                        "characterization": "none"},
+            "corridor": {"dims": [[15.0, 30.0], [1.5, 3.0], [2.4, 3.5]],
+                         "characterization": "none"}}})
+        run_gen_scenes(cfg, tmp_path, QUIET)
+        warnings = capsys.readouterr().err
+
+        assert "UNSCORED, not passed" in warnings
+        report = json.loads(
+            (tmp_path / "scenes" / "placement_report.json").read_text()
+        )
+        assert all(
+            e["t60_over_ir_duration"]["n_scenes"] == 0 for e in report.values()
+        )
+
+
+class TestIsoMinimumDistanceDisclosure:
+    """AC-30: the config declares ONE global placement floor, but ISO 3382-1 §5.3's
+    minimum measurement distance is per scene — it varies with each scene's own
+    absorption and surface. The shortfall is measured and reported, not asserted
+    away. The per-scene criterion itself stays deferred."""
+
+    @staticmethod
+    def _d_min(dims, alpha) -> dict:
+        return _room_acoustics(
+            dims, alpha, 2.0,
+            alpha_limit=0.5, ir_duration_s=10.0, characterization="sabine",
+        )
+
+    @staticmethod
+    def _declared_support(cfg: Config) -> dict[str, tuple[float, float]]:
+        """Sweep every declared geometry x material corner, the way
+        `Config.worst_case_t60` sweeps them for the T60 corner.
+
+        DERIVED from the config, never hardcoded (AC-46): AC-30's own [0.41, 5.16] m
+        was computed over the `mixed` regime alone, so it missed
+        `ceiling_absorptive` (alpha up to 0.98) on the same shoebox family — and a
+        test that restated the literals could not see the omission.
+        """
+        out: dict[str, list[float]] = {"sabine": [], "eyring": []}
+        for spec in cfg.scenes.geometry_families.values():
+            if spec.characterization != "sabine":
+                continue
+            for dims in itertools.product(*[(a[0], a[1]) for a in spec.dims]):
+                for regime in cfg.scenes.material_regimes.values():
+                    for alpha in regime.absorption:
+                        room = TestIsoMinimumDistanceDisclosure._d_min(dims, alpha)
+                        out["sabine"].append(room["iso_min_distance_sabine_m"])
+                        out["eyring"].append(room["iso_min_distance_eyring_m"])
+        return {k: (min(v), max(v)) for k, v in out.items()}
+
+    def test_the_declared_support_spans_every_declared_material_regime(self) -> None:
+        """base.yaml declares `mixed` [0.05, 0.80] AND `ceiling_absorptive`
+        [0.85, 0.98] over the same shoebox family, and `test_material_shift`
+        selects the second. The support is the union, not one regime's span."""
+        support = self._declared_support(Config.load(Path("configs/base.yaml")))
+
+        assert support["sabine"] == pytest.approx((0.412, 5.712), abs=0.005)
+        assert support["eyring"] == pytest.approx((0.417, 11.413), abs=0.005)
+        assert support["sabine"][1] > 5.16, (
+            "5.16 m is the `mixed` regime's ceiling (alpha 0.80), not the declared "
+            "support's — ceiling_absorptive reaches alpha 0.98 (AC-46)"
+        )
+
+    def test_the_individual_corners_still_reproduce(self) -> None:
+        """AC-30's three hand-checked numbers, which are correct as far as they go —
+        they are corners of the `mixed` regime, not of the declared support."""
+        assert self._d_min((3.0, 3.0, 2.4), 0.05)["iso_min_distance_sabine_m"] == \
+            pytest.approx(0.41, abs=0.005)
+        assert self._d_min((12.0, 10.0, 5.0), 0.05)["iso_min_distance_sabine_m"] == \
+            pytest.approx(1.29, abs=0.005)
+        assert self._d_min((12.0, 10.0, 5.0), 0.80)["iso_min_distance_sabine_m"] == \
+            pytest.approx(5.16, abs=0.005)
+
+    def test_the_declared_floor_sits_near_the_bottom_of_that_range(self) -> None:
+        """The claim AC-30 refuted: 1.0 m is not "inside the band" — it is near the
+        bottom of a support that reaches 5.71 m by Sabine and 11.41 m by Eyring."""
+        lo, hi = self._declared_support(Config.load(Path("configs/base.yaml")))["sabine"]
+        assert lo < 1.0 < hi
+        assert 1.0 < lo + 0.25 * (hi - lo), "1.0 m is not in the band's interior"
+
+    def test_eyring_is_the_stricter_criterion_at_every_absorption(self) -> None:
+        """-ln(1-a) > a for all a in (0, 1), so Eyring's shorter T60 always gives the
+        larger d_min — by 0.5 % at alpha 0.02 and by ~2x at 0.98. Both are carried
+        because that spread is the disclosure: AC-30 measured 25.4 % of id below
+        d_min by Sabine against 37.2 % by Eyring."""
+        for alpha in (0.02, 0.05, 0.30, 0.80, 0.98):
+            room = self._d_min((12.0, 10.0, 5.0), alpha)
+            assert room["iso_min_distance_eyring_m"] > \
+                room["iso_min_distance_sabine_m"], alpha
+
+    def test_the_report_records_the_realized_fraction_per_split(
+        self, tmp_path: Path
+    ) -> None:
+        run_gen_scenes(tiny_config(), tmp_path, QUIET)
+        report = json.loads(
+            (tmp_path / "scenes" / "placement_report.json").read_text()
+        )
+        for name, entry in report.items():
+            block = entry["below_iso_min_distance"]
+            assert block["n_scenes"] == entry["n_scenes"], name
+            for flag in ("below_iso_min_distance_sabine",
+                         "below_iso_min_distance_eyring"):
+                assert 0.0 <= block[flag]["fraction"] <= 1.0, f"{name}/{flag}"
+                assert block[flag]["count"] <= entry["n_scenes"]
+            # The floor this fraction is the shortfall OF, carried alongside it.
+            assert block["declared_distance_min_m"] is not None, name
+            assert entry["iso_min_distance_sabine_m"]["median"] > 0.0, name
+
+    def test_an_uncharacterized_split_reports_no_below_d_min_number(
+        self, tmp_path: Path
+    ) -> None:
+        """A non-enclosure has no surface-and-absorption d_min either, so it is
+        excluded here for the same reason it leaves the record-length gate."""
+        run_gen_scenes(_openfield_config(), tmp_path, QUIET)
+        report = json.loads(
+            (tmp_path / "scenes" / "placement_report.json").read_text()
+        )
+        block = report["test_openfield"]["below_iso_min_distance"]
+        assert block["n_scenes"] == 0
+        assert block["n_uncharacterized"] == 3
+        assert block["below_iso_min_distance_sabine"]["fraction"] is None
+        assert report["test_openfield"]["iso_min_distance_sabine_m"] is None
