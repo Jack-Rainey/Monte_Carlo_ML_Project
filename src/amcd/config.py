@@ -39,7 +39,59 @@ from . import provenance
 from .acoustics import sabine_rt60
 
 
-_CONFIGS_DIR = Path(__file__).parent.parent.parent / "configs"
+#: Where `configs/` may live, most-preferred first.
+#:
+#: `configs/` used to be resolved three levels up from this module and nowhere
+#: else, which silently assumed a source checkout — so a wheel installed into
+#: site-packages could not find `base.yaml` and failed with a bare
+#: `FileNotFoundError` deep inside `_merge_yaml`, naming a path three parents above
+#: a site-packages directory (F-73). That is the same class of defect as a
+#: platform-keyed branch: a host-layout assumption baked into package code.
+#:
+#: The packaged location is listed FIRST and is not a source checkout's layout, so
+#: shipping `configs/` as package data later needs no change here.
+_CONFIG_ROOT_CANDIDATES = (
+    Path(__file__).parent / "configs",            # packaged alongside the package
+    Path(__file__).parent.parent.parent / "configs",  # source checkout: repo/configs
+)
+
+
+def _resolve_configs_dir() -> Path:
+    """The first candidate that actually holds `base.yaml`.
+
+    Falls back to the source-checkout candidate when none does, so importing
+    `amcd.config` never fails on layout alone and `_CONFIGS_DIR` is always a real
+    Path. A layout that resolves to nothing is reported by `_require_configs`, at
+    the point a caller asks to LOAD a config — with a message naming every
+    location tried, rather than a bare FileNotFoundError from `_merge_yaml`.
+    """
+    for candidate in _CONFIG_ROOT_CANDIDATES:
+        if (candidate / "base.yaml").is_file():
+            return candidate
+    return _CONFIG_ROOT_CANDIDATES[-1]
+
+
+def _require_configs() -> None:
+    """Raise an actionable error if `configs/base.yaml` is not where we look.
+
+    Called before any load. Every value that governs a run comes from a config
+    layer, so there is no default to degrade to — the only useful response is to
+    say where we looked and what would fix it.
+    """
+    if _BASE_YAML.is_file():
+        return
+    tried = "\n".join(f"    {c / 'base.yaml'}" for c in _CONFIG_ROOT_CANDIDATES)
+    raise FileNotFoundError(
+        "amcd cannot find `configs/base.yaml`, which holds every default a run "
+        f"is built from.\n  Tried:\n{tried}\n"
+        "  Run from a source checkout (where `configs/` sits beside `src/`), or "
+        "install a build that ships `configs/` as package data. There is no "
+        "built-in fallback: a value that governs an experiment never has a "
+        "default in Python."
+    )
+
+
+_CONFIGS_DIR = _resolve_configs_dir()
 _BASE_YAML = _CONFIGS_DIR / "base.yaml"
 _MODELS_DIR = _CONFIGS_DIR / "models"
 _REPS_DIR = _CONFIGS_DIR / "representations"
@@ -827,9 +879,17 @@ class Config(BaseModel):
         self._check_split_seeds()
         self._check_inert_split_fields()
         self._check_split_counts_positive()
+        self._check_shift_splits()
+        return self
 
-        # Shift splits: each needs a count and exactly one axis, over a known regime
-        # value that differs from the id baseline (controlled single-axis shift).
+    def _check_shift_splits(self) -> None:
+        """Each shift split is a CONTROLLED single-axis perturbation of the id
+        baseline, and the baseline itself is a declared regime.
+
+        A shift split that matched id on its named axis, or named a regime that
+        does not exist, would still generate and render scenes — and then be
+        reported as a distribution shift that was never applied.
+        """
         id_regime = self.scenes.id_regime
         axis_registries = {
             "geometry": self.scenes.geometry_families,
@@ -864,7 +924,6 @@ class Config(BaseModel):
                 raise ValueError(
                     f"scenes.id_regime.{axis}={id_regime.get(axis)!r} not in scenes.{axis} regimes"
                 )
-        return self
 
     # ── id-pool sizing modes ──────────────────────────────────────────────────
     @property
@@ -1075,6 +1134,10 @@ class Config(BaseModel):
     # ── Loading ───────────────────────────────────────────────────────────────
     @staticmethod
     def _merge_yaml(paths: list[Path]) -> dict:
+        # A missing config ROOT is a layout problem, not a missing-file problem,
+        # and the two need different messages (F-73). Checked here so every entry
+        # point — load, with_overrides, expand_sweeps — is covered by one guard.
+        _require_configs()
         merged: dict = {}
         for path in paths:
             with open(path) as f:
@@ -1189,8 +1252,24 @@ class Config(BaseModel):
         # Whole-package, unlike the per-stage scopes: this one is for a HUMAN
         # asking "which code was this run made with", not a cache key.
         versions["code_version"] = provenance.code_version(provenance.ALL_SOURCES)
+        # WHICH MACHINE, beside which code (F-74). The device was auto-selected and
+        # then recorded nowhere, so under the project's two-host requirement the
+        # same config and the same code_version described a checkpoint trained on
+        # MPS here and on CUDA/CPU on the x86 box with identical provenance. Both
+        # are stamped, and NEITHER is a cache key: a device change must not
+        # invalidate an expensive artifact.
+        versions["device"] = str(provenance.select_device())
+        versions["platform_machine"] = provenance.host_platform()
         (run_dir / "versions.json").write_text(json.dumps(versions, indent=2))
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Plugin blocks + layer merge
+# ─────────────────────────────────────────────────────────────────────────────
+# The `{name, params}` seam (design_spec §7/§8) and the single merge primitive
+# every config layer combines through. `_merge_layer` is what F-11 turns on:
+# params are scoped to the plugin NAME, so switching model/representation cannot
+# leak the previous plugin's parameters into a different schema.
 
 # kind → (package to import so its plugins self-register, registry attribute name).
 _PLUGIN_REGISTRY = {

@@ -13,15 +13,8 @@ from ..data.dataset import EnergyDataset
 from ..data.normalization import denormalize
 from ..representations import build_representation
 from ..models.cnn import build_model  # noqa: F401 — import also triggers registration
+from ..provenance import select_device
 from ..runtime import Verbosity, emit
-
-
-def _select_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
 
 
 def run_infer(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
@@ -50,7 +43,7 @@ def run_infer(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
 
     n_channels = meta["n_channels"]
     norm_stats = meta["norm_stats"]
-    device = _select_device()
+    device = select_device()  # shared selector — see provenance.select_device (F-74)
 
     # Instantiate representation for D3 decode (required per §6, §3-D3)
     rep = build_representation(

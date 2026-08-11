@@ -11,16 +11,9 @@ from torch.utils.data import DataLoader
 from ..config import Config
 from ..data.dataset import EnergyDataset
 from ..models.cnn import build_model  # noqa: F401 — import also triggers registration
+from ..provenance import select_device
 from ..runtime import Verbosity, emit
 from .loss import build_criterion
-
-
-def _select_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
 
 
 def run_train(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
@@ -53,7 +46,10 @@ def run_train(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # Seed weight init and DataLoader shuffle from independent named seeds (inv #5)
     torch.manual_seed(config.seed("weight_init"))
 
-    device = _select_device()
+    # One selector, shared with `infer` and with the `versions.json` stamp, so the
+    # device a checkpoint was trained on cannot differ from the device recorded
+    # for the run (F-74).
+    device = select_device()
     emit(verbosity, "metrics", f"  Device: {device}")
 
     # Datasets + loaders (num_workers=0 for MPS compatibility)
