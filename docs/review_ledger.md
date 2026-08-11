@@ -39,6 +39,35 @@ grep -rn 'F-09' src/ tests/ configs/
 recovers the substance. `configs/` belongs in that list: RD-05's only citation in
 the whole repo is in `configs/base.yaml`.
 
+**DURABLE — the cycle-4 lane-id remap.** Four lanes worked cycle 4 in parallel, each
+allocated row ids by reading this file's max, and collided four ways (RD-93…RD-100 was
+allocated by ALL FOUR for four different findings). File ownership disambiguated the
+citations, and the source tree was remapped in `b5af7b9`. **The four inboxes
+`docs/ledger_inbox/{M,P,S,R}.md` were deliberately NOT renumbered** — they are the
+lanes' own words and hold the substance (every measurement, every probe). So a row
+below cites its inbox and its OLD id, and this table is how you get from one to the
+other. It stays here for the same reason the 16-id exception list does: it must outlive
+every old-id citation in commit messages and on the four lane branches.
+
+| lane | class | as written in the inbox | as filed here |
+|---|---|---|---|
+| M | all (`RD-93…100`, `F-M*`, `AC-*-R*`, `*-B*`) | — | **unchanged** — M used scoped suffixes and collided with nothing |
+| P | research-director | `RD-93…RD-102` | `RD-101…RD-110` |
+| P | falsifier / acoustics / readability | `F-75…80`, `AC-44…48`, `RR-46…59` | **unchanged** |
+| S | research-director | `RD-93, 94, 97` | `RD-111, RD-112, RD-113` |
+| S | falsifier | `S-F*`, `S-1`, `S-2` | **unchanged** |
+| S | acoustics | `AC-45…AC-49` | `AC-49…AC-53` |
+| S | readability | `RR-46,47,48,50,51,52,53,54,55` | `RR-60…RR-68` |
+| R | research-director | `RD-93…RD-104` | `RD-114…RD-125` |
+| R | falsifier (**misfiled as `RD-`**) | `RD-105…RD-122` | `F-81…F-98` |
+| R | acoustics | `AC-40…AC-49` | `AC-54…AC-63` |
+| R | readability | `RR-28…RR-38` | `RR-69…RR-79` |
+
+Note the two classes of genuine hazard this remap defused, both of which a blanket
+find/replace would have caused: lane R's `AC-40…AC-43` and `RR-28…RR-38` collided with
+**live OPEN rows**, and `dry_run.py:136` (lane M) cites the LIVE `AC-43` while
+`gsound_sir.py:61` (lane R) cited R's NEW one — only the latter moved.
+
 **Verified at the close of cycle 3 (2026-08-10, HEAD `ffe87b6`):** all **150**
 distinct ids cited anywhere in `src/`, `tests/`, `configs/`, `README.md`,
 `CLAUDE.md` and `docs/design_spec.md` are either a live row above, one of the 16
@@ -162,123 +191,405 @@ which this cycle acted on before writing them down.
 | RD-55 | builder (follow-on to RD-44) | minor | DEFERRED (gate: E4) | src/amcd/evaluation/room_acoustic.py | The shared window is set by the noisiest leg, so reported ISO absolutes remain a function of the low-ray budget. An E4 "metric vs ray count" curve would mix genuine convergence with a window that shrinks as the budget drops. | Paired improvement — everything E1/E2 report — is unaffected. Implement Lundeby extrapolated-tail compensation (ISO 3382-1 Annex) when E4 first needs budget-independent absolutes. Also the real closure for AC-34's residual. |
 | AC-19-value | acoustics-reviewer / research-director (RD-58, RD-68) | minor | DEFERRED (gate: E2) | configs/representations/spectrogram.yaml (`min_bins_per_band` VALUE) | AC-19's MECHANISM closed in cycle 2 (config-declared ladder, recorded band description, measured in-band fractions). The VALUE is shipped as 1 — today's behaviour — because raising it is a research decision with real cost: at production framing 3 bins drops every band below ~315 Hz, i.e. all low-frequency coverage. Measured basis: the five lowest bands hold ONE FFT bin each and a 63 Hz tone peaks in the WRONG band (58.7 % in the 78.7 Hz band vs 35.5 % in 49.6 Hz). | Blast radius is bounded: reported ISO-3382 metrics are 500/1000 Hz octave-band quantities computed from DECODED WAVEFORMS, not from these bands, so this cannot corrupt an E1 headline number — it affects the learned representation and low-frequency reconstruction. The roadmap fix is **multi-resolution sampling** (paper §6); merge-or-reframe the low bands is preferred, dropping them is the fallback. Decide at E2 with `preprocessed/meta.json`'s recorded in-band fractions in hand. |
 
+
 ---
-## Cycle 4 runs in PARALLEL LANES
+## Cycle 4 — the parallel-lane cycle, and its integration
 
-**2026-08-10.** The loop is now multi-session: `docs/parallel_protocol.md`, with
-the cycle-4 partition declared in `docs/lanes/cycle4.yaml` and a brief per lane
-(`docs/lanes/cycle4-{M,P,S,R}.md`). Nothing about the review standard changed —
-reviewers still count only on the integrated tree, and the definition of done is
-untouched. What changed is who applies fixes.
+**2026-08-11. Cycle 4 ran as FOUR PARALLEL LANES and has been INTEGRATED.** Protocol:
+`docs/parallel_protocol.md`; partition: `docs/lanes/cycle4.yaml`; each lane's own record
+(kept verbatim, and holding the substance of every row folded below):
+`docs/ledger_inbox/{M,P,S,R}.md`.
 
-Two rules bear directly on this file:
+### The protocol held where it was designed to
 
-- **Lanes do not write this ledger.** One writer, the integrator. Lanes write to
-  `docs/ledger_inbox/<lane>.md`; the integrator folds them in at the gate. The
-  PreToolUse hook in each worktree refuses the write, so this is enforced, not
-  requested.
-- **Rows marked "FIX APPLIED, awaiting re-review" are NOT lane work.** They are
-  confirmations the post-merge reviewer pass produces. Assigning one to a lane
-  invites a second fix on top of a first that was never checked. The partition
-  file lists only rows needing work, plus an `integrator_queue:` naming every row
-  deliberately left out and why — RD-73 was raised because a plan's coverage
-  figure silently equalled its own scope.
+**Zero textual merge conflicts across all four lanes.** Rule 1 (ownership by file,
+exclusive) did exactly what it claims. The suite came back **497 passed** after ONE
+cross-lane fix, which lane P had predicted, verified and written down before handing
+over. Step 4's fixed-seed `ci_table.csv` A/B against `experiments/cycle4_baseline` moved
+**exactly one row** — `test_material_shift/EDT`, 7 cells — which is lane M's own
+pre-registration, cell for cell.
 
-**Reviewed by `research-director` TWICE before any lane started.** First pass:
-DRIFTING, RD-81…87. Second pass over the revision: **on-track**, all seven
-CONFIRMED FIXED (rows deleted — `git log -S 'RD-83'` recovers them), five new
-rows RD-88…92, all addressed here.
+**Where it did NOT hold: row-id allocation.** See the durable remap table in this file's
+header. The protocol has no id-allocation rule and four lanes collided four ways
+(RD-126).
 
-What the two passes caught that mattered: rule 2 named the wrong files
-(`ci_table.csv` is written by `stats/aggregate.py:324`, `summary.txt` by
-`reporting/tables.py:144` — both lane P, not M); nothing checked a row was
-*fixable* inside its lane; the accounting claim was **asserted by nothing** —
-the partition test never opened this file (RD-88); and the subprocess worker, a
-declared cycle-4 deliverable, was **no lane's deliverable** (RD-89). All
-independently verified by the builder against the code before acceptance.
+**A correction to the step-4 claim (RD-136).** "P/S/R declared expected-neutral and are
+neutral" overstates lane S: S's neutrality is **structural** (scene specs are written
+before the gate runs, and every spec is byte-identical), not measured. `ci_table.csv`
+*cannot discriminate* for F-71, because no shipped config declares a
+`characterization: none` family — S said so itself and the integrator repeated the
+stronger claim. This is RD-91's concern recurring inside the detector's own evidence.
 
-**Cycle 4 is Steps 2+3, not only ledger rows.** RD-81's decisive argument: RD-33a
-lifts on BOTH zero OPEN rows on its path list AND the RD-17 probe, and RD-17
-"cannot run before Steps 2/3 exist" — so clearing lanes M and S to zero could not
-have lifted the gate. **Lane R** builds Steps 2+3, split from S on LOAD not
-taxonomy (S already owned those files and had no rows for them).
+### The two render scenes (RD-17's grant: 2 spent, ≤1 remains)
 
-**Precisely: cycle 4 UNBLOCKS RD-33a(ii); it does not LIFT it.** RD-17 is
-assigned to no lane. Cycle 5 runs the probe. Do not plan cycle 5 as though the
-gate had moved (RD-89c).
+Both decision rules were **fixed in writing before the renders ran**. This project has
+twice shipped a metric-path change defended on evidence chosen afterwards (AC-36, F-67).
 
-**Rows deferred to a gate that has ARRIVED are not deferred (RD-90).** The
-integrator re-statused RD-08, RD-24, RD-67, RD-21 and RD-20 from DEFERRED to
-OPEN before any worktree existed — its own write, so rule 3 is untouched.
-Otherwise the cycle could have reported "done" with all five untouched and
-`render()` still raising at `gsound_sir.py:124`.
+**AC-54 (was lane R's AC-40) — UPHELD.** 5×4×3 m, α = 0.30, T30 on channel 0 through
+the real ISO path. Rule: ≤0.43 s → nominal, ≥0.49 s → α_eff, else indeterminate.
 
-Accounting, printed in `cycle4.yaml` and — since RD-88 — actually **checked** by
-`test_the_partition_covers_exactly_the_ledgers_open_rows`, which reads this file
-and asserts the union of the four lists equals its OPEN set in both directions:
+```
+MEASURED T30 = 0.5441 s        (500 Hz 0.5660 · 1000 Hz 0.5222)
+  nominal α = 0.30      Sabine 0.343 s   Eyring 0.288 s
+  α_eff = 1−√(1−α)      Sabine 0.629 s   Eyring 0.576 s
+        = 0.1633
+```
 
-    70 OPEN = 29 lane + 14 integrator_queue + 22 awaiting_re_review + 5 (RD-88…92)
+**GSound's effective wall absorption is 1−√(1−α), not α.** Upstream multiplies an
+ENERGY-domain distance attenuation by an AMPLITUDE-domain reflectivity. Consequence, and
+it is large: every Sabine/Eyring/DRR/critical-distance/d_min number in
+`scenes/generator.py`, the `ir_duration: 4.25` choice, and the
+`max_t60_over_ir_duration_frac` gate are computed for a room that is **not the room
+gsound renders**. Inert under `dry_run` (its own scaffold, its own convention); live the
+moment the real backend renders a dataset.
 
-A naive `| OPEN |` parser miscounts: F-45 is `OPEN (narrowed)`. Match as a prefix.
+**F-89 (was lane R's RD-113) vs AC-58 (was its AC-44) — ADJUDICATED, and both were
+partly wrong.** Lane R flagged this as an unresolved contradiction and explicitly
+refused to close either row on the other's evidence, because the deciding experiment was
+outside its one-scene grant. One scene, both budgets. Rule: |Δ index| > 480 samples
+(10 ms) → F-89 upheld.
+
+```
+native_ir_samples    low 44647    high 46544
+trunc idx   500 Hz   low 30000    high 28778    Δ 1222  (25.5 ms)
+trunc idx  1000 Hz   low 28985    high 27505    Δ 1480  (30.8 ms)
+```
+
+- **F-89's CONCLUSION is UPHELD**: the shared truncation index **tracks the ray budget**.
+  AC-17's rationale ("the index is noise-floor dependent, so take the min over legs") no
+  longer describes the mechanism, and an E4 metric-vs-ray-count curve would move its own
+  measurement window along with the metric. This is also the **first real-render
+  confirmation of RD-55**, which predicted exactly this and is DEFERRED at E4.
+- **F-89's stated MECHANISM is REFUTED**: it predicted `index = native + 240`, from a
+  zero-pad-degenerated noise floor. The measured indices (~600 ms) sit **well inside**
+  native support (~930–970 ms), so Lundeby is finding a real crossing, not falling
+  through to the pad. And the HIGH budget gives the **shorter** index despite the
+  **longer** native IR — the opposite of length-tracking.
+- **AC-58's neutrality claim survives as stated** (padding per se is neutral here,
+  precisely because the index lands inside native support) but does not rescue AC-17.
+
+**Wall clock, a bare observation and NOT a feasibility finding** (RD-17 owns that):
+low leg 1.0 s, high leg **181.6 s** — 182× for a 40× budget increase, superlinear, n=1.
+
+### RD-33a, stated PER CONDITION (RD-128)
+
+Cycle 4 **unblocks (ii)** and **lifts nothing** (RD-89c). Reported per condition because
+a single sentence hid the direction of travel:
+
+- **(ii) the RD-17 probe** — UNBLOCKED. `GsoundSirSimulator.render` returns a real
+  `IRResult` through `build_simulator`; three renders have now run. The probe itself is
+  cycle 5's, with ≤1 scene of the grant left.
+- **(i) zero OPEN rows on the path list** — **REGRESSED.** Cycle 4 added roughly ten new
+  OPEN rows on `src/amcd/evaluation/**` and roughly ten on `src/amcd/scenes/**`, and the
+  integrator's queue advanced (i) by approximately zero. On current evidence the finding
+  rate on that path list **exceeds** the closure rate, which is the RD-33 → RD-33a → RD-76
+  drift pattern one level down.
+
+**This is a decision for the USER, not the builder, and it is deliberately not taken
+here:** either scope (i) by SEVERITY (zero OPEN blocker/major on the path list, minors
+explicitly DEFERRED at E1-report with reasons), or freeze (i) against a named row set.
+Do not let it be relaxed silently by a cycle that simply stops counting.
+
+### Accounting (RD-127 — print it, and name what is in no list)
+
+Enumerated from the four inboxes. **~138 new findings** arrived with the merge:
+
+```
+lane M   28 = 11 F-M*  +  7 reviewer-suffix (AC-42-R1 … AC-19-R7)  +  3 builder  +  7 RD plan-time
+lane P   35 = 10 RD    +  6 F-75…80  +  5 AC-44…48  +  14 RR-46…59
+lane S   24 =  3 RD    +  7 S-*      +  5 AC-49…53  +   9 RR-60…68
+lane R   51 = 12 RD    + 18 F-81…98  + 10 AC-54…63  +  11 RR-69…79
+         ───
+        138  + 11 integrator rows (RD-126…RD-136) = 149
+```
+
+Rev 1 of the integration plan named 6 taken and 13 deferred — i.e. its coverage figure
+equalled its own scope, which is **RD-73's exact shape**, and RD-73 is still OPEN two
+sections above. `research-director` caught it on the plan (RD-127). Every id is named
+below; **none is silently absent**, and the substance of each is in its lane's inbox
+under the OLD id per the header's remap table.
+
+### Folded rows — the ones a cycle-5 planner must not miss
+
+Full rows for findings whose consequence is a **wrong reported number**, a **false
+clearance**, or a **blocker**. Everything else is enumerated in the block below, OPEN,
+with its substance in the inbox named beside it.
+
+| ID | agent | sev | status | anchor | finding | resolution |
+|----|-------|-----|--------|--------|---------|------------|
+| AC-54 | acoustics-reviewer (lane R, was AC-40) | blocker | OPEN | src/amcd/simulators/gsound_sir.py; src/amcd/scenes/generator.py; configs/base.yaml | **EFFECTIVE ABSORPTION IS 1−√(1−α), CONFIRMED BY RENDER.** Upstream forms path energy as `getDistanceAttenuation(d) × Π reflectivity`, mixing an ENERGY-domain term with an AMPLITUDE-domain one (`SoundMesh.cpp:223`, `gsSoundPropagator.cpp:1410/1578/4518`). MEASURED on a 5×4×3 m, α=0.30 render: T30 = 0.5441 s against 0.343 s Sabine-nominal and 0.629 s Sabine-α_eff, on a rule fixed before the run. The dataset's declared acoustics describe a room that was never rendered. | Either pre-compensate at the `createbox` call site (pass `1−(1−α_target)²`) or re-derive every closed form in `scenes/generator.py` from α_eff. **Declare which in config; do not leave the two definitions coexisting.** Blocks the E1 dataset render: `ir_duration`, the record-length gate and every d_min/DRR disclosure inherit it. Evidence: `docs/ledger_inbox/R.md` (as AC-40) + this file's integration record. |
+| F-81 | falsifier (lane R, was RD-105) | blocker | OPEN | configs/simulators/gsound_sir.yaml (`render_python`); src/amcd/pipeline.py `_render_fingerprint`; src/amcd/simulators/render.py | **THE RENDER CACHE IDENTITY IS HOST-DEPENDENT — a direct cross-platform violation.** `render_python` sits in `config.simulator.params`, which `_render_fingerprint` hashes WHOLE. PROBE: base.yaml → `6999713b8247…`; base.yaml + a host layer → `51033e7d57c0…`. A 720-scene dataset rendered on this Mac fails loudly on the declared x86_64 second host, demanding a byte-identical re-render. `render.py` already declares this value not a property of the dataset while `pipeline.py` uses it as part of the dataset's identity. | Hash the params that DETERMINE THE IR; exclude host-scoped and disclosure-only params from the single `_HOST_SCOPED_PARAMS` declaration `render.py` already uses. **Fix with F-82** (`max_discarded_tail_db`, a pure disclosure threshold that also invalidates the render cache) — one defect, one edit site. Test: `_render_fingerprint` invariant to `render_python`. |
+| F-75 | falsifier (lane P) | blocker | OPEN (narrowed) | src/amcd/pipeline.py `_render_fingerprint`, `STAGE_FINGERPRINT` gen-scenes/render | **A REPORTED NUMBER IS STILL REACHABLE THROUGH A CACHED STAGE, AND `versions.json` VOUCHED FOR IT.** A two-character edit to `simulators/dry_run.py` leaves all nine stages `[skip]` at exit 0 while a fresh run_dir under the same code reports different CIs (`test_geometry_shift` C50 `improvement_mean` −0.6815340 cached vs −0.6824248 fresh). Worse than the F-53 pattern: `versions.json` was RE-STAMPED with a whole-package `code_version` byte-equal to the fresh run's, so the canonical provenance channel positively asserted that the new code produced the old numbers. | **FALSE-WITNESS HALF CLOSED** in lane P: `code_version_unscoped` recorded beside (never inside) the fingerprint, a stderr warning for unprotected stages, and `code_version_describes` in `versions.json`. **THE STALENESS ITSELF IS THE STANDING DECISION — see RD-107**, which the user has now ruled on (wire `render` + `gen-scenes`); NOT yet implemented. Evidence: `docs/ledger_inbox/P.md`. |
+| RD-107 | research-director (lane P, was RD-99) | major | OPEN | src/amcd/pipeline.py `STAGE_FINGERPRINT` gen-scenes, render | `gen-scenes` and `render` carry NO `code_version` — F-64's defect class one link upstream. A change to `scenes/generator.py` (placement and admission sampling) or to a simulator backend is invisible to the cache. | **USER DECISION 2026-08-11: WIRE BOTH, accepting the re-render cost.** NOT yet implemented. `research-director` then found (RD-133) that the naive wiring costs more than was agreed: `provenance.py:131` unions every scope with `_CORE_SOURCES` (`config.py`, `runtime.py`, `registry.py`, `acoustics.py`, `provenance.py`), so an `acoustics.py` or `select_device` edit would invalidate a 720-scene emulated render — and scope `("simulators",)` would let a `dry_run.py` scaffold tweak invalidate the REAL dataset. Implement as: `gen-scenes` → `("scenes",)`; `render` → **active backend module + `simulators/base.py`, declared by the plugin**; and take RD-104's `src/amcd/device.py` split so `select_device` leaves `_CORE_SOURCES`. |
+| AC-45 | acoustics-reviewer (lane P) | major | OPEN | src/amcd/pipeline.py `STAGE_FINGERPRINT["diagnostics"]`; src/amcd/diagnostics/probe.py | **A STALE CARRIER-CEILING CLEARANCE IS A FALSE CLEARANCE OF THE PROJECT'S OWN PREMISE.** D0b's output is not a threshold report, it is a PHYSICAL VERDICT — "CARRIER CEILING CLEARS … Proceed to E1". With no fingerprint, `_is_done` returns True on the bare sentinel and NOTHING invalidates it. MEASURED on a complete run_dir: `diagnostics=SKIP(cached)` under doubled `ir_duration`, changed `ambisonics_order`, changed ray budgets and changed `sample_rate` — every one of which changes the residuals being compared. `probe.py` also imports `evaluation.room_acoustic` with no `code_version`. | Wire `diagnostics` with `code_version(("diagnostics","evaluation","representations","data"))` + the d0a/d0b keys + `iso_eval_freqs`/`metric_onset_rel_db`/`metric_band_resolvability_margin`/`sample_rate`, chained to `preprocess`. **Rate RD-108 major, not minor.** NOTE: the integrator's queue makes `diagnostics` the standing example of the unwired path in two test files, which institutionalises the hole — fix together (RD-129). |
+| S-F1 | falsifier (lane S) | major | OPEN | src/amcd/diagnostics/probe.py D0b verdict loop | **D0b CLEARS OVER ATTRITION IT CANNOT SEE — live today, no cache needed.** `_verdict` degrades to N/A only at `n == 0`, and the new coverage bracket keys on `len(dropped)`, so a metric averaged over a SUBSET of scored scenes prints as a bare number with `(PASS)`. CONFIRMED on the canonical dry run: `train` reports `n_scenes=12 n_attempted=12 dropped=0` while `T30 n=11` and `C50 n=10`, and the stage prints `CARRIER CEILING CLEARS … Proceed to E1`. The comment above the verdict states the contract as "any missing metric is insufficient coverage"; the code implements "a metric with ZERO scenes". Sub-defect: `t30_thresh` scales a nanmean over SCORED scenes while `t30_r` averages over NON-NaN-RESIDUAL scenes — two populations on the two sides of one ratio test. | Not fixable inside lane S: needs a config-declared minimum coverage in `configs/base.yaml` (no hidden defaults). Print per-metric `n`. Test: per (split, metric), `n == n_scenes == n_attempted` or the verdict is INDETERMINATE. Pairs with AC-45. |
+| F-M2 | falsifier (lane M) | major | OPEN | src/amcd/evaluation/room_acoustic.py; src/amcd/stats/aggregate.py; src/amcd/reporting/tables.py | **THE REPORTED TABLE GOT QUIETER ABOUT A CAVEAT THAT STILL EXISTS.** AC-38's disclosure reaches `metrics.parquet` (`n_bands_resolvability_limited`, scene_0022/EDT = 1) but `ci_table.csv` has no such column and `summary.txt` Caveats shows only `3 high-variance`. Before the change that row read `1 partial-band`; `n_partial_band` went 1 → 0 and **nothing replaced it**. `room_acoustic.py` asserts the opposite ("a reader must be able to see which numbers carry the caveat"). Confirmed in the integrator's own step-4 A/B: the header is unchanged, so no column landed. | Spans lane P (RD-82): one `_count_true` entry in `stats/aggregate.py` beside `n_estimator_variance_limited`, one Caveats part in `reporting/tables.py`. **AC-38 MUST NOT BE CLOSED until this lands** — lane M says so itself. |
+| F-M7 | falsifier (lane M) | major | OPEN | src/amcd/stats/aggregate.py `bootstrap_ci`; src/amcd/reporting/tables.py | **AT n=3 THE REPORTED "95 % CI" IS IDENTICALLY THE SAMPLE RANGE.** 18 of 20 rows have `improvement_ci_lower == min(paired)` and `improvement_ci_upper == max(paired)` exactly; nominal coverage of [min,max] at n=3 is ~0.75, not 0.95, yet `summary.txt` labels it `Imp 95% CI` and every row's interval excludes 0. **INDEPENDENTLY CONFIRMED IN THE INTEGRATOR'S STEP-4 A/B**: `improvement_mean` moved −0.0133272 → −0.0115544 while `improvement_ci_lower`/`_upper` stayed BIT-IDENTICAL — the interval cannot respond to the middle observation. | `bootstrap_ci` already special-cases n==1 and `mdes()` already returns NaN at n≤2 (F-13/F-14); the analogous small-n guard is the missing piece. **Take it WITH F-70** — adding a second CI column under the same mislabel ships the defect twice (RD-130). If deferred, both columns must be LABELLED uncalibrated below n=4, not as 95 %. |
+| F-89 | falsifier (lane R, was RD-113) | major | OPEN | src/amcd/evaluation/room_acoustic.py `_lundeby_truncate`, `_shared_truncation_per_band`; src/amcd/simulators/gsound_sir.py (the zero pad) | **THE SHARED TRUNCATION INDEX TRACKS THE RAY BUDGET — ADJUDICATED BY RENDER, and the mechanism is not the one proposed.** Measured on one scene at both budgets: index Δ 1222 samples (25.5 ms) at 500 Hz and 1480 (30.8 ms) at 1000 Hz, against a 480-sample tolerance fixed before the run. AC-17's rationale ("noise-floor dependent, so take the min over legs") no longer describes the mechanism. REFUTED half: the predicted `index = native + 240` from a degenerate zero-pad floor does NOT hold — indices (~600 ms) sit well inside native support (~930–970 ms), and the HIGH budget yields the SHORTER index despite the LONGER native IR. | Restate AC-17 before any E1/E4 number. **First real-render confirmation of RD-55** (DEFERRED at E4), which predicted exactly this; the two should be resolved together, and RD-55's Lundeby extrapolated-tail compensation is the candidate fix. Do NOT close AC-58 on this row's evidence or vice versa. |
+| AC-50 | acoustics-reviewer (lane S, was AC-46) | major | OPEN | configs/base.yaml (`distance_range` justification); src/amcd/scenes/generator.py | **THE d_min RANGE AC-30 ASKS THE INTEGRATOR TO WRITE INTO base.yaml IS ITSELF WRONG.** AC-30's [0.41, 5.16] m is the `mixed`-regime span only (α ≤ 0.80); `ceiling_absorptive` declares α ∈ [0.85, 0.98] on the SAME shoebox family, and `test_material_shift` selects exactly that regime. Over every geometry × material corner: Sabine **[0.412, 5.712] m**, Eyring **[0.417, 11.413] m**, max at 12×10×5 m, α = 0.98. Writing 5.16 would install a fresh understatement of 1.11× (Sabine) / 2.20× (Eyring) on the split whose realized shortfall is 92.5–100 %. Caught independently by lane S, its falsifier and its acoustics-reviewer. | Write the full product range, both variants. **AND NOW: these are NOMINAL-α numbers, which AC-54 has just shown is not the rendered room** — at α_eff the same corner gives ≈5.35 m Sabine / ≈8.07 m Eyring. Either resolve AC-54 first or write the range explicitly as "nominal α as configured; pending AC-54", and carry the same caveat onto `placement_report.json`'s `below_iso_min_distance` block, which is derived the same way (RD-131). |
+| RD-111 | research-director (lane S, was RD-93) | major | OPEN | docs/lanes/cycle4.yaml; rows RD-65, AC-30, RR-32 | **THREE HALF-REMEDIES LOOK WHOLE, AND DELETION IS THIS PROJECT'S ONLY "RESOLVED" MARKER.** RD-65, AC-30 and RR-32 each have a residual in a file lane S does not own, declared only in a YAML comment. `generator.py` now looks clean for all three, so a post-merge reviewer is invited to delete three rows that are each ~two-thirds unmet — and the cycle's accounting counted all three as fully covered. Related: the partition test validates declared `fix:` paths against `owns` but never against the row's own ANCHOR, which is how a spanning row passes rule 4. | **DO NOT DELETE RD-65, AC-30 or RR-32 at step 7.** Residuals: RD-65 → `reporting/tables.py` (per-split over-limit counts into the E1 table); AC-30 → `configs/base.yaml` (the corrected range, and see AC-50); RR-32 → `config.py` `_check_split_roles` (the F-44 transcript). Next cycle's partition gets a `partial_residual:` list, and the partition test flags any row whose ledger anchor names a file outside its owning lane. |
+| RD-126 | research-director (integrator) | major | OPEN | docs/parallel_protocol.md | **THE PROTOCOL HAS NO ROW-ID ALLOCATION RULE, AND FOUR LANES COLLIDED FOUR WAYS.** Each lane ran `research-director` on its plan and reviewers on its branch, and each numbered from this file's max — so `RD-93…RD-100` names four different findings depending on which inbox you read, and lane R's `AC-40…AC-43` / `RR-28…RR-38` collided with LIVE OPEN rows. Resolved for cycle 4 by a per-lane remap (header table), but the next cycle repeats it by construction. A blanket find/replace would additionally have corrupted lane M's citation of the live AC-43. | Add to `docs/parallel_protocol.md` "Setting up a cycle": the partition file allocates a DISJOINT id block per lane, and `tests/test_lane_partition.py` asserts the blocks do not overlap each other or the ledger's used set. Lane M's scoped-suffix convention (`F-M1`, `AC-42-R1`) is the cheaper alternative and collided with nothing — either is fine, but it must be declared. |
+| RD-128 | research-director (integrator) | major | OPEN | ledger RD-33a condition (i) | **RD-33a CONDITION (i) REGRESSED THIS CYCLE AND THE INTEGRATION PLAN WAS SILENT ON IT.** ~10 new OPEN rows on `src/amcd/evaluation/**` and ~10 on `src/amcd/scenes/**`, against a queue that advances (i) by ~zero. Finding rate on the path list exceeds closure rate — the RD-33 → RD-33a → RD-76 drift pattern one level down, and RD-76 exists precisely to stop the lift condition drifting. | **USER DECISION, not the builder's.** Either scope (i) by SEVERITY (zero OPEN blocker/major on the path list; minors explicitly DEFERRED at E1-report with reasons), or freeze (i) against a named row set. Stated per condition in the integration record above so it cannot be relaxed by a cycle that stops counting. |
+| RD-129 | research-director (integrator) | major | OPEN | src/amcd/pipeline.py; tests/test_stage_cache.py; tests/test_simulator_seam.py | Wiring `gen-scenes`/`render` (RD-107) makes `diagnostics` the **standing example of the unwired path** in two test files, institutionalising AC-45's false clearance in the same edit that closes the neighbouring holes. | Take the `diagnostics` fingerprint (AC-45 / RD-108) in the same change, or state in both test docstrings that the example is a KNOWN OPEN HOLE with its row id, not a sanctioned design. |
+
+### Reading guide — what actually matters in each lane's remainder
+
+Navigation only; the ROWS are two sections below. Written because 130 compact rows do not
+tell a cycle-5 planner where to look first.
+
+**Lane M — `docs/ledger_inbox/M.md`.** Fix applied in-lane, awaiting re-review:
+`AC-42-B1`/`AC-42-R1`/`F-M1` (one finding, three raisers — the first AC-42 guard was a
+false "float32 residue" that was really an undeclared C50 ceiling censoring the PHYSICAL
+legs; removed, C50 now inherits T30's verdict only), `AC-37-R5` (the AC-37 guard maxed
+over CHANNELS, leaving channel 0 — the only one the ISO path reads — unprotected),
+`RR-37`, `RR-38`, `RR-45` (verified already closed), `AC-39`, `F-68`.
+Still OPEN: `F-M3` `F-M4` `F-M5` `F-M6` `F-M8` `F-M9` `F-M10` `F-M11` · `F-68-R2`
+`F-68-R3` `AC-37-R4` `AC-26-R6` `AC-19-R7` · `AC-28-B2` `F-69-B4` · M's plan-time
+`RD-93` `RD-94` `RD-96` `RD-97` `RD-98` `RD-99` `RD-100` (all folded into the work).
+Load-bearing among these: **`F-M5`** — the lane's own A/B has near-zero power (AC-37 and
+AC-42 have ZERO coverage in it, AC-38's changed branch has n=1), so a quiet table is
+consistent with three of four changes never executing; **`F-M4`** — residual pred-side
+selection on the dependent variable, now with censoring probability a function of room
+absorption, correlated with the `test_material_shift` axis; **`AC-37-R4`/`F-M3`** — the
+AC-37 guard's limiting band is always the ~25 Hz single-FFT-bin band, so it is a
+spectral-flatness test calibrated as a level test.
+
+**Lane P — `docs/ledger_inbox/P.md`.** `RD-101` `RD-102` `RD-103` `RD-104` `RD-105`
+`RD-106` `RD-108` `RD-109` `RD-110` · `F-76` `F-77` `F-78` `F-79` `F-80` · `AC-44`
+`AC-46` `AC-47` `AC-48` · `RR-46`…`RR-59`. Load-bearing: **`AC-44`** confirms F-75/RD-107
+from the physics side and widens it — eval reads `renders/<scene>/high.npy` as the
+ISO-3382 REFERENCE leg, so this is not "the renders are stale", it is "the reference the
+improvement is measured against is stale"; **`RD-104`** (`select_device` sits in
+`provenance.py`, hence in `_CORE_SOURCES`, so editing the MPS→CUDA→CPU fallback would
+invalidate every fingerprinted stage — the fix is `src/amcd/device.py`, and RD-107's
+implementation should take it); **`F-77`/`F-78`/`F-79`** are broken-guard findings lane P
+raised against its OWN new tests and fixed.
+
+**Lane S — `docs/ledger_inbox/S.md`.** `RD-112` `RD-113` · `S-1` `S-2` `S-F4` `S-F5`
+`S-F6` `S-F7` · `AC-49` `AC-51` `AC-52` `AC-53` · `RR-60`…`RR-68`. Load-bearing:
+**`AC-49`** — `_C_TIMES_SABINE_K` is a SECOND declaration of Sabine's constant that
+disagrees with `acoustics.py`'s by 0.07 % (the AC-24 shape again); **`AC-52`** — the
+Eyring d_min, which carries the headline shortfall, is pinned only by an INEQUALITY;
+**`AC-51`** — `critical_distance_m` and `iso_min_distance_*_m` use incompatible
+absorption-area conventions and the record states neither.
+
+**Lane R — `docs/ledger_inbox/R.md`.** `RD-114`…`RD-125` · `F-82`…`F-88`, `F-90`…`F-98` ·
+`AC-55` `AC-56` `AC-57` `AC-59`…`AC-63` · `RR-69`…`RR-79`. Load-bearing: **`AC-55`**
+(`diffuse_depth: 100` is physically a TIME bound, so 4.1 % of `mixed` scenes — 14.0 %
+under AC-54, now CONFIRMED — have a diffuse field that dies before the T30 window
+closes, and nothing checks it); **`AC-56`** (pygsound compiles `maxIRLength = 3.0 s` and
+does not expose it, so RD-21's truncation QC is structurally dead and 29.4 % of every
+record is guaranteed zeros); **`AC-57`** (the `acn_n3d` stamp carries an undeclared
+Condon-Shortley phase = a 180° yaw — lane R measured it and stamped
+`sh_condon_shortley_phase`, so this is fix-applied/awaiting re-review, and it CORRECTS
+its own reviewer, which claimed the convention was wrong outright); **`F-84`** (a
+zero-energy render is indistinguishable from a healthy one); **`F-85`**
+(`kept_energy_percentage` fabricates 0.0 for an undefined ratio).
+
+**Integrator — this file.** `RD-127` (the plan's coverage equalled its own scope —
+RD-73's shape, now printed above) · `RD-130` (ship F-70's second CI column only with
+F-M7's small-n guard, or label both uncalibrated) · `RD-131` (AC-50's range is
+nominal-α and AC-54 has now falsified nominal α) · `RD-132` (the renumber mapping must
+be durable and each row must name its inbox + old id — done in the header) · `RD-133`
+(`_CORE_SOURCES` makes the naive RD-107 wiring far more expensive than agreed — folded
+into RD-107's resolution) · `RD-134` (RD-106 must be fixed with F-81, one edit site) ·
+`RD-135` (pre-register the render decision rules — done, both) · `RD-136` (lane S's
+step-4 neutrality is structural, not measured — corrected above; carry the distinction
+into protocol gate step 4).
 
 ---
 ## Resume here
 
-**2026-08-10 — cycle 3 (clusters A, B, C + part of E) COMPLETE and committed. Full
-four-reviewer pass RUN. NOT CLEAN — 61 OPEN. RD-33a HAS NOT LIFTED. No real
-gsound render.**
+**2026-08-11 — cycle 4 (four parallel lanes) MERGED AND FOLDED. NOT COMPLETE.**
+HEAD after this commit; suite **497 passed**; `experiments/cycle4_baseline` is the A/B
+reference. Plan: `~/.claude/plans/peppy-swinging-barto.md`, reviewed by
+`research-director` before implementation (returned DRIFTING, 11 findings, all folded —
+they are `RD-126`…`RD-136`).
 
-HEAD `5ab82b5`. Suite **354 passing** (was 296). Plan:
-`~/.claude/plans/dynamic-growing-puppy.md`, reviewed by `research-director` BEFORE
-implementation (its RD-73…RD-80 are now rows, per RR-40 — I had acted on them
-without writing them down, so `git log -S` could not have recovered them).
+**Integration gate status** (`docs/parallel_protocol.md`, 7 steps):
 
-**What cycle 3 closed, each verified by a command whose output is in the commit:**
-F-53 (five hyperparameter changes: nine `[skip]`s + exit 0 → refusal naming all
-five + exit 1), F-54, F-56, F-57, F-58, AC-25 (a degenerate pred left high/low
-**bit-identical**), AC-26/AC-27's threshold half, AC-29, AC-31, AC-32, AC-33,
-AC-34, AC-35, AC-28 (C50 flat to 0.02 dB over 16x distance → 10.5 dB monotone),
-RD-64/RD-75, F-45, F-59, F-61, F-62, RR-24/26/27/28/29/30/31, F-51.
+| step | state |
+|---|---|
+| 1 merge four lanes | **DONE** — zero textual conflicts |
+| 3 full suite | **DONE** — 497 passed, one cross-lane fix |
+| 4 dry run + fixed-seed A/B | **DONE** — exactly one row moved, as pre-registered |
+| 2b two render scenes | **DONE** — AC-54 UPHELD, F-89 adjudicated |
+| 5 fold inboxes | **DONE** — this section and the two above |
+| 2 integrator queue | **NOT DONE** — 7 items, listed below |
+| 6 four-reviewer pass | **NOT DONE** — this is the pass that counts |
+| 7 delete confirmed rows | **NOT DONE** — blocked on step 6, correctly |
 
-**The three things the next cycle must read first:**
+**The integrator queue, NOT started, in priority order.** All seven were scoped and
+justified in the approved plan:
 
-1. **AC-37 (major, NOT fixed).** `min_db` acts as an INJECTED ENERGY FLOOR in the
-   decoded pred: an oracle prediction — `decode(encode(high), low)`, definitionally
-   perfect — reads T30 **+24.4 % at −30 dB of IR level and +935 % at −40 dB**, with
-   a `min_db: -200` control clean at ≤0.38 %. INERT under dry_run, so it first
-   appears on the emulated gsound render RD-33a gates, and will look like a model
-   failure. Not fixed because choosing among its three remedies is a methodology
-   decision and belongs in Plan Mode. Its known-answer test is cheap and needs no
-   render.
-2. **F-63 / F-64 / F-65 (major).** Three routes still reach a REPORTED number
-   through a cached stage, all reproduced end to end with exit 0: `stats`+`report`
-   carry no code version, `preprocess` carries none (so the encoded dataset, the
-   normalization stats and the leakage-critical split assignment are served under
-   changed code, and the refusal message names the wrong stage), and
-   `metric_edt_variance_limited_s` — a key I added THIS cycle — is in no
-   fingerprint. **The cycle's claim that the cache protects the reported result is
-   true for train/infer/eval and false for the stages that produce the table.**
-3. **F-66 (major).** `eval` and `infer` scopes omit `data`, which they both call on
-   every reported leg. This is precisely the risk I accepted when I chose per-stage
-   scoping over a whole-package hash — and the test I cited as the mitigation does
-   not check what its docstring claims.
+1. **F-M2** — AC-38's missing reported column. The table is currently QUIETER about a
+   live caveat than it was before cycle 4. Small: one `_count_true` in
+   `stats/aggregate.py`, one Caveats part in `reporting/tables.py`.
+2. **F-70 + F-M7 together** (RD-130) — imputed-population CI, and the small-n guard
+   without which it ships under a demonstrably wrong `95 %` label.
+3. **F-81 + F-82** (RD-134) — host-scoped and disclosure-only params out of
+   `_render_fingerprint`. Cross-platform blocker.
+4. **RD-107** — wire `gen-scenes` + `render`, with the per-backend render scope and the
+   `device.py` split RD-133 showed are required to keep the cost to what was agreed.
+5. **AC-45 / RD-108 / S-F1** (RD-129) — `diagnostics` fingerprint and a D0b verdict that
+   is a function of coverage. Two independent routes to a FALSE CLEARANCE.
+6. **AC-50 / AC-30** — the corrected d_min range, now needing AC-54's caveat (RD-131).
+7. **RR-43** — one comment naming what `._` files are. `research-director` ruled the
+   filter correct and staying: a name filter, not a platform branch.
 
-**A caution about this cycle's own metric-path changes.** Two of them were found by
-reviewers AFTER I had applied and defended a previous version: the `padtype="odd"`
-reflection (AC-36) and then the single-sample fold (F-67), whose EDR step moved
-paired EDT improvement 77 % and deleted a split's MDES while my evidence was
-entirely C50. The current mirror-fold is verified on EDT as well as C50, but the
-pattern is clear: **a change to `_band_energy` moves every reported ISO number, so
-its pass condition must be a fixed-seed `ci_table.csv` A/B across all metrics, not
-a known-answer probe on one.**
+**Read these three first.**
 
-**NOT DONE, plainly:** Cluster D remainder (F-60, AC-30, RD-65, RD-18) and most of
-Cluster E (RR-32, RR-33, RR-34, RR-35, and the new RR-36…RR-45).
+1. **AC-54 is a confirmed blocker on the E1 dataset render.** GSound's effective
+   absorption is 1−√(1−α); measured T30 0.5441 s against 0.343 s nominal, on a rule
+   fixed before the run. Every closed form in `scenes/generator.py` and the
+   `ir_duration`/record-length choices are computed for a room gsound does not render.
+   Deciding this is upstream of most of the scenes-lane backlog.
+2. **RD-33a condition (i) REGRESSED** and its reachability is now a USER decision
+   (RD-128). Do not plan cycle 5 as though the gate moved: cycle 4 unblocked (ii) only.
+3. **Two independent false clearances** (AC-45 cached, S-F1 live) let D0b print
+   "CARRIER CEILING CLEARS — Proceed to E1" over evidence it never checked.
 
-**Cycle 4 is Steps 2+3, declared in advance and NOT contingent on the row count:**
-the PathData schema, the subprocess worker behind the existing seam, and RD-20's
-`RunContext` while the dispatch signature is open. `research-director` has said
-three times that ledger hygiene is not what stands between this project and a real
-render; `GsoundSirSimulator.render` raising `NotImplementedError` is. The one thing
-that should jump the queue is **AC-37**, because it is the defect that would
-otherwise be discovered on the expensive render itself.
+**≤1 scene of RD-17's ≤4-scene grant remains.** Two were spent here, both
+pre-registered, both recorded in the integration record above. The 200,000-ray leg has
+now executed exactly once (181.6 s, n=1, superlinear in budget) — a bare observation,
+NOT a feasibility finding; RD-17 still owns that measurement.
+
+### Folded rows — the remainder, ALL OPEN
+
+Compact but REAL rows: the prose enumeration they replace was invisible to
+`tests/test_lane_partition.py`, which parses `| ID |` rows only — so ~120 OPEN
+findings sat outside the very check that exists to stop silent omissions (RD-88).
+Each names its inbox and the id AS WRITTEN THERE (header remap table, RR-25).
+
+| ID | agent | sev | status | anchor | finding | resolution |
+|----|-------|-----|--------|--------|---------|------------|
+| F-M3 | falsifier (lane M) | major | OPEN | src/amcd/representations/spectrogram.py | AC-37's guard is a per-band MINIMUM over all 27 ladder bands, so it is a spectral-flatness test, not a level test, and its message blames the wrong cause. A 2nd-order 4 kHz lowpass — gentler than air absorption over a 4.25 s IR — trips it. Any spectrally sloped render (air absorption, frequency-dependent alpha, both roadmap items) raises. | See `docs/ledger_inbox/M.md` as `F-M3`. |
+| F-M4 | falsifier (lane M) | major | OPEN | src/amcd/evaluation/room_acoustic.py; src/amcd/stats/aggregate.py | Residual pred-side selection on the DEPENDENT VARIABLE, with a new confound: pred leaves `paired_improvement` when it falls below the floor in a band the physical legs resolve, and the scenes removed are those where pred decays fastest — the largest |pred-high| errors — so `improvement_mean` is biased OPTIMISTIC. Censoring probability is now a function of room absorption, correlated with the `test_material_shift` axis. Zero coverage in the A/B. | See `docs/ledger_inbox/M.md` as `F-M4`. |
+| F-M5 | falsifier (lane M) | major | OPEN | docs/lanes/cycle4-M.md pass condition; metrics/metrics.parquet | THE PASS-CONDITION A/B HAS NEAR-ZERO POWER OVER THE CODE IT VALIDATES. Of 60 (scene, ISO-metric) cells exactly ONE has `n_bands_resolvability_limited != 0`; `n_bands_pred_unresolved == 0` everywhere; no C50 leg is within 32.3 dB of AC-42's cliff; AC-37's guard raises on no scene. So '1 of 20 rows moved' is equally consistent with the change being correct and with 3 of 4 changes never having executed. | See `docs/ledger_inbox/M.md` as `F-M5`. |
+| F-M6 | falsifier (lane M) | major | OPEN | src/amcd/pipeline.py `_preprocess_fingerprint` | AC-37's guard is bypassable through the preprocess cache — adding a guard inside `encode` is a code-only change, so on an existing run_dir `preprocess` skips and the guard never runs. Also: `diagnostics` has no fingerprint, and the D0b oracle is the artifact `min_db_headroom_db = 50.0` was calibrated FROM, so the calibration evidence itself can be served stale. | See `docs/ledger_inbox/M.md` as `F-M6`. |
+| F-M8 | falsifier (lane M) | minor | OPEN | src/amcd/provenance.py; cf. src/amcd/evaluation/evaluator.py | F-69 attribution REFUTED as proven, CONFIRMED as contamination: 10 of the 27 files in the `eval` scope are AppleDouble `._*.py` sidecars and excluding them changes the digest. But writing an existing file does not rewrite its sidecar, so the intermittency mechanism is not pinned; sidecar CREATION is the live candidate. | See `docs/ledger_inbox/M.md` as `F-M8`. |
+| F-M9 | falsifier (lane M) | minor | OPEN | src/amcd/evaluation/room_acoustic.py | Unexercised path that would silently lose a drop reason: `nan_reasons[(metric, leg)]` is written for a physical leg that caused a band exclusion, then unconditionally OVERWRITTEN for every leg floor-limited in a kept band. Needs a guard or test, not removal — no instance is constructible inside base.yaml's support. | See `docs/ledger_inbox/M.md` as `F-M9`. |
+| F-M10 | falsifier (lane M) | minor | OPEN | src/amcd/representations/spectrogram.py; configs/representations/spectrogram.yaml | Evidence/config drift in the new AC-37 guard: the docstring says 'measured on a definitionally perfect oracle at the shipped 55 dB' while the shipped value is 50.0 and the test fixture uses 55.0. A measured claim stated against a value not in force. | See `docs/ledger_inbox/M.md` as `F-M10`. |
+| F-M11 | falsifier (lane M) | minor | OPEN | src/amcd/data/normalization.py; src/amcd/data/preprocess.py | `low_mean`/`low_std` are computed and stamped into `preprocessed/meta.json` but never consumed — both legs are normalised with the HIGH stats. Emits output, contributes nothing. NOT leakage (train-only, verified). | See `docs/ledger_inbox/M.md` as `F-M11`. |
+| F-68-R2 | acoustics-reviewer (lane M) | major | OPEN | src/amcd/evaluation/room_acoustic.py `_band_energy` fold | The KNOWN RESIDUAL paragraph mis-describes what the fold does. Onset alignment puts the direct arrival ON the boundary, and the folded post-onset energy is +96.6 % at 500 Hz / +93.3 % at 1000 Hz against the same impulse in the record interior — a MAGNITUDE effect on the ISO early window, not a placement residual. Absolute C50 runs +0.06 to +1.67 dB high vs a causal reference, monotone in direct-dominance. | See `docs/ledger_inbox/M.md` as `F-68-R2`. |
+| F-68-R3 | acoustics-reviewer (lane M) | minor | OPEN | src/amcd/evaluation/room_acoustic.py `_band_energy` | The fold double-counts one pad sample at each end (folded/full = 1.0000000015 vs exactly 1.0 without). Physically irrelevant at ~1.7e-28, but those two lines are the ONLY handling of the `head < guard` short-record branch, where pad samples are silently DISCARDED and energy is no longer conserved. | See `docs/ledger_inbox/M.md` as `F-68-R3`. |
+| AC-37-R4 | acoustics-reviewer (lane M) | major | OPEN | src/amcd/representations/spectrogram.py | The headroom guard is calibrated on one band set and enforced on another: the limiting band is ALWAYS the 24.8 Hz band (in-band energy fraction 0.579, one the code's own docstring calls a Hann-leakage measurement) while the calibration rationale is about 500/1000 Hz OCTAVE quantities of the DECODED waveform. Fails conservatively, but operand and justification are different band sets. | See `docs/ledger_inbox/M.md` as `AC-37-R4`. |
+| AC-26-R6 | acoustics-reviewer (lane M) | minor | OPEN | configs/base.yaml `metric_band_resolvability_margin` | The resolvability floor is a self-measured criterion, not the standard's, and does not say so. Margin 2.0x the filter's own decay gives 35.8 ms at 500 Hz; ISO 3382-2's BT > 16 requires 45 ms — the shipped floor is MORE permissive than the standard by ~9 ms. Not wrong, but a reader will take it for the ISO criterion. | See `docs/ledger_inbox/M.md` as `AC-26-R6`. |
+| AC-19-R7 | acoustics-reviewer (lane M) | minor | OPEN | src/amcd/representations/spectrogram.py | Measured in-band fractions have drifted from the quoted ones (99.4/93.4/56.8 % quoted vs 0.9992/0.9464/0.5771 measured). 0.5-1.2 pp; no decision depends on it. | See `docs/ledger_inbox/M.md` as `AC-19-R7`. |
+| AC-28-B2 | builder (lane M) | minor | OPEN | docs/review_ledger.md AC-28; src/amcd/simulators/dry_run.py | AC-28's DEFECT is fixed and verified through the real ISO path, but the ROW'S ACCEPTANCE CRITERION IS WRONG: 'C50 must fall ~6 dB per doubling and cross 0 dB near r_c' describes DRR, not C50, whose 50 ms early window contains large reverberant energy. Measured 4.91/3.37/1.62/0.58 dB per doubling, never below 0. Correct the criterion, not the scaffold. Also: AC-43's numbers are now stale (EDT spread 5.5 % -> 66.5 %). | See `docs/ledger_inbox/M.md` as `AC-28-B2`. |
+| F-69-B4 | builder (lane M) | minor | OPEN | src/amcd/provenance.py | F-69 makes `test_editing_metric_code_changes_evals_version` fail in roughly half of full-suite runs on this host and pass in isolation. Fixed by lane P's `._` filter; recorded because the exact intermittency mechanism was only partly pinned. | See `docs/ledger_inbox/M.md` as `F-69-B4`. |
+| RD-93 | research-director (lane M) | minor | OPEN | see inbox | Plan-time finding, folded into lane M's implementation rather than deferred. | Substance, measurements and probes in `docs/ledger_inbox/M.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-94 | research-director (lane M) | minor | OPEN | see inbox | Plan-time finding, folded into lane M's implementation rather than deferred. | Substance, measurements and probes in `docs/ledger_inbox/M.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-96 | research-director (lane M) | minor | OPEN | see inbox | Plan-time finding, folded into lane M's implementation rather than deferred. | Substance, measurements and probes in `docs/ledger_inbox/M.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-97 | research-director (lane M) | minor | OPEN | see inbox | Plan-time finding, folded into lane M's implementation rather than deferred. | Substance, measurements and probes in `docs/ledger_inbox/M.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-98 | research-director (lane M) | minor | OPEN | see inbox | Plan-time finding, folded into lane M's implementation rather than deferred. | Substance, measurements and probes in `docs/ledger_inbox/M.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-99 | research-director (lane M) | minor | OPEN | see inbox | Plan-time finding, folded into lane M's implementation rather than deferred. | Substance, measurements and probes in `docs/ledger_inbox/M.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-100 | research-director (lane M) | minor | OPEN | see inbox | Plan-time finding, folded into lane M's implementation rather than deferred. | Substance, measurements and probes in `docs/ledger_inbox/M.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-101 | research-director (lane P) | major | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md` (written there as `RD-93`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-102 | research-director (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md` (written there as `RD-94`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-103 | research-director (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md` (written there as `RD-95`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-104 | research-director (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md` (written there as `RD-96`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-105 | research-director (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md` (written there as `RD-97`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-106 | research-director (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md` (written there as `RD-98`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-108 | research-director (lane P) | major | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md` (written there as `RD-100`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-109 | research-director (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md` (written there as `RD-101`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-110 | research-director (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md` (written there as `RD-102`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-76 | falsifier (lane P) | major | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-77 | falsifier (lane P) | major | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-78 | falsifier (lane P) | major | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-79 | falsifier (lane P) | major | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-80 | falsifier (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-44 | acoustics-reviewer (lane P) | major | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-46 | acoustics-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-47 | acoustics-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-48 | acoustics-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-46 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-47 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-48 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-49 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-50 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-51 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-52 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-53 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-54 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-55 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-56 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-57 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-58 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-59 | readability-reviewer (lane P) | minor | OPEN | see inbox | Raised on lane P's branch (provenance / stage cache / reported tables). | Substance, measurements and probes in `docs/ledger_inbox/P.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-112 | research-director (lane S) | major | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RD-94`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-113 | research-director (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RD-97`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| S-1 | falsifier (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| S-2 | falsifier (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| S-F4 | falsifier (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| S-F5 | falsifier (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| S-F6 | falsifier (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| S-F7 | falsifier (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-49 | acoustics-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `AC-45`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-51 | acoustics-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `AC-47`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-52 | acoustics-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `AC-48`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-53 | acoustics-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `AC-49`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-60 | readability-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RR-46`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-61 | readability-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RR-47`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-62 | readability-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RR-48`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-63 | readability-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RR-50`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-64 | readability-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RR-51`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-65 | readability-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RR-52`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-66 | readability-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RR-53`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-67 | readability-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RR-54`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-68 | readability-reviewer (lane S) | minor | OPEN | see inbox | Raised on lane S's branch (scenes / QC / diagnostics). | Substance, measurements and probes in `docs/ledger_inbox/S.md` (written there as `RR-55`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-114 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-93`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-115 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-94`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-116 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-95`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-117 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-96`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-118 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-97`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-119 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-98`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-120 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-99`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-121 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-100`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-122 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-101`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-123 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-102`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-124 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-103`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-125 | research-director (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-104`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-82 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-106`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-83 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-107`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-84 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-108`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-85 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-109`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-86 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-110`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-87 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-111`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-88 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-112`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-90 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-114`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-91 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-115`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-92 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-116`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-93 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-117`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-94 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-118`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-95 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-119`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-96 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-120`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-97 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-121`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| F-98 | falsifier (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RD-122`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-55 | acoustics-reviewer (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `AC-41`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-56 | acoustics-reviewer (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `AC-42`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-57 | acoustics-reviewer (lane R) | major | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `AC-43`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-59 | acoustics-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `AC-45`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-60 | acoustics-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `AC-46`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-61 | acoustics-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `AC-47`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-62 | acoustics-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `AC-48`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| AC-63 | acoustics-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `AC-49`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-69 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-28`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-70 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-29`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-71 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-30`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-72 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-31`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-73 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-32`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-74 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-33`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-75 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-34`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-76 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-35`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-77 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-36`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-78 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-37`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RR-79 | readability-reviewer (lane R) | minor | OPEN | see inbox | Raised on lane R's branch (render enablement, Steps 2+3). | Substance, measurements and probes in `docs/ledger_inbox/R.md` (written there as `RR-38`). Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-127 | research-director (lane INT) | major | OPEN | see inbox | Raised by research-director against the INTEGRATION PLAN; see the plan and the integration record. | Substance, measurements and probes in `this file (integration record above)`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-130 | research-director (lane INT) | major | OPEN | see inbox | Raised by research-director against the INTEGRATION PLAN; see the plan and the integration record. | Substance, measurements and probes in `this file (integration record above)`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-131 | research-director (lane INT) | major | OPEN | see inbox | Raised by research-director against the INTEGRATION PLAN; see the plan and the integration record. | Substance, measurements and probes in `this file (integration record above)`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-132 | research-director (lane INT) | major | OPEN | see inbox | Raised by research-director against the INTEGRATION PLAN; see the plan and the integration record. | Substance, measurements and probes in `this file (integration record above)`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-133 | research-director (lane INT) | major | OPEN | see inbox | Raised by research-director against the INTEGRATION PLAN; see the plan and the integration record. | Substance, measurements and probes in `this file (integration record above)`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-134 | research-director (lane INT) | minor | OPEN | see inbox | Raised by research-director against the INTEGRATION PLAN; see the plan and the integration record. | Substance, measurements and probes in `this file (integration record above)`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-135 | research-director (lane INT) | minor | OPEN | see inbox | Raised by research-director against the INTEGRATION PLAN; see the plan and the integration record. | Substance, measurements and probes in `this file (integration record above)`. Not individually re-transcribed here — the inbox is committed and is the primary record. |
+| RD-136 | research-director (lane INT) | minor | OPEN | see inbox | Raised by research-director against the INTEGRATION PLAN; see the plan and the integration record. | Substance, measurements and probes in `this file (integration record above)`. Not individually re-transcribed here — the inbox is committed and is the primary record. |

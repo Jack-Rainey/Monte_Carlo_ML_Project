@@ -38,7 +38,7 @@ SHARED_AUTHORITY = ("docs/review_ledger.md", "CLAUDE.md", "docs/design_spec.md")
 #: in docs/lanes/ as the record of what was planned, and describe a ledger state
 #: that no longer exists — asserting them against today's ledger would fail for
 #: being history rather than for being wrong.
-_CURRENT_CYCLE = "cycle4"
+_CURRENT_CYCLE = "cycle5"
 
 
 def _partitions():
