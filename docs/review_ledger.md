@@ -435,12 +435,41 @@ they are `RD-126`…`RD-136`).
 | 4 dry run + fixed-seed A/B | **DONE** — exactly one row moved, as pre-registered |
 | 2b two render scenes | **DONE** — AC-54 UPHELD, F-89 adjudicated |
 | 5 fold inboxes | **DONE** — this section and the two above |
-| 2 integrator queue | **NOT DONE** — 7 items, listed below |
-| 6 four-reviewer pass | **NOT DONE** — this is the pass that counts |
-| 7 delete confirmed rows | **NOT DONE** — blocked on step 6, correctly |
+| 6 four-reviewer pass | **DONE — NOT CLEAN.** 26 new findings; two of my own claims corrected |
+| 2 integrator queue | **NOT DONE** — 7 items, and RD-143 says the order is wrong |
+| 7 delete confirmed rows | **CORRECTLY NOT DONE** — a row is deleted only when fixed AND re-review-confirmed, and the pass was not clean. **Zero rows deleted.** |
 
-**The integrator queue, NOT started, in priority order.** All seven were scoped and
-justified in the approved plan:
+**Step 6 outcome.** `research-director` DRIFTING (tracking layer, not the work);
+`falsifier` 7 new + 2 of my rows corrected; `acoustics-reviewer` 5 new incl. one blocker
++ one claim of mine refuted; `readability-reviewer` 14 new, no blocker. The reviewers
+found defects in the INTEGRATOR's own work — a 5-row shortfall in the fold, 116 missing
+anchors, a missed lane-S remap, and a withdrawn explanation — which is the pass doing
+exactly its job.
+
+**RE-ORDER THE QUEUE BEFORE STARTING IT (RD-143).** The seven items below were scoped
+before the renders and do NOT contain AC-54, this cycle's own blocker; item 6 is
+downstream of it and as written would record a nominal-α number AC-54 has falsified.
+`research-director`'s ruling, which I accept:
+
+> **Item 0 — backend renderability of the declared population: AC-54 + AC-55 + AC-56,
+> decided as ONE change.** They are one question — is the declared scene population
+> renderable by this backend at ISO-3382 fidelity? — and as configured the answer looks
+> like no: T60 realized 1.14-1.98× nominal; pygsound compiles `maxIRLength = 3.0 s` and
+> does not expose it, so `ir_duration: 4.25` can never be filled and RD-21's truncation
+> QC is structurally dead; `diffuse_depth: 100` is physically a TIME bound that kills
+> the diffuse field before the T30 window closes for 14 % of `mixed` scenes under AC-54.
+> Deciding them separately invites three inconsistent partial fixes to one physical
+> inconsistency. **Also take RD-144: put the absorption convention in the BACKEND's
+> config, not in `scenes/generator.py`, which is backend-agnostic.**
+
+**Item 0b — re-measure the truncation index with the artifact RETAINED** (AC-64). My
+probe rendered in memory, so the evidence is gone, and the index's position is currently
+explained by nothing. Half of this needs no render at all: synthetic decays at
+T60 ∈ {0.5, 1, 2, 3} s zero-padded to `ir_duration`, asserting T30 within
+`d0b_t30_jnd_frac` and index invariance to gain over ≥4 decades. **The gain-invariance
+half fails on the current tree** — that is AC-58.
+
+Then the seven, all scoped and justified in the approved plan:
 
 1. **F-M2** — AC-38's missing reported column. The table is currently QUIETER about a
    live caveat than it was before cycle 4. Small: one `_count_true` in
@@ -457,7 +486,12 @@ justified in the approved plan:
 7. **RR-43** — one comment naming what `._` files are. `research-director` ruled the
    filter correct and staying: a name filter, not a platform branch.
 
-**Read these three first.**
+**Do this before ANY cycle-5 lane work — it is a one-line-scale change that prevents a
+data-loss event: RR-80.** `docs/ledger_inbox/README.md` still instructs that inbox files
+are emptied at the start of each cycle. ~130 ledger rows now name the inbox as their
+primary record, so following that instruction deletes the substance of half the OPEN set.
+
+**Read these first.**
 
 1. **AC-54 is a confirmed blocker on the E1 dataset render.** GSound's effective
    absorption is 1−√(1−α); measured T30 0.5441 s against 0.343 s nominal, on a rule
