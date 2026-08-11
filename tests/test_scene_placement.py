@@ -484,7 +484,7 @@ class TestGenerationPlan:
 # ═══════════════════════════════════════════════════════════════════════════════
 # The record-length gate: what it scores, and what it discloses
 # (F-71 / RD-65 / RD-112 / RD-113), plus the ISO 3382-1 §5.3 distance disclosure
-# (AC-30 / AC-46).
+# (AC-30 / AC-50).
 #
 # Every test below constructs the population in which the defect is VISIBLE — a
 # healthy run has no uncharacterized scenes at all, so none of these fire on one.
@@ -702,7 +702,7 @@ class TestIsoMinimumDistanceDisclosure:
         """Sweep every declared geometry x material corner, the way
         `Config.worst_case_t60` sweeps them for the T60 corner.
 
-        DERIVED from the config, never hardcoded (AC-46): AC-30's own [0.41, 5.16] m
+        DERIVED from the config, never hardcoded (AC-50): AC-30's own [0.41, 5.16] m
         was computed over the `mixed` regime alone, so it missed
         `ceiling_absorptive` (alpha up to 0.98) on the same shoebox family — and a
         test that restated the literals could not see the omission.
@@ -729,7 +729,7 @@ class TestIsoMinimumDistanceDisclosure:
         assert support["eyring"] == pytest.approx((0.417, 11.413), abs=0.005)
         assert support["sabine"][1] > 5.16, (
             "5.16 m is the `mixed` regime's ceiling (alpha 0.80), not the declared "
-            "support's — ceiling_absorptive reaches alpha 0.98 (AC-46)"
+            "support's — ceiling_absorptive reaches alpha 0.98 (AC-50)"
         )
 
     def test_the_individual_corners_still_reproduce(self) -> None:

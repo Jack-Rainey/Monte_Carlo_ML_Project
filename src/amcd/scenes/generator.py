@@ -39,7 +39,7 @@ from ..simulators.base import SceneSpec, simulator_min_separation
 #: Sabine's constant is exactly 24·ln10/c, but `acoustics.SABINE_K` ships the
 #: rounded 0.161 — so this assumes c = 343.24 m/s rather than being independent of
 #: c, and d_min runs a constant −0.035 % against one recomputed from this module's
-#: own published `t60_sabine_s` at c = 343. Stated, not claimed away (AC-45).
+#: own published `t60_sabine_s` at c = 343. Stated, not claimed away (AC-49).
 _C_TIMES_SABINE_K = 24.0 * math.log(10.0)
 
 
