@@ -7,8 +7,8 @@ stream) and RD-37 (joint resampling + recorded acceptance rates).
 
 The second half of the file covers what the record-length gate SCORES and what it
 DISCLOSES: F-71 (uncharacterized scenes leave the gate's denominator), RD-65 (the
-per-split over-limit warning), RD-94 (a gate that scored nothing is unscored, not
-passed), RD-97 (the derived denominator is pinned to the published one) and AC-30
+per-split over-limit warning), RD-112 (a gate that scored nothing is unscored, not
+passed), RD-113 (the derived denominator is pinned to the published one) and AC-30
 (the realized shortfall against ISO 3382-1 §5.3's minimum distance).
 
 The load-bearing property here is that a config CANNOT quietly mean something
@@ -483,7 +483,7 @@ class TestGenerationPlan:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # The record-length gate: what it scores, and what it discloses
-# (F-71 / RD-65 / RD-94 / RD-97), plus the ISO 3382-1 §5.3 distance disclosure
+# (F-71 / RD-65 / RD-112 / RD-113), plus the ISO 3382-1 §5.3 distance disclosure
 # (AC-30 / AC-46).
 #
 # Every test below constructs the population in which the defect is VISIBLE — a
@@ -572,7 +572,7 @@ class TestUncharacterizedScenesLeaveTheRecordLengthGate:
     def test_the_derived_denominator_agrees_with_the_published_one(
         self, tmp_path: Path
     ) -> None:
-        """RD-97: the gate derives the characterized count that `_flag_counts`
+        """RD-113: the gate derives the characterized count that `_flag_counts`
         already publishes. Two expressions for one number is how AC-24's pair
         drifted apart, so they are pinned to each other here."""
         run_gen_scenes(_openfield_config(), tmp_path, QUIET)
@@ -645,7 +645,7 @@ class TestPerSplitOverLimitWarning:
     def test_a_wholly_uncharacterized_config_is_unscored_not_passed(
         self, capsys
     ) -> None:
-        """RD-94: with every scene uncharacterized the gate has nothing to measure.
+        """RD-112: with every scene uncharacterized the gate has nothing to measure.
         Falling through would be F-71's own defect one level up — a silent pass at
         exactly the outdoor/partially-open configuration the RD-64 seam enables."""
         report = {
@@ -664,9 +664,9 @@ class TestPerSplitOverLimitWarning:
     ) -> None:
         """The test above builds the report by hand, so it never exercised the
         corner disclosure — which reached `f"{None:.2f}"` and raised TypeError
-        before RD-94's warning could be emitted. `Config.worst_case_t60` returns a
+        before RD-112's warning could be emitted. `Config.worst_case_t60` returns a
         reasoned None for a config with no `sabine` family, which is the very
-        config RD-94 is about, so the warning was unreachable on it."""
+        config RD-112 is about, so the warning was unreachable on it."""
         cfg = tiny_config(scenes={"geometry_families": {
             "shoebox": {"dims": [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]],
                         "characterization": "none"},

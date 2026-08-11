@@ -19,7 +19,7 @@ from .base import (
 )
 
 #: Simulator params that are HOST facts, not dataset facts, and so are redacted from
-#: the canonical provenance echo below (RD-93). `render_python` is an absolute path to
+#: the canonical provenance echo below (RD-114). `render_python` is an absolute path to
 #: a machine-local interpreter: stamping it would make the same render carry different
 #: provenance on the Apple-Silicon and the native-x86_64 host the project must both
 #: support, and would leak a user home path into every scene's meta.json. The value

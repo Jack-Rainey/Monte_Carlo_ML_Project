@@ -800,7 +800,7 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
 
 
 class TestAnUnprotectedStaleStageIsDisclosedNotVouchedFor:
-    """F-75: `gen-scenes` and `render` carry no `code_version` (RD-99, a deliberate
+    """F-75: `gen-scenes` and `render` carry no `code_version` (RD-107, a deliberate
     policy call — scoping `render` to `simulators/` forces a re-render, the
     multi-hour artifact under emulation). The staleness that buys is accepted.
 
@@ -809,7 +809,7 @@ class TestAnUnprotectedStaleStageIsDisclosedNotVouchedFor:
     the render backend carried a provenance stamp positively asserting the new code
     produced them — a false witness, worse than the staleness itself.
 
-    These tests pin the disclosure, not a refusal. The refusal is RD-99's to decide.
+    These tests pin the disclosure, not a refusal. The refusal is RD-107's to decide.
     """
 
     def test_the_sentinel_records_which_code_wrote_the_artifacts(
@@ -879,7 +879,7 @@ class TestALegacySentinelIsRefusedActionablyNotWithATraceback:
     the actionable "predates fingerprinted caching" message.
 
     Generic, not a one-off migration wrinkle: it recurs for every stage that gains
-    a fingerprint later, `diagnostics` being the next candidate (RD-100/AC-45).
+    a fingerprint later, `diagnostics` being the next candidate (RD-108/AC-45).
     """
 
     def _run_dir_with_a_legacy_report_sentinel(

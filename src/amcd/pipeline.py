@@ -256,7 +256,7 @@ def _report_fingerprint(config: Config) -> dict:
 #:
 #: Six of the nine STAGES are here. `gen-scenes`, `render` and `diagnostics` are
 #: absent BY DECISION, not oversight: they carry no `code_version` at all, so they
-#: have nothing to scope — see STAGE_FINGERPRINT, RD-99 and RD-100 for the cost
+#: have nothing to scope — see STAGE_FINGERPRINT, RD-107 and RD-108 for the cost
 #: that buys and what it leaves exposed.
 STAGE_CODE_SCOPE: dict[str, tuple[str, ...]] = {
     # Assigns splits and encodes tensors. `simulators/base.py` is named as a
@@ -313,7 +313,7 @@ def _code_version(stage: str) -> str:
 #:
 #: The one remaining `None` is `diagnostics`, on RD-41's "terminal, so an unwired
 #: fingerprint costs only its own re-use" — the same argument that turned out to be
-#: wrong for `report` (see `_report_fingerprint`), and which RD-100/AC-45 dispute
+#: wrong for `report` (see `_report_fingerprint`), and which RD-108/AC-45 dispute
 #: here too: a stale D0b carrier-ceiling verdict is a false clearance.
 STAGE_FINGERPRINT: dict[str, Callable[[Config], dict] | None] = {
     "gen-scenes": _gen_scenes_fingerprint,
@@ -609,7 +609,7 @@ class Pipeline:
         # with the key absent — before F-75 it fell through to `_diff_fingerprints`,
         # which did `set(None)` and raised a bare TypeError with a traceback. This
         # recurs for EVERY stage that gains a fingerprint later (`diagnostics` next,
-        # RD-100/AC-45), so it is guarded here rather than at the call site.
+        # RD-108/AC-45), so it is guarded here rather than at the call site.
         if found is None:
             raise RuntimeError(
                 f"Stage {stage!r} has a cached sentinel with no fingerprint "
@@ -657,7 +657,7 @@ class Pipeline:
     def _warn_if_unprotected_and_stale(self, stage: str) -> None:
         """Say so when a stage the cache CANNOT protect is served under newer code.
 
-        `gen-scenes` and `render` declare no `code_version` (RD-99), deliberately:
+        `gen-scenes` and `render` declare no `code_version` (RD-107), deliberately:
         scoping `render` to `simulators/` would force a full re-render — the
         multi-hour artifact under x86 emulation — on any backend edit. The cost of
         that decision is that a code change to the IR synthesis, the placement
@@ -672,7 +672,7 @@ class Pipeline:
         So: for stages with no scoped `code_version`, compare the whole-package
         hash recorded when the artifacts were WRITTEN against the current one, and
         warn on stderr when they differ. Deliberately a warning, not a refusal —
-        the refusal is the policy call in RD-99, and this must not quietly make it.
+        the refusal is the policy call in RD-107, and this must not quietly make it.
 
         Fingerprinted stages are skipped: a scoped code change already refuses
         them, so a whole-package drift there is expected and would be pure noise.
@@ -702,7 +702,7 @@ class Pipeline:
                 f"[warn ] {stage} is cached and the package source has CHANGED "
                 f"since its artifacts were written "
                 f"({was_built_with[:12]} → {current[:12]}), but {stage!r} declares "
-                f"no code_version, so nothing refuses it (RD-99). Its artifacts may "
+                f"no code_version, so nothing refuses it (RD-107). Its artifacts may "
                 f"predate the current code; versions.json describes THIS "
                 f"invocation, not what produced them. Use --force or a fresh "
                 f"--run-dir if the change affects {stage!r}."

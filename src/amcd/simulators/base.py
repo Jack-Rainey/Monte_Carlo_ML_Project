@@ -100,7 +100,7 @@ class PathData:
     therefore travels INSIDE the parquet, in the file's own key/value metadata.
 
     The descriptor also carries `ray_budget`, `leg` and `realization_index`
-    (RD-96/RD-23): the current `paths_{low,high}.parquet` filename convention
+    (RD-117/RD-23): the current `paths_{low,high}.parquet` filename convention
     encodes exactly two legs and one realization, and RD-23's requirement ON THIS
     GATE is that the artifact layout must not foreclose a realization index. Naming
     is not the identifier — the file's own metadata is — so adding budgets (the E4
@@ -227,7 +227,7 @@ class PathData:
 #: Descriptor keys a `PathData` must carry to be interpretable on its own (RD-24).
 #: `band_edges_hz` + `band_centres_hz` name the `intensities` columns; `simulator` +
 #: `commit_sha` say what produced them; `ray_budget` + `leg` + `realization_index`
-#: identify WHICH render this is without relying on the filename (RD-96/RD-23).
+#: identify WHICH render this is without relying on the filename (RD-117/RD-23).
 REQUIRED_PATH_DESCRIPTOR_KEYS = (
     "simulator",
     "commit_sha",

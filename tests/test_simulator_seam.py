@@ -552,7 +552,7 @@ class TestPathDataIsSelfDescribing:
             )
 
     def test_the_file_identifies_its_render_without_the_filename(self, tmp_path: Path) -> None:
-        """RD-96/RD-23: `paths_{low,high}.parquet` encodes two legs and one
+        """RD-117/RD-23: `paths_{low,high}.parquet` encodes two legs and one
         realization. The artifact layout must not foreclose a realization index, so
         the identity lives in the file's own metadata, not in its name."""
         target = tmp_path / "renamed_by_someone.parquet"
@@ -760,7 +760,7 @@ class TestGsoundProvenanceFill:
 
 
 class TestHostScopedParamsStayOutOfProvenance:
-    """RD-93: `render_python` is a HOST fact, not a dataset fact.
+    """RD-114: `render_python` is a HOST fact, not a dataset fact.
 
     Stamped into canonical provenance it would make the same render carry different
     metadata on the Apple-Silicon and the native-x86_64 host this project must both
@@ -904,7 +904,7 @@ def generate_ambisonic_ir(order, listener_directions, intensities, distances, sp
 
 
 class TestRenderWorkerContract:
-    """RD-95: the worker needs a regression surface that is NOT a real render.
+    """RD-116: the worker needs a regression surface that is NOT a real render.
 
     `_WORKER_SRC` runs under an interpreter where `amcd` does not exist, and its only
     other exercise is a render that costs a scene from a standing ≤4-scene grant. Left

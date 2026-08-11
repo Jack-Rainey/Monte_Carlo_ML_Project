@@ -428,7 +428,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     limit is WARNED about unconditionally, whether or not the overall gate trips
     (RD-65). Warning, not gating, for the reason in the paragraph above.
 
-    Both the gate and the warning score only CHARACTERIZED scenes (F-71/RD-94):
+    Both the gate and the warning score only CHARACTERIZED scenes (F-71/RD-112):
     an uncharacterized scene has no closed-form T60, so it can be counted neither
     for nor against the record length, and a gate that scored none of its scenes
     is UNSCORED, never passed.
@@ -436,7 +436,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     corner = config.worst_case_t60()
     if corner["t60_sabine_s"] is None:
         # No family declares `characterization: sabine`, so there is no closed-form
-        # decay corner to disclose — the same config RD-94's gate warning is about,
+        # decay corner to disclose — the same config RD-112's gate warning is about,
         # and the one path that reached this line with nothing to format.
         emit(
             verbosity, "progress",
@@ -487,14 +487,14 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     attempted_total = sum(attempted for _, _, attempted in per_split.values())
     if not total:
         # Falling through here would be a silent pass over a gate that measured
-        # nothing (RD-94).
+        # nothing (RD-112).
         if attempted_total:
             emit(verbosity, "warning",
                  f"  WARNING: the record-length gate scored 0 of {attempted_total} "
                  f"scenes — every geometry family in this config declares "
                  f"characterization: none, so no closed-form T60 exists to compare "
                  f"against ir_duration {config.ir_duration} s. The gate is UNSCORED, "
-                 f"not passed (RD-94).")
+                 f"not passed (RD-112).")
         return
     if (over / total) > limit:
         lines = "\n".join(

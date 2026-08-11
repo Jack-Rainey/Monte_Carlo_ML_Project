@@ -58,7 +58,7 @@ _RECEIPT_SHA_KEY = "commit_sha"
 _AMBISONIC_CONVENTION = "acn_n3d"
 
 #: Whether the m != 0 channels carry a Condon-Shortley (-1)^|m| phase on top of
-#: ACN/N3D. **MEASURED, not read off the source comments** (AC-43): a single
+#: ACN/N3D. **MEASURED, not read off the source comments** (AC-57): a single
 #: synthetic path pushed through `generate_ambisonic_ir` at order 1, with no
 #: propagation involved, gives channel-to-W ratios of
 #:
@@ -429,7 +429,7 @@ class GsoundSirSimulator:
 
         The split matters: retention applies ONLY to the saved artifact. Filtering
         before synthesis would change the IR itself and confound the ray-budget axis
-        under study — measured at 43.1% of path energy on a real scene (RD-102).
+        under study — measured at 43.1% of path energy on a real scene (RD-123).
         """
         mode = self.params["path_retention"]["mode"]
         value = self.params["path_retention"]["value"]
@@ -656,7 +656,7 @@ class PathRetention(BaseModel):
     Maps onto the (energy_percentage, max_rays) pair that the render worker's
     `_retain` applies — upstream's own selection rule, reproduced there rather than
     requested from `getPathData`, which is always called unfiltered so the IR is
-    synthesized from every path (RD-102):
+    synthesized from every path (RD-123):
       all          → energy_percentage 100, max_rays 0
       top_percent  → energy_percentage = value
       top_k        → max_rays = value
