@@ -33,21 +33,16 @@ integrator_queue:
   - {id: AC-19-R7, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-26, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-26-R6, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-27, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-28, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-28-B2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-30, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-36, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-37, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-37-R4, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-37-R5, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-38, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-39, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-40, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-41, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-42, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-42-B1, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: AC-42-R1, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-43, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-44, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-45, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
@@ -74,23 +69,19 @@ integrator_queue:
   - {id: AC-66, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-67, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: AC-68, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-69, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-70, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-100, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-101, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-102, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-103, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-104, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-105, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-45, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-55, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-59, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-106, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-60, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-61, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-62, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-63, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-64, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-65, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-66, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-67, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-68, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-68-R2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-68-R3, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
@@ -126,7 +117,6 @@ integrator_queue:
   - {id: F-97, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-98, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-99, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
-  - {id: F-M1, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-M10, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-M11, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
   - {id: F-M2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
