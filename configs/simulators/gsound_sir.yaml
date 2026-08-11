@@ -58,6 +58,53 @@ scattering: 0.5
 # the SH synthesis. Do not copy it.
 frequency_points: [88.7412, 176.7767, 353.5534, 707.1068, 1414.2136, 2828.4271, 5656.8542]
 
+# The band CENTRES the edges above sit between — pygsound's compiled-in octave set
+# (Context.cpp:8). Declared rather than derived because 7 edges do not determine 8
+# centres without an anchor, but NOT free: `Params.model_post_init` requires each
+# edge to be the geometric mean of its adjacent centres, exactly as
+# `gs::FrequencyBands` derives them, so these two lists cannot drift apart.
+#
+# Needed because a retained-path file must NAME the frequency of each `intensities`
+# column (RD-24) — a path file from a second raytracer is otherwise uninterpretable
+# once separated from the config that produced it.
+band_centres_hz: [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+
+# ── Propagation speed (DECLARED, not configured) ──────────────────────────────
+# gsound uses 344 m/s, compiled into C++ with no way to set it (RD-19). Setting a
+# different value here does NOT change the simulation — it makes the render FAIL,
+# because every render cross-checks this against the `speeds_of_sound` the paths
+# themselves report. That is deliberate: it turns a comment that could silently go
+# stale into a declaration upstream can falsify.
+speed_of_sound_m_s: 344.0
+
+# ── Truncation QC threshold (RD-21) ───────────────────────────────────────────
+# gsound's natural IR is trimmed to `ir_duration`. The discarded tail energy is
+# measured per (scene, leg) and flagged above this level, relative to the native
+# IR's total energy. -60 dB = one part in a million of total energy; above that the
+# trim is large enough to bias T30/EDT on the most reverberant scenes, which is the
+# failure this disclosure exists to make visible. Nothing ACTS on the flag yet —
+# the per-criterion QC record that does is Step 4's (RD-14).
+max_discarded_tail_db: -60.0
+
+# ── Render interpreter (HOST-SCOPED — not an experiment value) ────────────────
+# GSound is x86-only. `null` means "run the worker under this same interpreter",
+# which is correct on a native x86_64 Ubuntu/Windows/Intel-Mac host. On a host where
+# the render env is a SEPARATE interpreter (Apple Silicon under Rosetta), supply its
+# absolute path from a config layer — e.g.
+#
+#     amcd render -c configs/base.yaml -c my_host.yaml
+#     # my_host.yaml:
+#     #   simulator:
+#     #     params:
+#     #       render_python: /path/to/envs/amcd-render-x86/bin/python
+#
+# It is committed as null so no machine-local path enters the repository, and it is
+# REDACTED from canonical render provenance (simulators/render.py): which
+# interpreter ran a render is a host fact, not a property of the dataset, and
+# stamping it would make the same render differ between the two hosts this project
+# must support. It migrates to `RunContext.host` when RD-20 lands.
+render_python: null
+
 # ── Normalization ─────────────────────────────────────────────────────────────
 # Must stay false. Per-IR normalization destroys low↔high energy comparability,
 # and every paired-improvement metric plus the D0b carrier test rests on it. Both
