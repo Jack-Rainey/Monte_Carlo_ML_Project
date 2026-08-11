@@ -282,13 +282,13 @@ class TestStageFingerprint:
         must keep working exactly as before until they are wired (RD-41)."""
         # Every stage is listed, so an unwired one is declared rather than absent.
         assert set(STAGE_FINGERPRINT) == set(STAGES)
-        # `eval`/`stats` were promoted out of the gap by RD-54; `report` remains in
-        # it, so it is the standing example of the unwired path.
-        assert STAGE_FINGERPRINT["report"] is None
+        # `eval`/`stats` were promoted out of the gap by RD-54 and `report` by F-63,
+        # so `diagnostics` is now the standing example of the unwired path.
+        assert STAGE_FINGERPRINT["diagnostics"] is None
         cfg = tiny_config(scenes={"n_id": 4})
         pipe = self._pipeline(cfg, tmp_path)
-        pipe._mark_done("report")
-        assert pipe._is_done("report")
+        pipe._mark_done("diagnostics")
+        assert pipe._is_done("diagnostics")
 
 
 class TestDryRunTailIsUnbiased:
