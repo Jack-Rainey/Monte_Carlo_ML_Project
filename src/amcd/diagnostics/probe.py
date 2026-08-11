@@ -72,6 +72,8 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
             # the config's declared set.
             per_split[split_name] = {
                 "n_scenes": 0,
+                "n_attempted": 0,
+                "dropped": [],
                 "unscored_reason": "declared in config but received no scenes",
             }
             emit(verbosity, "warning",
@@ -81,11 +83,21 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
 
         scene_gaps: list[float] = []
         per_band_gaps: list[list[float]] = []
+        # (scene, reason) for every scene this probe could not score, mirroring the
+        # eval stage's drops.csv (F-21). F-45 fixed the SPLIT enumeration; these
+        # per-scene skips stayed silent, so a split where 5 of 20 scenes lacked
+        # tensors reported headroom over the survivors and read as complete (F-72).
+        dropped: list[dict[str, str]] = []
 
         for sid in scene_ids:
             low_pt = split_dir / f"{sid}_low.pt"
             high_pt = split_dir / f"{sid}_high.pt"
-            if not low_pt.exists() or not high_pt.exists():
+            missing = [p.name for p in (low_pt, high_pt) if not p.exists()]
+            if missing:
+                dropped.append({
+                    "scene": sid,
+                    "reason": f"preprocessed tensor missing: {', '.join(missing)}",
+                })
                 continue
 
             low_norm = torch.load(low_pt, weights_only=True)
@@ -102,7 +114,26 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
             per_band_gaps.append(per_band)
             per_scene[sid] = scene_mean_gap
 
+        if dropped:
+            emit(verbosity, "warning",
+                 f"  WARNING: D0a scored {len(scene_gaps)} of {len(scene_ids)} scenes "
+                 f"in split {split_name!r} — {len(dropped)} dropped, per-scene reasons "
+                 f"in d0a_gap.json (F-72).")
+
         if not scene_gaps:
+            # Every scene failed. Skipping here made the split vanish from the
+            # artifact — indistinguishable from a split that was never declared, the
+            # state F-45 closed on the other axis. Recorded with its reason instead,
+            # and the print branch below renders it as unscored, never as a number.
+            per_split[split_name] = {
+                "n_scenes": 0,
+                "n_attempted": len(scene_ids),
+                "dropped": dropped,
+                "unscored_reason": (
+                    f"all {len(scene_ids)} scenes failed to load — see `dropped` for "
+                    f"the per-scene reasons"
+                ),
+            }
             continue
 
         gap_mean = float(np.mean(scene_gaps))
@@ -117,7 +148,12 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
             verdict = f"small gap ({gap_mean:.1f} dB < {config.d0a_gap_small_db} dB) — band energy may have converged; denoising unlikely to help"
 
         per_split[split_name] = {
+            # `n_scenes` IS the scored count; `n_attempted` is its denominator. No
+            # separate `n_scored` key — two names for one number is how the two
+            # expressions in AC-24 drifted apart.
             "n_scenes": len(scene_gaps),
+            "n_attempted": len(scene_ids),
+            "dropped": dropped,
             "mean_gap_db": gap_mean,
             "std_gap_db": gap_std,
             "verdict": verdict,
@@ -131,20 +167,23 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
     (diag_dir / "d0a_gap.json").write_text(json.dumps(result_d0a, indent=2))
 
     emit(verbosity, "metrics", "\n  D0a — Headroom probe (low-ray vs high-ray energy gap per split)")
-    emit(verbosity, "metrics", f"  {'Split':<28} {'n':>4}  {'mean gap':>9}  {'std':>6}  Verdict")
+    emit(verbosity, "metrics",
+         f"  {'Split':<28} {'scored/att':>10}  {'mean gap':>9}  {'std':>6}  Verdict")
     emit(verbosity, "metrics", "  " + "-" * 80)
     for sp, info in per_split.items():
         if info["n_scenes"] == 0:
             # Declared but empty (F-45): named with its reason, never rendered as a
             # number — a 0.00 dB gap would read as a measured result.
+            counts = f"0/{info['n_attempted']}"
             emit(
                 verbosity, "metrics",
-                f"  {sp:<28} {0:>4}  unscored — {info['unscored_reason']}",
+                f"  {sp:<28} {counts:>10}  unscored — {info['unscored_reason']}",
             )
             continue
+        counts = f"{info['n_scenes']}/{info['n_attempted']}"
         emit(
             verbosity, "metrics",
-            f"  {sp:<28} {info['n_scenes']:>4}  {info['mean_gap_db']:>8.2f} dB"
+            f"  {sp:<28} {counts:>10}  {info['mean_gap_db']:>8.2f} dB"
             f"  {info['std_gap_db']:>5.2f}  {info['verdict']}",
         )
 
@@ -211,18 +250,34 @@ def _run_d0b(
         if not scene_ids:
             per_split_residuals[split_name] = {
                 "n_scenes": 0,
+                "n_attempted": 0,
+                "dropped": [],
                 "unscored_reason": "declared in config but received no scenes",
             }
             continue
 
         scene_results: list[dict[str, float]] = []
+        # Same (scene, reason) accounting as D0a — D0b's silence was worse, because
+        # `all_clear` below stayed True over a split it never measured (F-72).
+        dropped: list[dict[str, str]] = []
 
         for sid in scene_ids:
             high_pt = split_dir / f"{sid}_high.pt"
             carrier_path = carrier_dir / f"{sid}.npy"
             ref_waveform_path = renders_dir / sid / "high.npy"
 
-            if not high_pt.exists() or not carrier_path.exists():
+            missing = [
+                label for label, path in (
+                    (high_pt.name, high_pt),
+                    (f"carrier/{carrier_path.name}", carrier_path),
+                    (f"renders/{sid}/{ref_waveform_path.name}", ref_waveform_path),
+                ) if not path.exists()
+            ]
+            if missing:
+                dropped.append({
+                    "scene": sid,
+                    "reason": f"input missing: {', '.join(missing)}",
+                })
                 continue
 
             # Oracle: decode true high-ray energy onto low-ray carrier
@@ -231,9 +286,8 @@ def _run_d0b(
             carrier = np.load(carrier_path)           # (C, T)
             oracle_ir = rep.decode(high_db, carrier)  # (C, T)
 
-            # Reference: raw high-ray waveform
-            if not ref_waveform_path.exists():
-                continue
+            # Reference: raw high-ray waveform (existence checked with the other two
+            # inputs above, so a missing render leaves a logged reason).
             high_ref_ir = np.load(ref_waveform_path)  # (C, T)
 
             # ISO-3382 metrics for oracle and reference (W-channel, onset-aligned, all
@@ -290,7 +344,25 @@ def _run_d0b(
                 }
             scene_results.append(residuals)
 
+        if dropped:
+            emit(verbosity, "warning",
+                 f"  WARNING: D0b scored {len(scene_results)} of {len(scene_ids)} "
+                 f"scenes in split {split_name!r} — {len(dropped)} dropped, per-scene "
+                 f"reasons in d0b_oracle.json (F-72).")
+
         if not scene_results:
+            # Carries no per-metric residuals, so the verdict loop below reads it as
+            # INDETERMINATE rather than letting `all_clear` stay True over a split
+            # nothing was measured on (F-72).
+            per_split_residuals[split_name] = {
+                "n_scenes": 0,
+                "n_attempted": len(scene_ids),
+                "dropped": dropped,
+                "unscored_reason": (
+                    f"all {len(scene_ids)} scenes lacked a required input — see "
+                    f"`dropped` for the per-scene reasons"
+                ),
+            }
             continue
 
         split_summary: dict[str, dict] = {}
@@ -301,6 +373,12 @@ def _run_d0b(
                 "std_residual": float(np.std(vals)) if vals else float("nan"),
                 "n": len(vals),
             }
+        # Scored-vs-attempted for the split as a whole. The per-metric `n` above is a
+        # further, narrower count: a scene can be scored here and still yield a NaN
+        # residual for one metric, which `nan_reasons` records per scene.
+        split_summary["n_scenes"] = len(scene_results)
+        split_summary["n_attempted"] = len(scene_ids)
+        split_summary["dropped"] = dropped
         per_split_residuals[split_name] = split_summary
 
     result_d0b = {
@@ -371,12 +449,19 @@ def _run_d0b(
         edt_s = f"{edt_r:.4f}s" if not np.isnan(edt_r) else "   N/A"
         c50_s = f"{c50_r:.4f}dB" if not np.isnan(c50_r) else "   N/A"
 
+        # A residual averaged over a subset of the split is only interpretable
+        # alongside how much of the split it covers (F-72).
+        n_dropped = len(summary.get("dropped", []))
+        coverage = (
+            f"  [{summary['n_scenes']}/{summary['n_attempted']} scored, "
+            f"{n_dropped} dropped]" if n_dropped else ""
+        )
         emit(
             verbosity, "metrics",
             f"  {split_name:<28} "
             f"{t30_s:>12}({t30_v})  "
             f"{edt_s:>12}({edt_v})  "
-            f"{c50_s:>12}({c50_v})",
+            f"{c50_s:>12}({c50_v}){coverage}",
         )
 
     emit(verbosity, "metrics", "")
