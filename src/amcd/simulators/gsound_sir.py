@@ -57,6 +57,28 @@ _RECEIPT_SHA_KEY = "commit_sha"
 #: in (RD-25).
 _AMBISONIC_CONVENTION = "acn_n3d"
 
+#: Whether the m != 0 channels carry a Condon-Shortley (-1)^|m| phase on top of
+#: ACN/N3D. **MEASURED, not read off the source comments** (AC-43): a single
+#: synthetic path pushed through `generate_ambisonic_ir` at order 1, with no
+#: propagation involved, gives channel-to-W ratios of
+#:
+#:     +x -> [1, 0, 0, -1.7321]      +y -> [1, -1.7321, 0, 0]
+#:     +z -> [1, 0, +1.7321, 0]
+#:
+#: The magnitude sqrt(3) confirms N3D (SN3D would be 1.0) and the position of the
+#: non-zero entry confirms ACN ordering (W, Y, Z, X) — so AC-15's stamp is right
+#: about both. But X and Y are NEGATED relative to W while Z is not, which is
+#: exactly (-1)^|m|, and negating X and Y together is a **180 degree yaw**.
+#:
+#: Stamped separately rather than folded into the convention string because the
+#: string names ordering + normalization, which are genuinely acn_n3d; the phase
+#: is an additional fact about the same data. It is inert today — every live
+#: scalar metric reads channel 0, where it has no effect — and becomes
+#: load-bearing the moment evaluation/spatial.py estimates a direction, which
+#: would otherwise come out 180 degrees wrong in azimuth and look like a bug in
+#: the estimator rather than in the encoding (RD-25).
+_SH_CONDON_SHORTLEY_PHASE = True
+
 #: The render worker, as source rather than a module, because it must run under an
 #: interpreter where `amcd` DOES NOT EXIST: the render env holds numpy, pygsound and
 #: spherical_harmonics_rt and nothing else. It therefore imports no part of this
@@ -396,12 +418,18 @@ class GsoundSirSimulator:
         return order
 
     def _retention_args(self) -> tuple[float, int]:
-        """`path_retention` → upstream's (`energy_percentage`, `max_rays`) pair.
+        """`path_retention` → the (`energy_percentage`, `max_rays`) pair.
 
-        Retention is native upstream, so there is no custom trimming here — and it
-        applies ONLY to the retained-path artifact: `getPathData` is a separate call
-        from the synthesis input, so the IR is always built from the full path set
-        and the ray-budget axis under study stays unconfounded.
+        Those two numbers are consumed by the worker's own `_retain`, AFTER
+        synthesis — NOT by `getPathData`, which is always called at (100.0, 0).
+        Upstream's native retention cannot be used here: it filters inside the same
+        call that produces the paths, so requesting it would mean a second
+        propagation run purely to obtain the unfiltered set the IR is synthesized
+        from. `_retain` reproduces upstream's selection exactly (Scene.cpp:193-224).
+
+        The split matters: retention applies ONLY to the saved artifact. Filtering
+        before synthesis would change the IR itself and confound the ray-budget axis
+        under study — measured at 43.1% of path energy on a real scene (RD-102).
         """
         mode = self.params["path_retention"]["mode"]
         value = self.params["path_retention"]["value"]
@@ -600,6 +628,7 @@ class GsoundSirSimulator:
                 "ray_budget": int(ray_budget),
                 "speed_of_sound_m_s": float(self.params["speed_of_sound_m_s"]),
                 "ambisonic_convention": _AMBISONIC_CONVENTION,
+                "sh_condon_shortley_phase": _SH_CONDON_SHORTLEY_PHASE,
                 # pygsound exposes no RNG seed (RD-23), so reproducibility rests on
                 # the cached artifacts, not on re-render bit-identity.
                 "rng_seeded": False,
@@ -624,7 +653,10 @@ class GsoundSirSimulator:
 class PathRetention(BaseModel):
     """Which simulated paths reach the saved retained-path artifact.
 
-    Maps directly onto upstream `getPathData(energy_percentage=…, max_rays=…)`:
+    Maps onto the (energy_percentage, max_rays) pair that the render worker's
+    `_retain` applies — upstream's own selection rule, reproduced there rather than
+    requested from `getPathData`, which is always called unfiltered so the IR is
+    synthesized from every path (RD-102):
       all          → energy_percentage 100, max_rays 0
       top_percent  → energy_percentage = value
       top_k        → max_rays = value

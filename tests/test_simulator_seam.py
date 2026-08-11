@@ -768,16 +768,32 @@ class TestHostScopedParamsStayOutOfProvenance:
     """
 
     def test_render_python_is_redacted_from_canonical_meta(self, tmp_path: Path) -> None:
-        import json
-
-        from amcd.scenes.generator import run_gen_scenes
-        from amcd.simulators.render import run_render
+        """The scaffold config has no `render_python` at all, so a dry_run render
+        would pass this whether or not the redaction exists. `_canonical_meta` is
+        therefore called against a params block that DOES carry the key, and with a
+        value that would be unmistakable in the output if it leaked."""
+        from amcd.simulators.render import _canonical_meta
 
         cfg = tiny_config(scenes={"n_id": 2})
-        run_gen_scenes(cfg, tmp_path, QUIET)
-        run_render(cfg, tmp_path, QUIET)
-        recorded = json.loads(next(tmp_path.glob("renders/*/meta.json")).read_text())
-        assert "render_python" not in recorded["simulator"]["params"]
+        cfg.simulator.name = "gsound_sir"
+        cfg.simulator.params = {
+            **Config.load(Path("configs/base.yaml")).simulator.params,
+            "render_python": "/Users/SOMEONE/envs/amcd-render-x86/bin/python",
+        }
+        scene = SceneSpec(
+            scene_id="scene_0000", seed=1, geometry_family="shoebox",
+            dims=(6.0, 5.0, 3.0), material_absorption=0.2,
+            source_pos=(1.0, 1.0, 1.5), receiver_pos=(4.0, 3.0, 1.5),
+        )
+        leg = IRResult(ir=np.zeros((16, 8), dtype=np.float32), meta={})
+        recorded = _canonical_meta(cfg, scene, leg, leg)
+
+        params = recorded["simulator"]["params"]
+        assert "render_python" not in params
+        assert "SOMEONE" not in json.dumps(recorded)
+        # …while the experiment-governing params are all still there.
+        assert params["commit_sha"] and params["specular_count"] == 2000
+        assert params["speed_of_sound_m_s"] == 344.0
 
     def test_every_other_simulator_param_still_reaches_provenance(self) -> None:
         """The redaction is a named list, not a filter that could quietly widen."""
