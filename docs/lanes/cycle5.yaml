@@ -1,30 +1,28 @@
 # Cycle-5 partition — STAGING, not yet drawn into lanes.
 #
-# Written by the integrator at the close of cycle 4 so the coverage identity
-# asserted by tests/test_lane_partition.py is RE-ESTABLISHED rather than suspended
-# (RD-88 forbids weakening that assertion; research-director raised the sequencing
-# as RD-132).
+# Written by the integrator at the close of cycle 4 so the coverage identity in
+# tests/test_lane_partition.py is RE-ESTABLISHED rather than suspended (RD-88 forbids
+# weakening that assertion; research-director raised the sequencing as RD-132 and
+# confirmed on review that this is a genuine re-establishment, not a dressed-up one).
 #
-# WHY THERE ARE NO LANES YET. Two things must happen before cycle 5 can be
-# partitioned, and neither is the builder's to decide:
+# WHY THERE ARE NO LANES YET. Three things must happen first, none of them the
+# builder's to decide:
 #
 #   1. RD-128 — RD-33a condition (i) REGRESSED in cycle 4 and its reachability is a
-#      USER decision (scope by severity, or freeze against a named row set). The
-#      protocol says to start a partition FROM THE GATE (planning step 1), so a
-#      partition drawn before that decision would be drawn from the ledger alone —
-#      exactly the RD-81 mistake cycle 4 was replanned to avoid.
-#   2. The integration reviewer pass (gate step 6) has not run. It is the pass that
-#      COUNTS, and it will both add rows and confirm-clean others. Partitioning
-#      before it would plan against a finding set known to be stale.
+#      USER decision. The protocol says to plan a partition FROM THE GATE, so lanes
+#      drawn before that decision would be drawn from the ledger alone: the RD-81
+#      mistake cycle 4 was replanned to avoid.
+#   2. RD-143 — the serial queue does not yet contain the cycle's own blocker.
+#      AC-54 + AC-55 + AC-56 are ONE question (is the declared scene population
+#      renderable by this backend at ISO-3382 fidelity?) and must be item 0.
+#   3. RD-126 — the id-allocation rule. Four lanes collided four ways in cycle 4
+#      because the protocol assigns no disjoint id blocks. Do NOT open cycle-5
+#      worktrees until docs/parallel_protocol.md says how ids are allocated.
 #
-# So every OPEN row sits in integrator_queue: serial and unassigned. That is the
-# truthful reading — until lanes are drawn, the integrator owns everything — and it
-# keeps the union == ledger OPEN set identity machine-checked in the meantime.
-#
-# Also required before lanes are drawn: RD-126, the id-allocation rule. Four lanes
-# collided four ways in cycle 4 because the protocol does not assign disjoint id
-# blocks. Do not open cycle-5 worktrees until docs/parallel_protocol.md says how
-# ids are allocated.
+# KNOWN DEFECT OF THIS FILE, recorded rather than hidden (RD-146): the ~22 rows that
+# are FIX APPLIED / awaiting re-review are pooled into the queue below and
+# `awaiting_re_review` is empty. Planning step 3 depends on exactly that distinction,
+# so it must be restored before lanes are drawn.
 
 cycle: cycle5
 base_branch: v3-rebuild
@@ -32,220 +30,238 @@ base_branch: v3-rebuild
 lanes: []
 
 integrator_queue:
-  - {id: AC-19-R7, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-26, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-26-R6, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-27, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-28, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-28-B2, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-30, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-36, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-37, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-37-R4, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-38, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-39, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-40, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-41, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-42, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-43, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-44, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-45, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-46, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-47, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-48, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-49, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-50, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-51, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-52, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-53, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-54, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-55, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-56, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-57, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-59, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-60, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-61, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-62, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: AC-63, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-45, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-55, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-59, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-60, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-61, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-62, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-63, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-64, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-65, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-66, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-67, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-68, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-68-R2, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-68-R3, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-69, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-69-B4, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-70, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-71, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-72, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-73, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-74, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-75, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-76, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-77, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-78, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-79, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-80, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-81, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-82, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-83, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-84, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-85, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-86, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-87, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-88, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-89, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-90, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-91, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-92, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-93, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-94, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-95, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-96, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-97, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-98, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-M10, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-M11, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-M2, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-M3, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-M4, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-M5, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-M6, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-M7, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-M8, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: F-M9, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-08, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-100, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-101, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-102, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-103, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-104, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-105, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-106, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-107, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-108, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-109, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-110, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-111, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-112, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-113, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-114, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-115, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-116, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-117, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-118, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-119, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-120, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-121, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-122, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-123, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-124, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-125, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-126, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-127, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-128, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-129, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-130, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-131, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-132, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-133, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-134, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-135, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-136, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-18, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-20, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-21, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-24, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-33a, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-65, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-66, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-67, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-69, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-72, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-73, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-74, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-75, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-76, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-77, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-78, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-79, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-80, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-88, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-89, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-90, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-91, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-92, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-93, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-94, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-96, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-97, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-98, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RD-99, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-24, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-26, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-27, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-28, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-29, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-32, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-33, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-34, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-35, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-36, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-37, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-38, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-42, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-43, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-44, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-45, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-46, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-47, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-48, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-49, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-50, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-51, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-52, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-53, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-54, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-55, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-56, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-57, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-58, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-59, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-60, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-61, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-62, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-63, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-64, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-65, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-66, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-67, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-68, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-69, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-70, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-71, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-72, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-73, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-74, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-75, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-76, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-77, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-78, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: RR-79, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: S-1, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: S-2, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: S-F1, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: S-F4, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: S-F5, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: S-F6, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
-  - {id: S-F7, reason: "cycle-4 fold; unassigned pending RD-128 and the step-6 reviewer pass"}
+  - {id: AC-19-R7, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-26, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-26-R6, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-27, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-28, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-28-B2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-30, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-36, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-37, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-37-R4, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-37-R5, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-38, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-39, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-40, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-41, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-42, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-42-B1, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-42-R1, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-43, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-44, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-45, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-46, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-47, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-48, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-49, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-50, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-51, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-52, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-53, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-54, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-55, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-56, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-57, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-58, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-59, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-60, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-61, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-62, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: AC-63, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-45, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-55, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-59, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-60, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-61, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-62, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-63, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-64, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-65, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-66, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-67, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-68, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-68-R2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-68-R3, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-69, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-69-B4, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-70, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-71, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-72, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-73, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-74, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-75, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-76, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-77, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-78, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-79, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-80, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-81, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-82, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-83, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-84, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-85, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-86, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-87, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-88, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-89, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-90, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-91, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-92, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-93, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-94, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-95, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-96, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-97, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-98, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M1, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M10, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M11, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M3, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M4, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M5, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M6, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M7, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M8, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: F-M9, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-08, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-100, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-101, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-102, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-103, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-104, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-105, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-106, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-107, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-108, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-109, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-110, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-111, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-112, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-113, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-114, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-115, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-116, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-117, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-118, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-119, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-120, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-121, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-122, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-123, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-124, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-125, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-126, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-127, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-128, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-129, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-130, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-131, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-132, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-133, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-134, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-135, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-136, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-142, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-143, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-144, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-145, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-146, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-18, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-20, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-21, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-24, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-33a, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-65, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-66, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-67, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-69, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-72, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-73, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-74, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-75, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-76, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-77, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-78, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-79, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-80, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-88, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-89, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-90, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-91, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-92, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-93, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-94, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-96, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-97, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-98, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RD-99, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-24, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-26, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-27, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-28, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-29, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-32, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-33, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-34, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-35, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-36, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-37, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-38, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-42, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-43, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-44, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-45, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-46, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-47, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-48, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-49, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-50, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-51, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-52, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-53, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-54, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-55, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-56, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-57, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-58, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-59, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-60, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-61, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-62, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-63, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-64, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-65, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-66, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-67, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-68, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-69, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-70, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-71, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-72, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-73, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-74, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-75, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-76, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-77, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-78, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-79, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-80, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-81, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-82, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-83, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-84, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-85, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-86, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: RR-87, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: S-1, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: S-2, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: S-F1, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: S-F4, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: S-F5, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: S-F6, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
+  - {id: S-F7, reason: "cycle-4 fold; unassigned pending RD-128/RD-143/RD-126"}
 
 awaiting_re_review: []
 raised_against_this_partition: []
