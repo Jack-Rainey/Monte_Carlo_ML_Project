@@ -345,24 +345,102 @@ got wrong in doing so:
 cross-lane `test_simulator_seam.py` row at the top of this file. Canonical dry run
 still completes, exit 0.
 
+### F-75: the false-witness half is closed; the staleness is a standing decision
+
+Operator decision: **do not wire `render`/`gen-scenes`** — the re-render cost under
+emulation is real and RD-99 stays open as a policy call for the integrator. But
+stop the provenance channel vouching for artifacts it did not describe.
+
+Implemented:
+
+* `_mark_done` records `code_version_unscoped` (the whole-package hash of the code
+  that actually wrote the artifacts) as a sibling of `fingerprint`, never inside
+  it — so it is recorded and never compared, and cannot turn every stage into a
+  whole-package hash.
+* `Pipeline._warn_if_unprotected_and_stale` warns on stderr, for stages with NO
+  scoped `code_version` only, when a cached stage's recorded hash differs from the
+  current source. Fingerprinted stages are skipped deliberately: a scoped change
+  already refuses them, and a warning there would be noise, which is how an
+  operator learns to ignore warnings.
+* `versions.json` now carries `code_version_describes`, in the file rather than in
+  a comment no reader of the JSON sees.
+
+Verified with the falsifier's own probe (`noise_scale` 1.0 → 2.0 in
+`simulators/dry_run.py`, scratch copy):
+
+```
+[warn ] gen-scenes is cached and the package source has CHANGED since its
+        artifacts were written (295d31ea7f13 → 1e08fc60bdf5), but 'gen-scenes'
+        declares no code_version, so nothing refuses it (RD-99). ...
+[warn ] render is cached and the package source has CHANGED ...
+[warn ] diagnostics is cached and the package source has CHANGED ...
+[skip] × 9, EXIT=0
+```
+
+and on disk the two records now disagree openly:
+
+```
+versions.json  code_version          : 1e08fc60bdf5   (this invocation)
+stages/render.done code_version_unscoped: 295d31ea7f13   (what built the artifacts)
+```
+
+The staleness remains — that is RD-99's call, unchanged. It is no longer silent,
+and `versions.json` no longer asserts the new code produced the old numbers.
+**The cycle's cache-protection claim still stands only for `preprocess`…`report`.**
+
 ### OPEN, not fixed
 
-* **F-75 / AC-44 (blocker)** — awaiting the policy decision above. Until it is
-  taken, **the cycle's claim must be stated as "for preprocess…report only"**, not
-  as the class claim.
+* **RD-99 / F-75 / AC-44 (blocker→policy)** — `render` and `gen-scenes` still carry
+  no `code_version`. Deliberate, now disclosed at runtime rather than silent.
+  Integrator's decision.
 * **AC-45 (major)** — acoustics-reviewer rates the unfingerprinted `diagnostics`
   higher than my RD-100 did, and is right about why: the D0b output is a physical
   VERDICT ("CARRIER CEILING CLEARS … Proceed to E1"), invalidated by nothing, and
   measured stale under changed `ir_duration`, `ambisonics_order`, ray budgets and
   `sample_rate`. A stale clearance is a false clearance of the project's own
   premise. RD-100 should be re-rated major.
-* **RR-46…RR-59 (readability-reviewer)** — largely NOT addressed, and one is a
-  fair hit I should own: **RR-36 is not closed**. I cut four reproduction
-  transcripts and wrote four new ones for the reproductions I ran this cycle, which
-  is the same pattern by the same standard. The abstract-sentence half IS closed
-  (stated once at `STAGE_CODE_SCOPE`). Also unclosed: F-53 still narrated twice,
-  and the RD-41 "report is terminal" rebuttal now appears four times. RR-58
-  (README) is cross-lane.
+* **RR-46…RR-57, RR-59 — ADDRESSED** (see below). **RR-58 (README) is cross-lane**
+  and stays for the integrator: the README documents only "a cached stage is
+  skipped, pass `--force`", which after this cycle is the least important half —
+  a mismatch is a LOUD refusal naming the stage, and `--force` DISCARDS artifacts.
+
+### The readability pass (second round)
+
+RR-36 was the fair hit and I own it: I closed it by cutting four reproduction
+transcripts and then writing four new ones for the reproductions I ran this cycle
+— the same pattern, by the same standard. Now actually done:
+
+* **RR-46** — the four transcripts I added are cut to rule + ledger id
+  (`_preprocess_fingerprint`, `_stats_fingerprint`, `_report_fingerprint` 13 lines
+  → 6, and the 8-line narration inside `_eval_fingerprint`'s dict literal → 2).
+  The evidence lives here in the inbox and in `git log -S`, which is what the ids
+  are for.
+* **RR-47** — F-53 now narrated once (at `STAGE_UPSTREAM`, which owns the chain),
+  with `_train_fingerprint` citing it. The RD-41 "report is terminal" rebuttal went
+  from four statements to one at `_report_fingerprint`; the other three cite it.
+* **RR-48** — the same trim applied to the test-class docstrings. The
+  "WHAT THIS TEST CHECKS / WHAT IT CANNOT CHECK" and LIMIT paragraphs are kept
+  verbatim — those are contract, not transcript.
+* **RR-49** — `code_version`'s docstring last paragraph no longer restates the test
+  docstring; it points at it, in `STAGE_CODE_SCOPE`'s shape.
+* **RR-50** — `_DIAGNOSTICS_EXEMPTION` moved above the `#:` block, which now
+  documents the dict it precedes rather than the string constant.
+* **RR-51** — the "Non-exempt" token contract, previously discoverable only by
+  failing a test, is stated in the table's header.
+* **RR-52** — `STAGE_CODE_SCOPE` now says the three absent stages are absent by
+  decision, and points at RD-99/RD-100.
+* **RR-53** — `TestTheChainReachesTheReportedTABLE` →
+  `TestTheTableProducingStagesAreCacheProtected`; it no longer differs from its
+  neighbour by a shouted last word.
+* **RR-54** — the new banner cut to a bare title, matching the other three.
+* **RR-55** — `_check_scalar_domains` and `_check_reserved_split_names` extracted;
+  `Config._check` is now eight named calls and nothing else.
+* **RR-56** — the ~15 lines in `stamp()` re-telling `provenance.py`'s docstrings cut
+  to one line each, pointing at the module that owns the rule.
+* **RR-57** — `select_device` annotated `-> "torch.device"` (lazy import preserved,
+  verified importable) and the two-way-parsing opener reworded.
+* **RR-59** — the module docstring's stale row enumeration replaced with the six
+  failure families the file now covers.
 
 ---
 

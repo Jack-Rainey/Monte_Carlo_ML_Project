@@ -122,17 +122,10 @@ def code_version(scope: tuple[str, ...]) -> str:
     compliance.
 
     The residual risk is a scope that omits a real dependency, and it fails
-    silently. `tests/test_stage_cache.py` bounds that risk but does not eliminate
-    it: it asserts the declared scope is a superset of the stage's STATIC
-    transitive `amcd.*` import closure, module-level and function-level, minus
-    `_CORE_SOURCES`. What that cannot see is a dependency reached without an
-    import statement — above all the plugin registry, through which
-    `representations`, `models` and `simulators` are loaded by NAME. Those stay a
-    declared judgement, checked by review and not by the test. Stating this
-    precisely is deliberate: the previous wording claimed the test checked "the
-    modules the stage actually imports", when it only checked that the stage's own
-    entry-point subpackage was in scope, and the overstatement was itself the
-    finding (F-66).
+    silently. `tests/test_stage_cache.py::TestDeclaredScopeCoversWhatTheStageImports`
+    bounds that risk without eliminating it — read that test's docstring for what
+    it does and does not catch, since an earlier version of THIS docstring claimed
+    more than the test checked and that overstatement was the finding (F-66).
     """
     digest = hashlib.sha256()
     for entry in sorted(set(scope) | set(_CORE_SOURCES)):
@@ -163,11 +156,11 @@ def host_platform() -> str:
     return platform.machine()
 
 
-def select_device():
+def select_device() -> "torch.device":  # noqa: F821 — torch imported lazily below
     """The torch device this host offers, preferring MPS, then CUDA, then CPU.
 
-    NOT provenance, and not here by design: this is runtime policy, and it lives
-    in `provenance.py` because `Config.stamp` must record the chosen device into
+    This is runtime policy, not provenance, and this is not its natural home: it
+    lives here because `Config.stamp` must record the chosen device into
     `versions.json` and `config.py` is in `_CORE_SOURCES`. A core module importing
     `amcd.training` would put `training/` in EVERY stage's import closure and make
     every stage's declared scope wrong. The natural home is a top-level

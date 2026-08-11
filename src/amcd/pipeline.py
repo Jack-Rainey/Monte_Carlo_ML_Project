@@ -99,14 +99,10 @@ def _preprocess_fingerprint(config: Config) -> dict:
     existing run_dir was a complete no-op — splits.json kept the old assignment
     while config.yaml stamped the new seed, a provenance lie.
 
-    `code_version` closes the same hole against a CODE change (F-64). Config keys
+    `code_version` closes the same hole against a CODE change (F-64): config keys
     alone left the encoder, the normalization statistics and that same
-    leakage-critical split assignment reachable through the cache: patching
-    `spectrogram.encode` left preprocess `[skip] (cached)` and refused TRAIN, so
-    an operator who did exactly what the message said reached exit 0 and a full
-    report over an encoding no stage in the run produced. A refusal that names
-    the wrong stage is worse than no refusal — it spends the operator's trust on
-    a `--force` that does not fix anything.
+    leakage-critical split assignment reachable through the cache, and the stage
+    that DID refuse was `train`, so following the error rebuilt the wrong thing.
     """
     return {
         "splits": {name: sp.model_dump() for name, sp in config.splits.items()},
@@ -125,11 +121,8 @@ def _preprocess_fingerprint(config: Config) -> dict:
 def _train_fingerprint(config: Config) -> dict:
     """Config inputs that determine the trained weights.
 
-    RD-41 deferred this on COST grounds — "the expensive artifact is the render".
-    F-53 is why that is the wrong test: a cache that is cheap to REBUILD can still
-    be the one standing between a changed model and the reported numbers, and
-    leaving it unwired reported an old checkpoint's results under a new model's
-    provenance stamp.
+    RD-41 deferred this on COST grounds — "the expensive artifact is the render" —
+    which F-53 showed is the wrong test; see STAGE_UPSTREAM, which owns that story.
 
     Both training seeds are named individually (inv #5): weight init and data
     shuffle are separate aspects and a run that differs in either is a different
@@ -188,14 +181,8 @@ def _eval_fingerprint(config: Config) -> dict:
         "iso_eval_freqs": list(config.iso_eval_freqs),
         "metric_onset_rel_db": config.metric_onset_rel_db,
         "metric_band_resolvability_margin": config.metric_band_resolvability_margin,
-        # The EDT variance-limited bound governs a REPORTED disclosure column
-        # (`ci_table.n_estimator_variance_limited` → summary.txt's Caveats), so it
-        # is an input to the reported result like any threshold. It was added in
-        # cycle 3 for RD-78 and reached no fingerprint, which served that column
-        # under the wrong threshold's provenance stamp — F-53's failure mode,
-        # reintroduced by the key that fixed a different row (F-65). The
-        # class-level guard against the next such key is
-        # FINGERPRINT_EXEMPT_FIELDS below.
+        # Governs a REPORTED disclosure column (F-65); the class-level guard
+        # against the next such key is FINGERPRINT_EXEMPT_FIELDS below.
         "metric_edt_variance_limited_s": config.metric_edt_variance_limited_s,
         "representation": {
             "name": config.representation.name,
@@ -216,11 +203,9 @@ def _stats_fingerprint(config: Config) -> dict:
     below forbids (F-54). Recomputing let `--force` stamp a chain describing
     artifacts that did not exist, and cost the recursive leaf diff F-49 bought.
 
-    `code_version` covers the code that COMPUTES the reported CIs (F-63). Without
-    it, `bootstrap_ci` could be edited and every stage still printed
-    `[skip] (cached)` at exit 0 with `ci_table.csv` holding the old code's
-    numbers: `stats` is in no other stage's scope, so nothing upstream could
-    notice on its behalf. Scope is ("stats", "evaluation") because
+    `code_version` covers the code that COMPUTES the reported CIs (F-63). `stats`
+    is in no other stage's scope, so nothing upstream can notice an edit to
+    `bootstrap_ci` on its behalf. Scope is ("stats", "evaluation") because
     `stats/aggregate.py` imports `evaluation.metric_row.paired_improvement` — the
     improvement values the CIs are taken over.
     """
@@ -236,16 +221,10 @@ def _stats_fingerprint(config: Config) -> dict:
 def _report_fingerprint(config: Config) -> dict:
     """Config inputs — AND the code version — that determine the reported tables.
 
-    RD-41 left `report` unwired as "terminal — nothing chains to it, so an unwired
-    fingerprint can only cost it its own re-use". F-63 is what makes that
-    rationale wrong: `report`'s own re-use IS `report/summary.txt`, the artifact a
-    reader treats as the result. An edit to `reporting/tables.py` reached exit 0
-    with the old table on disk.
-
-    `STAGE_UPSTREAM["report"] = "stats"` carries the other half. A fingerprint
-    over this stage's own inputs cannot see the numbers it formats, so without the
-    chain a re-run `stats` left `report` cached and `summary.txt` disagreeing with
-    the `ci_table.csv` it was rendered from — the same defect one link downstream.
+    RD-41 left this unwired as terminal, "costing only its own re-use". Its own
+    re-use IS `report/summary.txt`, the artifact a reader treats as the result
+    (F-63). `STAGE_UPSTREAM["report"] = "stats"` carries the other half: a
+    fingerprint over this stage's own inputs cannot see the numbers it formats.
     """
     return {
         "report_format": config.report_format,
@@ -274,6 +253,11 @@ def _report_fingerprint(config: Config) -> dict:
 #: fails SILENTLY. `tests/test_stage_cache.py` therefore asserts each declared
 #: scope against the stage's transitive import closure; read that test's docstring
 #: for what it does and does not catch (F-66).
+#:
+#: Six of the nine STAGES are here. `gen-scenes`, `render` and `diagnostics` are
+#: absent BY DECISION, not oversight: they carry no `code_version` at all, so they
+#: have nothing to scope — see STAGE_FINGERPRINT, RD-99 and RD-100 for the cost
+#: that buys and what it leaves exposed.
 STAGE_CODE_SCOPE: dict[str, tuple[str, ...]] = {
     # Assigns splits and encodes tensors. `simulators/base.py` is named as a
     # single module rather than the whole subpackage because `data/preprocess.py`
@@ -299,8 +283,7 @@ STAGE_CODE_SCOPE: dict[str, tuple[str, ...]] = {
     # Computes the reported CIs and MDES over `evaluation.metric_row`'s paired
     # improvements, which is why `evaluation` is in scope and not just `stats`.
     "stats": ("stats", "evaluation"),
-    # Formats the reported tables. Terminal, but its own re-use is
-    # `report/summary.txt` — the artifact a reader treats as the result (F-63).
+    # Formats the reported tables (F-63; see `_report_fingerprint`).
     "report": ("reporting",),
 }
 
@@ -328,11 +311,10 @@ def _code_version(stage: str) -> str:
 #: change upstream of preprocess is still a fresh run_dir or `--force`.
 #: See STAGE_CODE_SCOPE for why config keys alone are not enough.
 #:
-#: The one remaining `None` is `diagnostics`: genuinely terminal — nothing chains
-#: to it — so an unwired fingerprint there cannot corrupt another stage's
-#: provenance, only its own re-use. `report` USED to be justified the same way
-#: (RD-41) and no longer is: its own re-use is `report/summary.txt`, which is the
-#: reported result, so "only its own re-use" was never a small cost (F-63).
+#: The one remaining `None` is `diagnostics`, on RD-41's "terminal, so an unwired
+#: fingerprint costs only its own re-use" — the same argument that turned out to be
+#: wrong for `report` (see `_report_fingerprint`), and which RD-100/AC-45 dispute
+#: here too: a stale D0b carrier-ceiling verdict is a false clearance.
 STAGE_FINGERPRINT: dict[str, Callable[[Config], dict] | None] = {
     "gen-scenes": _gen_scenes_fingerprint,
     "render": _render_fingerprint,
@@ -359,20 +341,15 @@ STAGE_FINGERPRINT: dict[str, Callable[[Config], dict] | None] = {
 #:
 #:   gen-scenes → render → preprocess → train → infer → eval → stats → report
 #:
-#: Before F-53 it stopped at `preprocess`. `eval` and `stats` carried fingerprints,
-#: which READ as "the reported metrics are cache-protected", while neither was
-#: chained to its actual inputs and `train`/`infer` carried none at all — so a
-#: changed model was reported under a stale checkpoint's numbers. Wiring the chain
-#: is what makes a fingerprint transitive: `report` is stale when the SCENES
-#: changed, through seven links, without `_report_fingerprint` naming a single
-#: scene key.
+#: Before F-53 it stopped at `preprocess`, so a changed model was reported under a
+#: stale checkpoint's numbers. Wiring the chain is what makes a fingerprint
+#: transitive: `report` is stale when the SCENES changed, through seven links,
+#: without `_report_fingerprint` naming a single scene key.
 #:
-#: The last link is `stats → report` (F-63). `report` was unchained as "terminal"
-#: (RD-41), which is true of the graph and false of the consequence: `summary.txt`
-#: is rendered FROM `ci_table.csv`, so an unchained `report` stayed cached across a
-#: re-run `stats` and disagreed with the table it was made from.
+#: The last link is `stats → report` (F-63; see `_report_fingerprint` for why
+#: "terminal" was true of the graph and false of the consequence).
 #:
-#: `diagnostics` is the only terminal stage left, and consumes nothing a later
+#: `diagnostics` is the only unchained stage left, and consumes nothing a later
 #: stage reports.
 STAGE_UPSTREAM: dict[str, str | None] = {
     "gen-scenes": None,
@@ -396,10 +373,7 @@ STAGE_UPSTREAM: dict[str, str | None] = {
 #: the two distinguishable — every `Config` field must either move a fingerprint
 #: when perturbed, or be named here — so the next added key cannot repeat it.
 #:
-#: An entry states why the field is absent TODAY and what makes it non-exempt,
-#: because a present-tense fact ("nothing consumes it") reads to a later editor as
-#: permission to delete the field.
-#: Shared by the five D0a/D0b thresholds below, which are exempt for one reason.
+#: Shared reason for the five D0a/D0b thresholds in the table below.
 _DIAGNOSTICS_EXEMPTION = (
     "Consumed only by `diagnostics`, which declares no fingerprint at all "
     "(STAGE_FINGERPRINT). The exemption is a pointer to that open hole, not a "
@@ -408,6 +382,11 @@ _DIAGNOSTICS_EXEMPTION = (
     "these belong in its fingerprint."
 )
 
+#: An entry states why the field is absent TODAY and what makes it non-exempt,
+#: because a present-tense fact ("nothing consumes it") reads to a later editor as
+#: permission to delete the field. `tests/test_config.py` enforces that shape: each
+#: reason must contain "Non-exempt", or say the field is "fingerprinted through"
+#: another key.
 FINGERPRINT_EXEMPT_FIELDS: dict[str, str] = {
     "run_id": (
         "Experiment-ledger label with no pipeline consumer (config.py `run_id`). "
@@ -663,10 +642,71 @@ class Pipeline:
                 self._effective_fingerprint(stage)
                 if STAGE_FINGERPRINT[stage] else None
             ),
+            # OUTSIDE `fingerprint`, so it is recorded and never compared: this is
+            # the whole-package hash of the code that actually produced these
+            # artifacts. For `gen-scenes` and `render` — which carry no scoped
+            # `code_version` — it is the ONLY record on disk of which code made
+            # them, and it is what lets `_warn_if_unprotected_and_stale` tell the
+            # operator that a cached artifact predates the current source (F-75).
+            "code_version_unscoped": provenance.code_version(provenance.ALL_SOURCES),
         }
         s = _sentinel(self.run_dir, stage)
         s.parent.mkdir(parents=True, exist_ok=True)
         s.write_text(json.dumps(payload, indent=2, default=str))
+
+    def _warn_if_unprotected_and_stale(self, stage: str) -> None:
+        """Say so when a stage the cache CANNOT protect is served under newer code.
+
+        `gen-scenes` and `render` declare no `code_version` (RD-99), deliberately:
+        scoping `render` to `simulators/` would force a full re-render — the
+        multi-hour artifact under x86 emulation — on any backend edit. The cost of
+        that decision is that a code change to the IR synthesis, the placement
+        sampling or the render QC gates leaves these stages cached with no refusal.
+
+        What is NOT acceptable is that being invisible. `versions.json` is
+        re-stamped every invocation with the CURRENT whole-package hash, so a
+        run_dir whose renders predate an edit to `simulators/dry_run.py` carried a
+        provenance stamp positively asserting the new code produced them — a false
+        witness, and worse than the staleness itself (F-75).
+
+        So: for stages with no scoped `code_version`, compare the whole-package
+        hash recorded when the artifacts were WRITTEN against the current one, and
+        warn on stderr when they differ. Deliberately a warning, not a refusal —
+        the refusal is the policy call in RD-99, and this must not quietly make it.
+
+        Fingerprinted stages are skipped: a scoped code change already refuses
+        them, so a whole-package drift there is expected and would be pure noise.
+        """
+        fingerprint = STAGE_FINGERPRINT[stage]
+        if fingerprint is not None and "code_version" in fingerprint(self.config):
+            return
+        try:
+            recorded = json.loads(_sentinel(self.run_dir, stage).read_text())
+        except (json.JSONDecodeError, OSError):
+            return
+        was_built_with = recorded.get("code_version_unscoped")
+        if was_built_with is None:
+            # Written before this key existed. Absence is not evidence of a match,
+            # so say that rather than implying agreement.
+            emit(
+                self.verbosity, "warning",
+                f"[warn ] {stage} is cached and carries no code_version. Its "
+                f"sentinel predates provenance recording for unprotected stages, "
+                f"so which code produced its artifacts is UNKNOWN."
+            )
+            return
+        current = provenance.code_version(provenance.ALL_SOURCES)
+        if was_built_with != current:
+            emit(
+                self.verbosity, "warning",
+                f"[warn ] {stage} is cached and the package source has CHANGED "
+                f"since its artifacts were written "
+                f"({was_built_with[:12]} → {current[:12]}), but {stage!r} declares "
+                f"no code_version, so nothing refuses it (RD-99). Its artifacts may "
+                f"predate the current code; versions.json describes THIS "
+                f"invocation, not what produced them. Use --force or a fresh "
+                f"--run-dir if the change affects {stage!r}."
+            )
 
     def _record_timing(self, stage: str, seconds: float) -> None:
         # Per-stage wall time is provenance (RD-09): written from save level 1.
@@ -691,6 +731,7 @@ class Pipeline:
                 self._effective_fingerprint(stage)
 
             if self._is_done(stage):
+                self._warn_if_unprotected_and_stale(stage)
                 emit(self.verbosity, "progress", f"[skip] {stage} (cached)")
                 return
 

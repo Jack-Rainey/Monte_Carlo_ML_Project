@@ -1,10 +1,17 @@
-"""Stage-cache fingerprints and artifact residue.
+"""Stage-cache fingerprints, code versions, and artifact residue.
 
-Ledger rows F-46, F-47 (widening F-38), F-49, F-50, RD-54/RD-59.
+Every class names the row it pins; the reproductions behind those rows live in
+git history and the review ledger, which is what the ids are for.
 
-Two failure families, both about a run_dir quietly disagreeing with its config:
-  * FINGERPRINTS — a cached stage must be refused when its inputs changed, and
-    NOT refused when they did not (a false refusal costs an emulated re-render).
+The failure families, all about a run_dir quietly disagreeing with its config:
+  * FINGERPRINT SCOPE — a cached stage must be refused when its inputs changed,
+    and NOT refused when they did not (a false refusal costs an emulated
+    re-render, and teaches the operator to reach for `--force`).
+  * CODE VERSION — a config fingerprint cannot see a code change; the declared
+    per-stage scope must cover what the stage actually depends on.
+  * THE CHAIN — staleness must reach the reported table transitively.
+  * CONFIG-FIELD COVERAGE — every Config field is fingerprinted or declared exempt.
+  * HOST INDEPENDENCE — the cache key describes the source, not the machine.
   * RESIDUE — scene ids are POSITIONAL, so a shrunk scene set leaves orphans that
     a later config silently reuses under different geometry.
 """
@@ -434,18 +441,10 @@ class TestZeroCountIsRejected:
         assert payload == {"volume_m3": None, "t60_sabine_s": None}
 
 
-class TestTheChainReachesTheReportedTABLE:
+class TestTheTableProducingStagesAreCacheProtected:
     """F-63 / F-64: cycle 3's "the cache protects the reported result" held for
-    train/infer/eval and failed for the stages that PRODUCE the table.
-
-    All three reproduced end to end before the fix, each at exit 0:
-      * F-64 — patching `spectrogram.encode` left `[skip] preprocess (cached)` and
-        refused TRAIN. Following that message (`--force` train, then infer, then
-        eval, then stats) reached a full report while
-        `preprocessed/train/scene_0000_high.pt` stayed bit-identical.
-      * F-63 — patching `bootstrap_ci` printed `[skip]` for all nine stages and
-        left `ci_table.csv` as the old code's output.
-      * The same for `report`, whose own re-use IS `summary.txt`.
+    train/infer/eval and failed for `preprocess`, `stats` and `report` — the stages
+    that produce the table. Each was reproduced end to end at exit 0 before the fix.
     """
 
     def test_preprocess_carries_a_code_version(self) -> None:
@@ -522,9 +521,7 @@ class TestDeclaredScopeCoversWhatTheStageImports:
     scope that omits a real dependency fails SILENTLY.
 
     `eval` and `infer` both called `data.normalization.denormalize` on every
-    reported leg while neither declared `data`. MEASURED before the fix: patching
-    `denormalize` (+10 dB) left `_code_version("eval")` and `_code_version("infer")`
-    bit-identical while train's moved. It was masked only because `data` sits in
+    reported leg while neither declared `data`, masked only because `data` sits in
     TRAIN's scope and the chain refuses upstream first — an accident of ordering.
 
     WHAT THIS TEST CHECKS, precisely, because the previous docstring claimed more
@@ -677,10 +674,7 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
 
     `metric_edt_variance_limited_s` was added in cycle 3 to fix RD-78 and reached
     no fingerprint, so a REPORTED disclosure column was served under the wrong
-    threshold's stamp. REPRODUCED: 0.15 → 5.0 on a complete run_dir printed
-    `[skip]` for all nine stages at exit 0 and re-stamped `config.yaml` with 5.0
-    while `ci_table.csv` kept the old counts (measured 0/1/3/0 at 0.15 against
-    3/3/3/3 at 5.0). Adding the key fixes one instance; this test is what stops
+    threshold's stamp. Adding the key fixes one instance; this test is what stops
     the next one.
 
     Coverage is proved by PERTURBATION, not by matching field names against
@@ -805,6 +799,80 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
             )
 
 
+class TestAnUnprotectedStaleStageIsDisclosedNotVouchedFor:
+    """F-75: `gen-scenes` and `render` carry no `code_version` (RD-99, a deliberate
+    policy call — scoping `render` to `simulators/` forces a re-render, the
+    multi-hour artifact under emulation). The staleness that buys is accepted.
+
+    What was NOT acceptable: `versions.json` is re-stamped every invocation with
+    the current whole-package hash, so a run_dir whose renders predate an edit to
+    the render backend carried a provenance stamp positively asserting the new code
+    produced them — a false witness, worse than the staleness itself.
+
+    These tests pin the disclosure, not a refusal. The refusal is RD-99's to decide.
+    """
+
+    def test_the_sentinel_records_which_code_wrote_the_artifacts(
+        self, tmp_path: Path
+    ) -> None:
+        import amcd.provenance as prov
+
+        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        pipe._mark_done("gen-scenes")
+        recorded = json.loads(_sentinel(tmp_path, "gen-scenes").read_text())
+        assert recorded["code_version_unscoped"] == prov.code_version(prov.ALL_SOURCES)
+
+    def test_it_is_recorded_outside_the_fingerprint_so_it_never_invalidates(
+        self, tmp_path: Path
+    ) -> None:
+        """Recording it must not turn every stage into a whole-package hash — that
+        is exactly the guard-by-over-refusal the scoping rationale rejects."""
+        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        pipe._mark_done("gen-scenes")
+        recorded = json.loads(_sentinel(tmp_path, "gen-scenes").read_text())
+        assert "code_version_unscoped" not in (recorded["fingerprint"] or {})
+
+    def test_a_changed_package_warns_when_an_unprotected_stage_is_served(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        pipe._mark_done("gen-scenes")
+        sentinel = _sentinel(tmp_path, "gen-scenes")
+        recorded = json.loads(sentinel.read_text())
+        recorded["code_version_unscoped"] = "0" * 64  # as if built by older source
+        sentinel.write_text(json.dumps(recorded))
+
+        capsys.readouterr()
+        pipe._warn_if_unprotected_and_stale("gen-scenes")
+        err = capsys.readouterr().err
+        assert "gen-scenes" in err and "no code_version" in err, err
+
+    def test_a_fingerprinted_stage_does_not_warn(self, tmp_path: Path, capsys) -> None:
+        """`preprocess` refuses on a scoped change, so a whole-package drift there
+        is expected and a warning would be pure noise — which is how an operator is
+        taught to ignore warnings."""
+        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
+        for stage in ("gen-scenes", "render", "preprocess"):
+            pipe._mark_done(stage)
+        sentinel = _sentinel(tmp_path, "preprocess")
+        recorded = json.loads(sentinel.read_text())
+        recorded["code_version_unscoped"] = "0" * 64
+        sentinel.write_text(json.dumps(recorded))
+
+        capsys.readouterr()
+        pipe._warn_if_unprotected_and_stale("preprocess")
+        assert capsys.readouterr().err == ""
+
+    def test_versions_json_says_what_its_code_version_describes(
+        self, tmp_path: Path
+    ) -> None:
+        from amcd.config import Config
+
+        Config.load().stamp(tmp_path)
+        versions = json.loads((tmp_path / "versions.json").read_text())
+        assert "this invocation" in versions["code_version_describes"]
+
+
 class TestALegacySentinelIsRefusedActionablyNotWithATraceback:
     """F-76: giving `report` a fingerprint made `{"fingerprint": null}` sentinels
     reachable, and they crashed with a bare `TypeError` from `set(None)` instead of
@@ -855,16 +923,11 @@ class TestALegacySentinelIsRefusedActionablyNotWithATraceback:
 class TestTheCacheKeyDescribesTheSourceNotTheHost:
     """F-69: `rglob("*.py")` hashed macOS AppleDouble `._*.py` sidecars.
 
-    42 `._*.py` sat under `src/amcd/` on this exFAT volume when the row was
-    written. They do not exist on APFS or on the project's declared second host, so
-    the same source hashed differently there and a run_dir carried between hosts
-    was refused with a `code_version: <sha> → <sha>` diff naming no leaf — leaving
-    `--force` as the only remedy, which is the compliance failure the scoping
-    rationale exists to avoid.
-
-    Verified against real trees as well as the injection below: this exFAT worktree
-    (42 sidecars) and an rsync copy excluding them (0) now hash identically for
-    every scoped stage.
+    They are real files on an exFAT volume and absent on APFS or the project's
+    declared second host, so the same source hashed differently there and a run_dir
+    carried between hosts was refused with a `code_version: <sha> → <sha>` diff
+    naming no leaf — leaving `--force` as the only remedy, which is the compliance
+    failure the scoping rationale exists to avoid.
     """
 
     def test_an_appledouble_sidecar_does_not_change_any_stages_version(self) -> None:

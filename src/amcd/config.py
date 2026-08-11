@@ -839,11 +839,27 @@ class Config(BaseModel):
     # ── Validation ────────────────────────────────────────────────────────────
     @model_validator(mode="after")
     def _check(self) -> "Config":
-        # Positivity guards for scalars a §7 tuned sweep (or a typo) could otherwise
-        # drive ≤ 0, caught here at load rather than deep in torch/stats. (F-07, F-08)
-        # F-08 in particular: bootstrap_n_resamples ≤ 0 → degenerate/empty CIs, and CIs
-        # are the load-bearing evidence for every headline claim; the D0a/D0b thresholds
-        # are gate multipliers a negative value would silently invert.
+        """Every cross-field validation, as a list of named checks."""
+        self._check_scalar_domains()
+        self._check_reserved_split_names()
+        # Role vocabulary + cardinality. Must run BEFORE the shift-split check,
+        # which already assumes `role == "test"` is meaningful (F-44/RD-53).
+        self._check_split_roles()
+        self._check_id_pool_sizing()
+        self._check_split_seeds()
+        self._check_inert_split_fields()
+        self._check_split_counts_positive()
+        self._check_shift_splits()
+        return self
+
+    def _check_scalar_domains(self) -> None:
+        """Ranges a §7 tuned sweep (or a typo) could otherwise drive out of bounds.
+
+        Caught at load rather than deep in torch/stats (F-07, F-08). F-08 in
+        particular: `bootstrap_n_resamples` ≤ 0 gives degenerate CIs, and CIs are
+        the load-bearing evidence for every headline claim; the D0a/D0b thresholds
+        are gate multipliers a negative value would silently invert.
+        """
         positive_fields = (
             "huber_delta", "learning_rate",
             "bootstrap_n_resamples",
@@ -878,10 +894,11 @@ class Config(BaseModel):
                 f"metric_onset_rel_db must be < 0 (dB below peak); got {self.metric_onset_rel_db}"
             )
 
-        # Reserved names: `id` is the generator's "hash-bucket me" tag (a split of
-        # that name silently captures or loses scenes instead of being routed), and
-        # `carrier` is a non-split directory inside preprocessed/ that the stale-
-        # split sweep deliberately skips.
+    def _check_reserved_split_names(self) -> None:
+        """`id` is the generator's "hash-bucket me" tag (a split of that name
+        silently captures or loses scenes instead of being routed), and `carrier` is
+        a non-split directory inside preprocessed/ that the stale-split sweep
+        deliberately skips (F-38)."""
         clashes = sorted(set(self.splits) & set(RESERVED_SPLIT_NAMES))
         if clashes:
             raise ValueError(
@@ -889,15 +906,6 @@ class Config(BaseModel):
                 f"sentinels or non-split directories, and would silently misroute or "
                 f"retain scenes). Reserved: {list(RESERVED_SPLIT_NAMES)}."
             )
-        # Role vocabulary + cardinality. Must run BEFORE the shift-split loop below,
-        # which already assumes `role == "test"` is meaningful (F-44/RD-53).
-        self._check_split_roles()
-        self._check_id_pool_sizing()
-        self._check_split_seeds()
-        self._check_inert_split_fields()
-        self._check_split_counts_positive()
-        self._check_shift_splits()
-        return self
 
     def _check_shift_splits(self) -> None:
         """Each shift split is a CONTROLLED single-axis perturbation of the id
@@ -1259,22 +1267,31 @@ class Config(BaseModel):
                 versions[pkg] = importlib.metadata.version(pkg)
             except importlib.metadata.PackageNotFoundError:
                 versions[pkg] = "not-installed"
-        # Resolved from the PACKAGE, not from run_dir (F-56): a --run-dir on a data
-        # volume is the normal case, and asking git about it stamped "unavailable"
-        # here while the same run's eval sentinel recorded a real sha. `git_dirty`
-        # is stated because a sha alone does not describe an edited tree — what the
-        # CACHE compares is provenance.code_version(), a content hash.
+        # git sha/dirty are HUMAN provenance resolved from the PACKAGE, never the
+        # run_dir — see amcd.provenance (F-56).
         versions["git_sha"] = provenance.git_sha()
         versions["git_dirty"] = provenance.git_is_dirty()
         # Whole-package, unlike the per-stage scopes: this one is for a HUMAN
         # asking "which code was this run made with", not a cache key.
+        #
+        # It describes THIS INVOCATION, and stamp() runs before any stage does, so
+        # it is NOT a claim that this code produced the artifacts in the run_dir.
+        # It read as one: re-running on a run_dir whose stages are all cached
+        # re-stamps this file with the current hash, so a run_dir whose renders
+        # predate a change to the render backend carried a stamp asserting the new
+        # code made them (F-75). Which code produced a given stage's artifacts is
+        # recorded per stage in `stages/<stage>.done` (`code_version_unscoped`),
+        # and `Pipeline` warns when a stage with no scoped `code_version` is served
+        # from cache under changed source. Said in the file itself, because a
+        # comment here does not reach whoever reads versions.json.
         versions["code_version"] = provenance.code_version(provenance.ALL_SOURCES)
-        # WHICH MACHINE, beside which code (F-74). The device was auto-selected and
-        # then recorded nowhere, so under the project's two-host requirement the
-        # same config and the same code_version described a checkpoint trained on
-        # MPS here and on CUDA/CPU on the x86 box with identical provenance. Both
-        # are stamped, and NEITHER is a cache key: a device change must not
-        # invalidate an expensive artifact.
+        versions["code_version_describes"] = (
+            "this invocation, not necessarily the artifacts in this run_dir; "
+            "cached stages may predate it — see stages/<stage>.done"
+        )
+        # WHICH MACHINE, beside which code — the same config and code_version give
+        # different weights on MPS and on CUDA/CPU. Neither is a cache key; see
+        # amcd.provenance (F-74).
         versions["device"] = str(provenance.select_device())
         versions["platform_machine"] = provenance.host_platform()
         (run_dir / "versions.json").write_text(json.dumps(versions, indent=2))
@@ -1283,10 +1300,6 @@ class Config(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 # Plugin blocks + layer merge
 # ─────────────────────────────────────────────────────────────────────────────
-# The `{name, params}` seam (design_spec §7/§8) and the single merge primitive
-# every config layer combines through. `_merge_layer` is what F-11 turns on:
-# params are scoped to the plugin NAME, so switching model/representation cannot
-# leak the previous plugin's parameters into a different schema.
 
 # kind → (package to import so its plugins self-register, registry attribute name).
 _PLUGIN_REGISTRY = {
