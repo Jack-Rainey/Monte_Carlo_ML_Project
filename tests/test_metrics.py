@@ -19,6 +19,15 @@ _ONSET_DB = -20.0
 # (configs/base.yaml); tests that exercise the floor itself set it explicitly.
 _NO_FLOOR = 0.0
 
+#: Disables the ISO 3382-1 SNR admissibility bound (AC-176) for probes whose
+#: subject is the ESTIMATOR itself. Same rationale as `_NO_FLOOR`: a known-answer
+#: test must see the raw fitted value, including one the pipeline would refuse.
+#: Tests whose subject IS the bound pass the standard's values explicitly.
+_NO_SNR_BOUND = {"T30": 0.0, "EDT": 0.0}
+#: ISO 3382-1's own requirement: >= 45 dB of usable decay for T30, >= 20 for EDT.
+_ISO_SNR_BOUND = {"T30": 45.0, "EDT": 20.0}
+
+
 
 def _decaying_noise_ir(rt60: float, duration_s: float, seed: int) -> np.ndarray:
     """A synthetic reverb IR: white noise under a -60 dB/RT60 energy-decay envelope,
@@ -42,6 +51,7 @@ def _metrics(ir_w: np.ndarray) -> dict:
     values, _reasons = channel_band_avg_metrics(
         ir_w, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=_NO_FLOOR,
+        min_decay_range_db=_NO_SNR_BOUND,
     )
     return values
 
@@ -99,6 +109,7 @@ def test_c50_nan_carries_lundeby_truncation_reason() -> None:
     values, reasons = channel_band_avg_metrics(
         ir, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=_NO_FLOOR,
+        min_decay_range_db=_NO_SNR_BOUND,
     )
     assert np.isnan(values["C50"]), "fixture must actually produce an unscored C50"
     assert "C50" in reasons
@@ -152,13 +163,14 @@ def test_paired_metrics_share_a_band_set_across_legs() -> None:
     # Fixture must bite: low's 1000 Hz band C50 is NaN, its 500 Hz band finite.
     low_bands = channel_per_band_metrics(
         low, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        band_resolvability_margin=_NO_FLOOR)
+        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND)
     assert np.isfinite(low_bands[0][0]["C50"]) and np.isnan(low_bands[1][0]["C50"])
 
     triples, reasons, _window, _acct = compute_room_acoustic_metrics(
         pred[None, :], high[None, :], low[None, :],
         sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=_NO_FLOOR,
+        min_decay_range_db=_NO_SNR_BOUND,
     )
     c50 = triples["C50"]
     # The drop is attributed to the causing leg and marked as affecting all legs.
@@ -182,10 +194,11 @@ def test_paired_metrics_share_a_band_set_across_legs() -> None:
     )
     high_500 = channel_band_avg_metrics(
         high, sample_rate=_SR, iso_eval_freqs=[500.0], onset_rel_db=_ONSET_DB,
-        band_resolvability_margin=_NO_FLOOR, trunc_idx_per_band=shared_500)[0]["C50"]
+        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND,
+        trunc_idx_per_band=shared_500)[0]["C50"]
     high_both = channel_band_avg_metrics(
         high, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        band_resolvability_margin=_NO_FLOOR)[0]["C50"]
+        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND)[0]["C50"]
     assert c50.high == pytest.approx(high_500)
     assert high_500 != pytest.approx(high_both)
     assert np.isfinite(c50.pred) and np.isfinite(c50.low)  # still scored, same band set
@@ -249,6 +262,7 @@ def test_t30_invariant_to_leg_noise_floor() -> None:
                     leg: channel_band_avg_metrics(
                         ir, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
                         band_resolvability_margin=_NO_FLOOR, trunc_idx_per_band=shared,
+                        min_decay_range_db=_NO_SNR_BOUND,
                     )[0]["T30"]
                     for leg, ir in legs.items()
                 }
@@ -299,6 +313,7 @@ def test_prediction_cannot_set_the_integration_window() -> None:
             pred[None, :], high[None, :], low[None, :],
             sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
             band_resolvability_margin=_NO_FLOOR,
+            min_decay_range_db=_NO_SNR_BOUND,
         )
         out[label] = (triples, window)
 
@@ -375,6 +390,7 @@ def test_prediction_cannot_set_the_band_set() -> None:
             pred[None, :], high[None, :], low[None, :],
             sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
             band_resolvability_margin=margin,
+            min_decay_range_db=_NO_SNR_BOUND,
         )
         out[label] = (triples, reasons, acct)
 
@@ -542,6 +558,7 @@ def test_the_placement_axis_moves_c50_through_the_iso_path() -> None:
             sample_rate=cfg.sample_rate, iso_eval_freqs=iso,
             onset_rel_db=cfg.metric_onset_rel_db,
             band_resolvability_margin=cfg.metric_band_resolvability_margin,
+            min_decay_range_db=_NO_SNR_BOUND,
         )
         c50.append(vals["C50"])
 
@@ -900,6 +917,7 @@ def test_a_leg_that_both_excludes_a_band_and_is_floor_limited_keeps_both_reasons
         tag("pred"), tag("high"), tag("low"),
         sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=2.0,
+        min_decay_range_db=_NO_SNR_BOUND,
     )
 
     high_t30 = reasons[("T30", "high")]
@@ -1077,7 +1095,7 @@ def test_a_record_shorter_than_one_guard_width_is_unmeasurable_not_approximated(
     short[len(short) // 2] = 1.0
     values, reasons, _res = _iso3382_band_metrics(
         short, fc, _SR, band_resolvability_margin=2.0
-    )
+    , min_decay_range_db=_NO_SNR_BOUND)
     for metric in ("T30", "EDT", "C50"):
         assert np.isnan(values[metric]), (
             f"{metric} returned {values[metric]} for a {len(short)}-sample record at "
@@ -1096,7 +1114,7 @@ def test_a_record_shorter_than_one_guard_width_is_unmeasurable_not_approximated(
     ok[len(ok) // 2] = 1.0
     values_ok, _r, _res2 = _iso3382_band_metrics(
         ok, fc, _SR, band_resolvability_margin=2.0
-    )
+    , min_decay_range_db=_NO_SNR_BOUND)
     assert not np.isnan(values_ok["T30"]), (
         f"a {len(ok)}-sample record at {fc:g} Hz is at or above the {guard}-sample "
         f"guard width and must still be measurable"
@@ -1235,6 +1253,7 @@ def _oracle_t30_error_frac(cfg, rep, sim, scene, gain_db: float):
         iso_eval_freqs=[float(f) for f in cfg.iso_eval_freqs],
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
+        min_decay_range_db=_NO_SNR_BOUND,
     )
     t = triples["T30"]
     return t.high, t.pred, abs(t.pred - t.high) / t.high, headroom
@@ -1333,7 +1352,7 @@ def _fitted_t30(t60: float, fc: float, seed: int, duration_s: float = 0.5) -> fl
     energy = energy[: _lundeby_truncate(energy, _SR)]
     if len(energy) < 2:
         return float("nan")
-    return _decay_times_from_energy(energy, _SR)[0]
+    return _decay_times_from_energy(energy, _SR, min_decay_range_db=_NO_SNR_BOUND)[0]
 
 
 @pytest.mark.parametrize("true_t60", [0.02, 0.03, 0.04])
@@ -1429,6 +1448,7 @@ def test_a_floor_limited_band_does_not_cost_a_scene_from_the_paired_comparison()
         sample_rate=cfg.sample_rate, iso_eval_freqs=iso,
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
+        min_decay_range_db=_NO_SNR_BOUND,
     )
     assert acct["T30"]["resolvability_limited_hz"], (
         "fixture does not bite: no band was floor-limited, so this asserts nothing"
@@ -1472,6 +1492,7 @@ def test_a_degenerate_pred_leaves_c50_unscored_not_at_plus_200_db() -> None:
         iso_eval_freqs=[float(f) for f in cfg.iso_eval_freqs],
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
+        min_decay_range_db=_NO_SNR_BOUND,
     )
 
     assert np.isnan(triples["C50"].pred), (
@@ -1523,6 +1544,7 @@ def test_a_large_but_real_c50_is_not_unscored_by_the_guard() -> None:
         iso_eval_freqs=[float(f) for f in cfg.iso_eval_freqs],
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
+        min_decay_range_db=_NO_SNR_BOUND,
     )
     assert np.isfinite(values["C50"]), (
         f"a direct-dominated scene's C50 was unscored ({reasons.get('C50')}) — the "
@@ -1568,6 +1590,7 @@ def test_a_physical_leg_is_never_censored_for_its_own_c50(true_t60: float) -> No
         iso_eval_freqs=[float(f) for f in cfg.iso_eval_freqs],
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
+        min_decay_range_db=_NO_SNR_BOUND,
     )
     for leg in ("low", "high"):
         assert np.isfinite(getattr(triples["C50"], leg)), (
@@ -1647,7 +1670,7 @@ class TestTheTruncationIndexUnderAZeroPad:
             values = [
                 _iso3382_band_metrics(
                     ir * 10.0**e, fc, _SR, band_resolvability_margin=_NO_FLOOR
-                )[0]
+                , min_decay_range_db=_NO_SNR_BOUND)[0]
                 for e in (-6, -3, 0, 3)
             ]
             for metric in ("T30", "EDT", "C50"):
@@ -1734,6 +1757,7 @@ class TestT30RecoversAKnownDecayInAPaddedRecord:
                     values, nan_reasons, _ = _iso3382_band_metrics(
                         _padded_decay(rt60, seed=seed), fc, _SR,
                         band_resolvability_margin=_NO_FLOOR,
+                        min_decay_range_db=_NO_SNR_BOUND,
                     )
                     t30 = values["T30"]
                     assert np.isfinite(t30), (
@@ -1767,6 +1791,7 @@ class TestT30RecoversAKnownDecayInAPaddedRecord:
                     values, _, _ = _iso3382_band_metrics(
                         _padded_decay(rt60, seed=seed), fc, _SR,
                         band_resolvability_margin=_NO_FLOOR,
+                        min_decay_range_db=_NO_SNR_BOUND,
                     )
                     if abs(values["T30"] - rt60) / rt60 > _T30_JND_FRAC:
                         n += 1
@@ -1787,58 +1812,88 @@ class TestT30RecoversAKnownDecayInAPaddedRecord:
 
 
 class TestARoomTooReverberantForItsRecord:
-    """F-186: a decay longer than the record must not yield a quiet, wrong number.
+    """F-186 / AC-176: a decay longer than its record is UNSCORED, not quietly wrong.
 
-    This is F-186's backend-free precursor. base.yaml's largest declared shoebox
-    at nominal alpha 0.05 is T60 = 4.200 s and fits the 4.25 s record; under the
-    alpha_eff convention ITEM 0 is deciding (alpha_eff = 1 - sqrt(1 - alpha)) the
-    same room is T60 = 8.294 s and does NOT.
+    base.yaml's largest declared shoebox at nominal alpha 0.05 is T60 = 4.200 s and
+    fits the 4.25 s record; under the alpha_eff convention ITEM 0 is deciding
+    (alpha_eff = 1 - sqrt(1 - alpha)) the same room is T60 = 8.294 s and does not.
 
-    MEASURED at the cycle-5 integration: the estimator returns 6.3868 s at 500 Hz
-    (-22.99 %) and 5.5690 s at 1000 Hz (-32.86 %) — T30 UNDER-reads, which is the
-    direction that makes an over-long decay look as though it fits with `nan_reason` AND
-    `resolvability` both None — a plausible number for a room whose decay is twice
-    its record. The record-length gate in `scenes/generator.py` is the ONLY thing
-    standing between an alpha_eff population and that number, and F-186 is that
-    the gate is evaluated at nominal alpha.
+    Before the AC-176 bound the estimator returned 6.3868 s at 500 Hz (-22.99 %)
+    and 5.5690 s at 1000 Hz (-32.86 %) with `nan_reason` AND `resolvability` both
+    None. The sign is the point: T30 UNDER-reads, so a room whose decay outruns its
+    record is reported as LESS reverberant than it is — the direction that makes
+    the truncation look like a shorter room rather than a broken measurement.
 
-    The assertion below is deliberately the WEAK one: it pins the error's
-    existence and size, so this test documents the live behaviour rather than
-    asserting the behaviour is acceptable. It must be REPLACED by an
-    unscored-with-a-reason assertion when ITEM 0 lands (cluster C6).
+    ISO 3382-1 does not permit a T30 here at all: only 30.7 dB of decay is
+    available (60 x 4.25 / 8.294) against the >= 45 dB the standard requires. So
+    the correct output is unscored-with-a-reason, and that is now what it is.
     """
 
-    def test_a_decay_twice_its_record_is_mis_estimated_and_not_flagged(self) -> None:
+    def test_a_decay_that_fits_its_record_is_scored(self) -> None:
+        """The control. Without it the refusal below could be refusing everything."""
         from amcd.evaluation.room_acoustic import _iso3382_band_metrics
 
-        fits = _padded_decay(4.200, seed=0)
-        overruns = _padded_decay(8.294, seed=0)
-
         for fc in _ISO:
-            values, _, _ = _iso3382_band_metrics(
-                fits, fc, _SR, band_resolvability_margin=_NO_FLOOR
+            values, reasons, _ = _iso3382_band_metrics(
+                _padded_decay(4.200, seed=0), fc, _SR,
+                band_resolvability_margin=_NO_FLOOR,
+                min_decay_range_db=_ISO_SNR_BOUND,
+            )
+            assert reasons.get("T30") is None, (
+                f"a decay that FITS its record was refused at {fc} Hz: "
+                f"{reasons['T30']}. The bound must refuse truncation, not length."
             )
             err = abs(values["T30"] - 4.200) / 4.200
-            assert err <= _T30_JND_FRAC, (
-                f"the CONTROL is wrong at {fc} Hz: T30={values['T30']:.4f}s, "
-                f"err={err:.2%}. A decay that fits its record must be recovered, "
-                "or the overrun case below measures the estimator, not truncation."
-            )
+            assert err <= _T30_JND_FRAC, f"control T30 off by {err:.2%} at {fc} Hz"
+
+    def test_a_decay_twice_its_record_is_unscored_with_a_reason(self) -> None:
+        from amcd.evaluation.room_acoustic import _iso3382_band_metrics
 
         for fc in _ISO:
-            values, nan_reasons, resolvability = _iso3382_band_metrics(
-                overruns, fc, _SR, band_resolvability_margin=_NO_FLOOR
+            values, reasons, _ = _iso3382_band_metrics(
+                _padded_decay(8.294, seed=0), fc, _SR,
+                band_resolvability_margin=_NO_FLOOR,
+                min_decay_range_db=_ISO_SNR_BOUND,
             )
-            t30 = values["T30"]
-            err = abs(t30 - 8.294) / 8.294
-            assert np.isfinite(t30) and err > 0.20, (
-                f"F-186's premise has changed at {fc} Hz: T30={t30}, err={err}. "
-                "This test documents that a room twice as reverberant as its "
-                "record is silently mis-estimated by >20 %. If that is no longer "
-                "true, ITEM 0 has landed and this test must be replaced by the "
-                "unscored-with-a-reason assertion (cluster C6)."
+            assert np.isnan(values["T30"]), (
+                f"T30 = {values['T30']} at {fc} Hz for a room whose decay is twice "
+                "its record. A number here is the silent under-read F-186 is about."
             )
-            assert nan_reasons.get("T30") is None, (
-                f"T30 now carries a reason at {fc} Hz: {nan_reasons['T30']}. That "
-                "is the FIX for F-186 — replace this test rather than relaxing it."
+            reason = reasons.get("T30")
+            assert reason and "decay range" in reason and "45" in reason, (
+                f"T30 is NaN at {fc} Hz but the reason does not name the decay "
+                f"range and the ISO bound: {reason!r}. Nothing may leave a result "
+                "silently (CLAUDE.md)."
+            )
+
+    def test_the_bound_is_config_declared_not_hardcoded(self) -> None:
+        """The same record is scored or refused purely by what the config declares.
+
+        This is what makes the scaffold's lower value legitimate rather than a
+        quiet weakening: the threshold is an experiment-governing value, so it
+        lives in config and a run's provenance records which one it used.
+        """
+        from amcd.evaluation.room_acoustic import _iso3382_band_metrics
+
+        ir = _padded_decay(8.294, seed=0)
+        strict, _, _ = _iso3382_band_metrics(
+            ir, _ISO[0], _SR, band_resolvability_margin=_NO_FLOOR,
+            min_decay_range_db=_ISO_SNR_BOUND)
+        lax, _, _ = _iso3382_band_metrics(
+            ir, _ISO[0], _SR, band_resolvability_margin=_NO_FLOOR,
+            min_decay_range_db={"T30": 15.0, "EDT": 10.0})
+        assert np.isnan(strict["T30"]) and np.isfinite(lax["T30"]), (
+            "the declared bound did not change the outcome on an identical "
+            "record, so it is not the thing deciding admissibility"
+        )
+
+    def test_the_metric_floor_must_be_declared_for_every_reported_metric(self) -> None:
+        """No hidden default: an undeclared metric raises rather than passing."""
+        from amcd.evaluation.room_acoustic import _iso3382_band_metrics
+
+        with pytest.raises(KeyError, match="declares no floor"):
+            _iso3382_band_metrics(
+                _padded_decay(1.0, seed=0), _ISO[0], _SR,
+                band_resolvability_margin=_NO_FLOOR,
+                min_decay_range_db={"EDT": 20.0},   # T30 missing
             )

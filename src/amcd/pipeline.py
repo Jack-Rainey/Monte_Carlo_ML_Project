@@ -181,6 +181,11 @@ def _eval_fingerprint(config: Config) -> dict:
         "iso_eval_freqs": list(config.iso_eval_freqs),
         "metric_onset_rel_db": config.metric_onset_rel_db,
         "metric_band_resolvability_margin": config.metric_band_resolvability_margin,
+        # Governs whether T30/EDT is SCORED AT ALL (AC-176), so it decides a
+        # reported number and its caveat counts. In the fingerprint from the
+        # moment it is declared -- F-65 is the row that exists because a key
+        # governing a disclosure column was added and left out of one.
+        "metric_min_decay_range_db": dict(sorted(config.metric_min_decay_range_db.items())),
         # Governs a REPORTED disclosure column (F-65); the class-level guard
         # against the next such key is FINGERPRINT_EXEMPT_FIELDS below.
         "metric_edt_variance_limited_s": config.metric_edt_variance_limited_s,

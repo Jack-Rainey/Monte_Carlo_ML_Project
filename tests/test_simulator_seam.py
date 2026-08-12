@@ -426,6 +426,7 @@ class TestPlacementAxisIsAcousticallyLive:
             self._render(distance).ir[0], sample_rate=48000,
             iso_eval_freqs=[500.0, 1000.0], onset_rel_db=-20.0,
             band_resolvability_margin=0.0,
+            min_decay_range_db={"T30": 0.0, "EDT": 0.0},
         )
         return values["C50"]
 

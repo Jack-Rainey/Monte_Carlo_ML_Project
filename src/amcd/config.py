@@ -699,6 +699,24 @@ class Config(BaseModel):
     # number.
     metric_band_resolvability_margin: float
 
+    # ISO 3382-1 SNR ADMISSIBILITY (AC-176), per metric, in dB of usable decay.
+    # The standard requires the decay to be measurable over >= 45 dB before a T30
+    # is permitted (>= 35 dB for T20, >= 20 dB for EDT); below that the fit is not
+    # a room-acoustic quantity. Nothing enforced it, and nothing could: a
+    # Schroeder backward integral terminates at -inf dB by construction, so the
+    # [-5, -35] dB regression window is NEVER empty however little genuine decay
+    # the record holds, and the terminal plunge is silently included in the fit.
+    # Measured through the shipped path: -0.98 % T30 error at 85 dB of available
+    # decay, -5.41 % at 42.5, -22.99 % at 30.7, -55.88 % at 18.2 -- with
+    # `nan_reason` None and `resolvability` empty at every one of those points.
+    #
+    # DECLARED, not hardcoded, because the value is not universal: the dry-run
+    # SCAFFOLD's 0.25 s records carry only 19-30 dB (measured over all 29 canonical
+    # legs), so an ISO-conformant bound would refuse every scaffold scene. The
+    # scaffold overlay declares its own lower value with that reason attached; the
+    # real-render configs declare the standard's.
+    metric_min_decay_range_db: dict[str, float]
+
     # Decay time (s) below which the EDT ESTIMATOR is variance-limited rather than
     # filter-limited: measured sd 24-31 % of T60 below ~0.15 s, against 6-10 % for
     # T30. Not a suppression threshold — no threshold can remove estimator variance

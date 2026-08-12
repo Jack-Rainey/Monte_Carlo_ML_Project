@@ -337,3 +337,24 @@ metric_edt_variance_limited_s: 0.15
 bootstrap_n_resamples: 1000
 bootstrap_alpha: 0.05
 bootstrap_power: 0.8
+
+# ISO 3382-1 SNR ADMISSIBILITY, in dB of USABLE decay, per reported metric (AC-176).
+# The standard requires the decay to be measurable over >= 45 dB before a T30 may
+# be reported, and >= 20 dB for EDT. Nothing enforced this and nothing could: a
+# Schroeder backward integral terminates at -inf dB by construction, so the
+# [-5, -35] dB regression window is NEVER empty however little real decay the
+# record holds, and the terminal plunge steepens the fit silently. The failure is
+# SIGNED -- T30 under-reads -- so a decay that outruns its record is reported as a
+# LESS reverberant room, which is the direction that hides the truncation.
+#
+# Measured through the shipped path, available decay -> T30 error:
+#   85.0 dB -> -0.98 %   51.0 -> -0.95 %   42.5 -> -5.41 %
+#   36.4 -> -13.42 %     30.7 -> -22.99 %  18.2 -> -55.88 %
+# with nan_reason None and resolvability empty at every point. The JND crossing
+# lands at ~43 dB, i.e. essentially exactly where the standard puts its bound.
+#
+# These are the STANDARD's values and they govern every real render. The dry-run
+# scaffold declares its own in configs/overlays/dry_run.yaml, with the reason.
+metric_min_decay_range_db:
+  T30: 45.0
+  EDT: 20.0

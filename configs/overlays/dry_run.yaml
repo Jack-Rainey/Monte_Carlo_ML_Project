@@ -38,3 +38,17 @@ model:
   params:
     hidden_channels: 8
     n_layers: 2
+
+# SCAFFOLD VALUES, and the reason they are not the standard's (AC-176).
+# The dry run's records are n_samples 12000 = 0.25 s. Measured over all 29
+# canonical legs, the available decay range is 19.1-29.7 dB -- so base.yaml's
+# ISO-conformant 45 dB would refuse EVERY scaffold scene, T30 and EDT alike.
+#
+# That is not a reason to weaken the bound; it is a fact about the scaffold, and
+# it is recorded as one. DryRunSimulator's numbers are plumbing, never results
+# (CLAUDE.md, Scaffolding and the end goal), so the scaffold declares a value that
+# lets the pipeline exercise the metric path end to end. NOTHING measured under
+# this overlay is an ISO 3382-1 T30, and no E1/E4 claim may cite one.
+metric_min_decay_range_db:
+  T30: 15.0
+  EDT: 10.0

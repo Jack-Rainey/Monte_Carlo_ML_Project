@@ -282,7 +282,10 @@ def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.ndarray:
 
 
 def _decay_times_from_energy(
-    energy_trunc: np.ndarray, sample_rate: int
+    energy_trunc: np.ndarray,
+    sample_rate: int,
+    *,
+    min_decay_range_db: dict[str, float],
 ) -> tuple[float, str | None, float, str | None]:
     """T30 and EDT from an already-truncated band energy envelope.
 
@@ -307,6 +310,55 @@ def _decay_times_from_energy(
 
     t30, t30_reason = _slope_to_rt(-5.0, -35.0)
     edt, edt_reason = _slope_to_rt(0.0, -10.0)
+
+    # ── ISO 3382-1 SNR admissibility (AC-176) ────────────────────────────────
+    #
+    # Everything above will return a number for ANY record. The Schroeder
+    # backward integral terminates at 0, i.e. -inf dB, at its last sample, so
+    # `mask` is never empty however little genuine decay the record holds — the
+    # `<2 points` guard cannot fire for T30 — and the terminal plunge is included
+    # in the least-squares fit, steepening it. The failure is silent and it is
+    # signed: T30 UNDER-reads, so a decay that outruns its record is reported as
+    # LESS reverberant than it is, which is the direction that makes the
+    # truncation look like a shorter room.
+    #
+    # The available range is estimated from the T20 window [-5, -25] dB, which is
+    # the least truncation-contaminated fit available here, and projected over
+    # the integration window actually used. It UNDER-reads the true available
+    # decay (measured 26.6 dB against a true 30.7; 51.2 against 60.7), so it errs
+    # toward refusing — the safe direction for a reported number.
+    #
+    # This is the bound the project had for decays too FAST (`_band_resolvable_
+    # decay_s`) and lacked for decays too SLOW for their record.
+    t20_for_range, _ = _slope_to_rt(-5.0, -25.0)
+    if np.isfinite(t20_for_range) and t20_for_range > 0.0:
+        window_s = len(energy_trunc) / sample_rate
+        available_db = 60.0 * window_s / t20_for_range
+    else:
+        available_db = float("nan")
+
+    def _admissible(value, reason, metric):
+        floor = min_decay_range_db.get(metric)
+        if floor is None:
+            raise KeyError(
+                f"metric_min_decay_range_db declares no floor for {metric!r}. "
+                "Every reported decay metric must declare the SNR range ISO "
+                "3382-1 requires of it — there is no default (AC-176)."
+            )
+        if reason is not None or not np.isfinite(value):
+            return value, reason
+        if not np.isfinite(available_db) or available_db < floor:
+            got = "unmeasurable" if not np.isfinite(available_db) else f"{available_db:.1f} dB"
+            return float("nan"), (
+                f"decay range {got} over the {window_s * 1000:.0f} ms integration "
+                f"window is below the {floor:g} dB ISO 3382-1 requires for {metric}"
+                " — the record truncates the decay, so this is not a room-acoustic"
+                " quantity (AC-176)"
+            )
+        return value, reason
+
+    t30, t30_reason = _admissible(t30, t30_reason, "T30")
+    edt, edt_reason = _admissible(edt, edt_reason, "EDT")
     return t30, t30_reason, edt, edt_reason
 
 
@@ -346,8 +398,14 @@ def _band_resolvable_decay_s(fc: float, sample_rate: int) -> dict[str, float]:
     impulse = np.zeros(n, dtype=np.float32)
     impulse[0] = 1.0
     energy = _band_energy(impulse, fc, sample_rate)
+    # Floors of 0.0 ON PURPOSE: this measures the FILTER's own ringing from a unit
+    # impulse, which carries no room decay by construction, so ISO 3382-1's SNR
+    # admissibility (AC-176) must not apply here. Refusing it would make the floor
+    # itself unmeasurable and take every band's resolvability disclosure with it.
     t30, _, edt, _ = _decay_times_from_energy(
-        energy[: _lundeby_truncate(energy, sample_rate)], sample_rate
+        energy[: _lundeby_truncate(energy, sample_rate)],
+        sample_rate,
+        min_decay_range_db={"T30": 0.0, "EDT": 0.0},
     )
     return {"T30": t30, "EDT": edt}
 
@@ -412,6 +470,7 @@ def _iso3382_band_metrics(
     sample_rate: int,
     *,
     band_resolvability_margin: float,
+    min_decay_range_db: dict[str, float],
     trunc_idx: int | None = None,
     trunc_source: str | None = None,
 ) -> tuple[dict[str, float], dict[str, str], dict[str, str]]:
@@ -504,7 +563,9 @@ def _iso3382_band_metrics(
         )
 
     # Schroeder backward integration on truncated portion
-    t30, t30_reason, edt, edt_reason = _decay_times_from_energy(energy_trunc, sample_rate)
+    t30, t30_reason, edt, edt_reason = _decay_times_from_energy(
+        energy_trunc, sample_rate, min_decay_range_db=min_decay_range_db
+    )
 
     # ── Resolvability floor: MEASURED AND REPORTED, NOT APPLIED (AC-26/27/38) ──
     #
@@ -651,6 +712,7 @@ def channel_band_avg_metrics(
     iso_eval_freqs: list[float],  # config.iso_eval_freqs (§7)
     onset_rel_db: float,          # config.metric_onset_rel_db (§3 metric path)
     band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-26/AC-27)
+    min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db (ISO 3382-1 SNR, AC-176)
     trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> tuple[dict[str, float], dict[str, str]]:
     """Onset-align a W-channel IR to its direct arrival, then average ISO-3382 band
@@ -688,6 +750,7 @@ def channel_band_avg_metrics(
         ir_w, sample_rate=sample_rate,
         iso_eval_freqs=iso_eval_freqs, onset_rel_db=onset_rel_db,
         band_resolvability_margin=band_resolvability_margin,
+        min_decay_range_db=min_decay_range_db,
         trunc_idx_per_band=trunc_idx_per_band,
     )
     # Apply the floor here, so this unit's contract is exactly what it always was.
@@ -719,6 +782,7 @@ def channel_per_band_metrics(
     iso_eval_freqs: list[float],  # config.iso_eval_freqs (§7)
     onset_rel_db: float,          # config.metric_onset_rel_db (§3 metric path)
     band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-26/AC-27)
+    min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db (ISO 3382-1 SNR, AC-176)
     trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> list[tuple[dict[str, float], dict[str, str], dict[str, str]]]:
     """Onset-align a W-channel IR (AC-02), then compute per-eval-band ISO-3382
@@ -744,6 +808,7 @@ def channel_per_band_metrics(
         _iso3382_band_metrics(
             ir_w, float(fc), sample_rate,
             band_resolvability_margin=band_resolvability_margin,
+        min_decay_range_db=min_decay_range_db,
             trunc_idx=None if trunc_idx_per_band is None else trunc_idx_per_band[b][0],
             trunc_source=None if trunc_idx_per_band is None else trunc_idx_per_band[b][1],
         )
@@ -760,6 +825,7 @@ def compute_room_acoustic_metrics(
     iso_eval_freqs: list[float],  # from config.iso_eval_freqs (§7)
     onset_rel_db: float,          # from config.metric_onset_rel_db (§3 metric path)
     band_resolvability_margin: float,  # from config.metric_band_resolvability_margin (§3, AC-26/AC-27)
+    min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db (ISO 3382-1 SNR, AC-176)
 ) -> tuple[
     dict[str, MetricTriple],
     dict[tuple[str, str], str],
@@ -833,6 +899,7 @@ def compute_room_acoustic_metrics(
             ir[0], sample_rate=sample_rate,
             iso_eval_freqs=iso_eval_freqs, onset_rel_db=onset_rel_db,
             band_resolvability_margin=band_resolvability_margin,
+        min_decay_range_db=min_decay_range_db,
             trunc_idx_per_band=shared_trunc,
         )
         for leg, ir in [("pred", pred_ir), ("high", high_ref_ir), ("low", low_ref_ir)]

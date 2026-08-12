@@ -734,6 +734,9 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         "iso_eval_freqs": [500, 1000, 2000],
         "metric_onset_rel_db": -25.0,
         "metric_band_resolvability_margin": 0.07,
+        # AC-176: governs whether T30/EDT is scored at all, so a change to it
+        # must invalidate eval. Probed, not exempted.
+        "metric_min_decay_range_db": {"T30": 41.0, "EDT": 19.0},
         "metric_edt_variance_limited_s": 0.3,
         "bootstrap_n_resamples": 500,
         "bootstrap_alpha": 0.1,

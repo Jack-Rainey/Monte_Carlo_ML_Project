@@ -116,6 +116,7 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 iso_eval_freqs=[float(f) for f in config.iso_eval_freqs],
                 onset_rel_db=config.metric_onset_rel_db,
                 band_resolvability_margin=config.metric_band_resolvability_margin,
+                min_decay_range_db=config.metric_min_decay_range_db,
             )
             all_metrics.update(room_triples)
             nan_reasons.update(room_reasons)
