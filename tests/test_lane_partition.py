@@ -13,6 +13,7 @@ So the partition is checked here rather than trusted. These tests run over every
 partition file in `docs/lanes/`, so a future cycle's declaration is covered the
 moment it is written.
 """
+import re
 from pathlib import Path
 
 import pytest
@@ -297,4 +298,290 @@ def test_every_declared_brief_exists(path: Path, spec: dict) -> None:
         assert brief.exists(), (
             f"{path.name}: lane {lane['id']} points at '{lane['brief']}', which does "
             "not exist. The brief is the session's actual instruction set."
+        )
+
+
+def test_the_current_cycle_names_the_newest_partition() -> None:
+    """RD-148: `_CURRENT_CYCLE` is a module literal that nothing asserted.
+
+    Every check below that matters — the coverage identity, the id blocks, the
+    anchor check — skips when `path.stem != _CURRENT_CYCLE`. If the literal ever
+    names a stem with no file, `pytest.skip` fires for EVERY parametrization and
+    the whole coverage guarantee is suspended with a green suite. That is RD-88's
+    own "asserted by nothing" shape, one level up: the guard reports success
+    because it never ran.
+    """
+    current = _REPO_ROOT / "docs" / "lanes" / f"{_CURRENT_CYCLE}.yaml"
+    assert current.exists(), (
+        f"_CURRENT_CYCLE is '{_CURRENT_CYCLE}' but {current} does not exist, so "
+        "every ledger-coupled test in this file silently skips. Bump the literal "
+        "when you open a cycle, or restore the partition file."
+    )
+    assert current == _PARTITIONS[-1], (
+        f"_CURRENT_CYCLE is '{_CURRENT_CYCLE}' but the newest partition in "
+        f"docs/lanes/ is '{_PARTITIONS[-1].name}'. The live ledger is checked "
+        "against the current cycle only; pointing at an older one checks history."
+    )
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_every_lane_declares_its_expected_ci_table_effect(path: Path, spec: dict) -> None:
+    """RD-149: gate step 4's detector only discriminates if every lane declared.
+
+    The step-4 fixed-seed A/B is the cross-lane interference detector, and it can
+    tell interference from legitimate change only because each lane said in
+    advance what it expected to move. `docs/parallel_protocol.md` stated that as a
+    CYCLE-4 FACT ("all three declare none") and nothing asserted that a later
+    cycle's lanes re-declare it — so the detector's discriminating power would
+    quietly become an assumption again (RD-91 confirmed the durable half holds;
+    this is the half that did not).
+
+    Declared in the PARTITION, not only in the brief's prose: RD-147's lesson is
+    that when a decision lives in two places, the prose copy is the one that
+    drifts, and the machine-readable file is what the next planner reads.
+    """
+    if path.stem != _CURRENT_CYCLE:
+        pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+
+    for lane in spec["lanes"]:
+        declared = lane.get("expected_ci_table_effect")
+        assert declared, (
+            f"{path.name}: lane {lane['id']} declares no "
+            "`expected_ci_table_effect:`. Gate step 4 compares a fixed-seed "
+            "ci_table.csv against the pre-lane baseline; without a declaration a "
+            "moved row cannot be told from interference (RD-91, RD-149)."
+        )
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_the_partition_declares_what_it_moves_on_the_gate(path: Path, spec: dict) -> None:
+    """A cycle whose lanes cannot move the gate is a cycle that ends where it began.
+
+    Planning step 1 says to start from the gate and give it a lane FIRST, and step
+    1b says to state which conditions the cycle LIFTS and which it only UNBLOCKS.
+    Both were prose, and prose is not a check: cycle 5 drew four lanes, and all
+    four independently reported in their own inboxes that they lift nothing and
+    unblock nothing — lane B "lifts NEITHER condition", lane P "neither LIFTS nor
+    UNBLOCKS", lane S "LIFTS NOTHING AND UNBLOCKS NOTHING", lane M that condition
+    (i) cannot lift for `evaluation/**` regardless of its execution. Four lanes,
+    ~130 new findings, gate unmoved.
+
+    So the partition must SAY, machine-readably, what it moves. A cycle that moves
+    nothing is still allowed — some cycles are backlog discharge — but it has to
+    be a declared, reasoned choice rather than something discovered afterwards.
+    """
+    if path.stem != _CURRENT_CYCLE:
+        pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+
+    gate = spec.get("gate")
+    assert isinstance(gate, dict), (
+        f"{path.name}: no `gate:` block. Declare `lifts:`, `unblocks:` and, when "
+        "both are empty, `exception:` with a reason (planning steps 1 and 1b)."
+    )
+    for key in ("lifts", "unblocks"):
+        assert key in gate, f"{path.name}: `gate:` declares no `{key}:` list."
+
+    if not gate["lifts"] and not gate["unblocks"]:
+        assert gate.get("exception"), (
+            f"{path.name}: `gate:` declares it lifts nothing and unblocks nothing, "
+            "with no `exception:` reason. That is permitted — a backlog-discharge "
+            "cycle is legitimate — but it is a decision, and an undeclared one is "
+            "how cycle 5 spent four parallel lanes without moving RD-33a."
+        )
+
+
+#: RD-33a condition (i)'s EXPLICIT path list, as operationalized by RD-76 and
+#: scoped by severity in RD-128. Kept here so the check below counts the same
+#: paths the gate does; the free text "the metric path" is what RD-76 replaced.
+_GATE_PATH_LIST = (
+    "src/amcd/scenes/**",
+    "src/amcd/evaluation/**",
+    "src/amcd/config.py",
+    "configs/*.yaml",
+)
+
+
+def _ledger_rows() -> dict[str, list[str]]:
+    """Every OPEN row's cells, keyed by id: [_, id, agent, sev, status, anchor, ...]."""
+    rows: dict[str, list[str]] = {}
+    for line in (_REPO_ROOT / "docs" / "review_ledger.md").read_text().splitlines():
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) > 5 and cells[4].startswith("OPEN"):
+            rows[cells[1]] = cells
+    return rows
+
+
+#: A repo-relative path written out in full, e.g. `src/amcd/pipeline.py`.
+_ANCHOR_PATH_RE = re.compile(
+    r"\b((?:src|tests|configs|docs|scripts)/[\w./*-]+?\.(?:py|yaml|yml|md|json))\b"
+)
+#: A bare module name, e.g. "pipeline.py, runtime.py, cli.py stage dispatch" —
+#: RD-20's anchor names its cross-lane file exactly this way, so a full-path-only
+#: reader would miss the one row this check exists to catch.
+_BARE_MODULE_RE = re.compile(r"\b([\w_]+\.py)\b")
+
+
+def _unique_basenames() -> dict[str, str]:
+    """Basename → repo path, for basenames that resolve to exactly ONE file.
+
+    An ambiguous basename (`base.py` is four different modules) is left
+    unresolved rather than guessed: a wrong resolution would flag a row for
+    spanning a lane it does not touch, and a false accusation here costs a
+    planner more than a miss.
+    """
+    counts: dict[str, int] = {}
+    first: dict[str, str] = {}
+    for p in (_REPO_ROOT / "src").rglob("*.py"):
+        if p.name.startswith("._"):
+            continue
+        counts[p.name] = counts.get(p.name, 0) + 1
+        first.setdefault(p.name, p.relative_to(_REPO_ROOT).as_posix())
+    return {name: rel for name, rel in first.items() if counts[name] == 1}
+
+
+def _anchor_paths(anchor: str) -> set[str]:
+    paths = set(_ANCHOR_PATH_RE.findall(anchor))
+    basenames = _unique_basenames()
+    for bare in _BARE_MODULE_RE.findall(anchor):
+        if bare in basenames and not any(p.endswith("/" + bare) for p in paths):
+            paths.add(basenames[bare])
+    return paths
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_no_rows_anchor_lands_in_another_lanes_files(path: Path, spec: dict) -> None:
+    """A row's ANCHOR, not only its declared `fix:` paths, must fit its lane.
+
+    `test_every_row_is_fixable_inside_its_own_lane` validates the paths the
+    PARTITION declares. Nothing validated the paths the LEDGER declares, and the
+    two can disagree — which is how a rule-4 spanning row passes the reachability
+    check. RD-20 is the worked example: `cycle5.yaml` declares
+    `fix: [src/amcd/pipeline.py]` (lane P owns it, so the check passed), while the
+    ledger anchor names `runtime.py`, which lane B owns, and the real remedy
+    changes a dispatch signature across nine call sites in three lanes. Lane P
+    could not start it and returned it unattempted (RD-208).
+
+    Four reviewers derived this hole independently — RD-111, RD-208, RD-225,
+    RD-155 — and they are ONE defect that closes here, together.
+
+    WHAT THIS CANNOT CHECK. The anchor is where a finding LIVES, not where its
+    remedy lands. F-60's anchor is `scenes/generator.py`, genuinely lane S's,
+    while its resolution needs `evaluation/room_acoustic.py` and
+    `configs/base.yaml` — this check passes it, and RD-225 caught it by reading.
+    Only a path a HUMAN OR REVIEWER wrote into the anchor is visible here.
+    """
+    if path.stem != _CURRENT_CYCLE:
+        pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+
+    rows = _ledger_rows()
+    for lane in spec["lanes"]:
+        for row in lane["rows"]:
+            cells = rows.get(row["id"])
+            if cells is None:  # the coverage test owns this failure
+                continue
+            declared_spans = set(row.get("spans", []))
+            for target in sorted(_anchor_paths(cells[5])):
+                if target in declared_spans:
+                    continue
+                other = next(
+                    (l["id"] for l in spec["lanes"]
+                     if l["id"] != lane["id"] and _owns(target, l["owns"])),
+                    None,
+                )
+                assert other is None, (
+                    f"{path.name}: row {row['id']} is assigned to lane "
+                    f"{lane['id']}, but its LEDGER ANCHOR names '{target}', which "
+                    f"lane {other} owns. That is a rule-4 spanning row: move it to "
+                    "integrator_queue: with a reason, or — if the anchor merely "
+                    "cites that file as context — declare it in the row's "
+                    "`spans:` list so the acknowledgement is on the record."
+                )
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_a_fix_path_that_does_not_exist_is_declared_as_new(path: Path, spec: dict) -> None:
+    """RD-155: the partition had no notion of a fix that must CREATE a file.
+
+    The ownership hook refuses a write to any path outside the lane's owned set,
+    and a path that does not exist yet is refused the same way — so a row whose
+    remedy is "promote this to its own module" strands mid-session. RD-121 and
+    RR-83 both did, and so did lane S's RR-165.
+
+    WHAT THIS CANNOT CHECK: those three rows declared `fix:` paths that DO exist
+    (the file the code is being promoted OUT of), so the shortfall was invisible
+    at declaration time and is invisible here too. This catches the forward case —
+    a partition that names a not-yet-existing path — and makes `creates:` the
+    place to say so. The reviewer reading the row's resolution is still the only
+    thing that catches the other direction.
+    """
+    if path.stem != _CURRENT_CYCLE:
+        pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+
+    for lane in spec["lanes"]:
+        for row in lane["rows"]:
+            creates = set(row.get("creates", []))
+            for kind in ("fix", "test"):
+                for target in row.get(kind, []):
+                    if "*" in target or (_REPO_ROOT / target).exists():
+                        continue
+                    assert target in creates, (
+                        f"{path.name}: row {row['id']} declares {kind} path "
+                        f"'{target}', which does not exist. If the remedy creates "
+                        "it, list it in the row's `creates:`; the ownership hook "
+                        "refuses a write to an unowned path whether or not the "
+                        "file is there yet (RD-155)."
+                    )
+
+
+#: `| ID |` at the start of a table row, and bare id mentions in prose. Lane B's
+#: eighteen readability findings existed ONLY as prose, so a table-row-only reader
+#: would have declared them absent and lost them at the fold — which is the exact
+#: event this check exists to prevent.
+_ID_RE = re.compile(r"\b((?:RD|F|AC|RR)-\d+)\b")
+_FOLDED_RE = re.compile(r"\b(?:RD|F|AC|RR)-\d+\b[^\n]{0,80}?folded into\b", re.IGNORECASE)
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_every_inbox_finding_reaches_the_ledger(path: Path, spec: dict) -> None:
+    """The missing direction: inbox → ledger (RD-142, F-160 — ONE defect).
+
+    `test_the_partition_covers_exactly_the_ledgers_open_rows` asserts ledger ↔
+    partition, and it is sound, but it cannot see a finding that never became a
+    row at all. That is how cycle 4's fold lost five rows including a blocker.
+
+    `docs/parallel_protocol.md` CLAIMED this file already asserted it. Lane P
+    measured otherwise — nine tests, none of which opened an inbox — and filed
+    F-160 as the same class as F-66/F-77: documentation claiming more than the
+    test checks, on the guard that exists to stop silent row loss at the fold.
+
+    SCOPED TO EACH LANE'S OWN id_block. An inbox also cites pre-existing ids it
+    merely verified or discussed, and those get DELETED from the ledger when they
+    are confirmed fixed — requiring them to stay OPEN would make a correct
+    deletion fail this test. A NEW finding, though, comes from the lane's declared
+    block by rule 6, so the block is exactly the set the fold must not drop.
+    """
+    if path.stem != _CURRENT_CYCLE:
+        pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+
+    open_ids = _open_ledger_ids()
+    for lane in spec["lanes"]:
+        inbox = _REPO_ROOT / lane["inbox"]
+        if not inbox.exists():
+            continue  # lane has not reported yet; nothing to fold
+        text = inbox.read_text()
+        folded = set(_ID_RE.findall(" ".join(_FOLDED_RE.findall(text))))
+
+        block: set[str] = set()
+        for prefix, rng in (lane.get("id_block") or {}).items():
+            lo, _, hi = str(rng).partition("..")
+            block |= {f"{prefix}-{n}" for n in range(int(lo), int(hi) + 1)}
+
+        raised = {i for i in _ID_RE.findall(text) if i in block}
+        missing = sorted(raised - open_ids - folded)
+        assert not missing, (
+            f"{path.name}: lane {lane['id']} raised {missing} in {lane['inbox']} "
+            "and they are not OPEN rows in docs/review_ledger.md. The fold must "
+            "give every finding a row with a file anchor, or record it as "
+            "'folded into <id>' in the inbox. A finding in neither place is "
+            "invisible to every later cycle (RD-142, F-160)."
         )

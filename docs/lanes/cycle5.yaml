@@ -34,9 +34,29 @@
 cycle: cycle5
 base_branch: v3-rebuild
 
+# What this cycle does to the GATE, declared machine-readably (planning steps 1
+# and 1b; asserted by tests/test_lane_partition.py). Prose said this before and
+# prose is not a check — cycle 5 drew four lanes and every one of them reported,
+# in its own inbox and unprompted, that it moves neither condition of RD-33a.
+gate:
+  lifts: []
+  unblocks: []
+  exception: >-
+    Declared at integration, not at planning — which is the defect RD-254 exists
+    to stop repeating. The four LANE rows are backlog discharge and cycle-4
+    verification; RD-33a condition (i) is held by the on-path blocker/major set
+    (chiefly AC-26 -> AC-38 and clusters C6/C5) and condition (ii) needs the
+    RD-17 probe, which cycle 5's partition scheduled in no lane (RD-151). The
+    gate-moving work — ITEM 0 / ITEM 0b — sits in serial_queue below and is the
+    integrator's, so no LANE could have lifted anything. Cycle 6 must give the
+    gate a lane FIRST.
+
 lanes:
   - id: B
     title: render backend — is the declared population renderable?
+    # Gate step 4's interference detector is the SET of these declarations, not
+    # the false premise that only the metric lane can move the table (RD-261).
+    expected_ci_table_effect: none
     brief: docs/lanes/cycle5-B.md
     inbox: docs/ledger_inbox/B.md
     id_block:
@@ -96,6 +116,7 @@ lanes:
       - {id: RR-84, fix: [src/amcd/simulators/base.py], test: [tests/test_simulator_seam.py]}
   - id: M
     title: metric computation path
+    expected_ci_table_effect: none
     brief: docs/lanes/cycle5-M.md
     inbox: docs/ledger_inbox/M.md
     id_block:
@@ -151,6 +172,7 @@ lanes:
       - {id: F-106, fix: [tests/test_metrics.py], test: [tests/test_metrics.py]}
   - id: P
     title: provenance, stage cache and reported tables
+    expected_ci_table_effect: none
     brief: docs/lanes/cycle5-P.md
     inbox: docs/ledger_inbox/P.md
     id_block:
@@ -173,7 +195,13 @@ lanes:
       - tests/test_report.py
     rows:
       - {id: RD-66, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
-      - {id: RD-20, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
+      # RD-20 MOVED OUT to integrator_queue at integration (RD-208 / RD-259). It
+      # was never worked: lane P returned it unattempted because its remedy puts
+      # RunContext in runtime.py (lane B) and changes the dispatch signature
+      # across nine stage entry points in three lanes. The declared
+      # `fix: [src/amcd/pipeline.py]` was not where the fix lands, which is how
+      # it passed the reachability check — now also caught by
+      # test_no_rows_anchor_lands_in_another_lanes_files.
       - {id: F-63, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
       - {id: F-64, fix: [src/amcd/data/preprocess.py, src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
       - {id: F-66, fix: [src/amcd/pipeline.py, src/amcd/provenance.py], test: [tests/test_stage_cache.py]}
@@ -214,6 +242,7 @@ lanes:
       - {id: F-102, fix: [src/amcd/pipeline.py], test: [tests/test_stage_cache.py]}
   - id: S
     title: scenes, QC and diagnostics
+    expected_ci_table_effect: none
     brief: docs/lanes/cycle5-S.md
     inbox: docs/ledger_inbox/S.md
     id_block:
@@ -291,6 +320,7 @@ serial_queue:
   - {id: RR-80, reason: "ITEM 7 — the inbox-emptying data-loss instruction (already applied; confirm)"}
 
 integrator_queue:
+  - {id: RD-20, reason: "MOVED HERE AT INTEGRATION (RD-208/RD-259). Rule-4 spanning row: RunContext lands in runtime.py (lane B) and the dispatch signature changes across nine stage entry points in lanes M, P and B. SCHEDULE WITH RD-104 (ITEM 4) — RD-20's own resolution wants it landed while the dispatch signature is already open, and doing it twice is two nine-site touches."}
   - {id: RD-18, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RD-69, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: F-65, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
@@ -344,4 +374,10 @@ integrator_queue:
 awaiting_re_review:
   [RR-24]
 
-raised_against_this_partition: []
+# Raised BY research-director reviewing the cycle-5 INTEGRATION plan, before any
+# implementation. RD-202 noted this list was empty while three lanes were each
+# raising rows against the partition; it is no longer empty, and it is the right
+# home for them — they are findings about this file, not about the code.
+raised_against_this_partition:
+  [RD-250, RD-251, RD-252, RD-253, RD-254, RD-255, RD-256,
+   RD-257, RD-258, RD-259, RD-260, RD-261, RD-262, RD-263]
