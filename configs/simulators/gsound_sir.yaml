@@ -144,3 +144,87 @@ path_retention:
 # because every measurement taken before this fix was taken under it, and those
 # numbers must stay reproducible.
 absorption_convention: pre_compensate
+
+# ── THE RECORD THIS BACKEND CAN ACTUALLY FILL (AC-175, AC-184, AC-56) ─────────
+#
+# Two separate limits, and the SECOND one binds. Both are backend facts, declared
+# here for the same reason `speed_of_sound_m_s` is: a comment goes stale silently,
+# a declaration gets falsified against what the render reports.
+#
+# 1. THE COMPILED CAP. `prop_request.maxIRLength = 3.0` is compiled into pygsound's
+#    Context (Context.cpp:33) and is NOT settable -- module.cpp:60-69 is the
+#    complete exposed set. Every propagation bound derives from it
+#    (`maxDistance = maxIRLength * c`), so no path delay can exceed it. With the
+#    auralizer's 2048-sample FILTER_TAIL_PADDING the native record is at most
+#    146048 samples = 3.043 s. `ir_duration: 4.25` is therefore 1.40x longer than
+#    anything this backend can produce, and 29.4% of every record is guaranteed
+#    zeros.
+max_ir_length_s: 3.0
+#
+# 2. THE ADAPTIVE ENERGY TRIM, which binds FIRST and is the one that matters
+#    (AC-184, measured on four real renders retained in experiments/ac175_probe/).
+#    No rendered scene came near the 3.0 s cap: native records were 0.676 / 1.199 /
+#    1.951 s for T60_nominal 0.093 / 0.417 / 4.200 s. Upstream trims on accumulated
+#    energy (Context.cpp:19,21 IR_THRESHOLD / ADAPTIVE_IR_LENGTH), and that grows far
+#    slower than the decay: T60 swept 45.2x while the record grew only 2.89x.
+#
+#    So the captured fraction of a scene's own decay COLLAPSES as the room gets more
+#    reverberant -- 436.5 / 172.3 / 27.9 dB at nominal alpha -- and for the largest
+#    declared room the record is SHORTER THAN THE T30 IT IS MEASURING
+#    (native_s / T30_fitted = 0.594). A declared CONSTANT cannot express this,
+#    because the deficit is a function of T60.
+#
+#    THE FORM. Realized support is NOT a fixed number of T60-multiples: measured
+#    over the three retained renders those multiples run 5.027 / 1.564 / 0.235, a
+#    21x spread, so a constant multiple is refuted by the data it would be fitted
+#    to. What does hold is a power law in the scene's own T60 --
+#
+#        predicted_support_s = coefficient * T60_eff ** exponent
+#
+#    -- least squares on log-log, n = 3, residuals +4.91 / -7.96 / +3.57 %. The
+#    sub-unity exponent IS the finding: support grows far more slowly than the
+#    decay it has to contain, so the deficit is worst for exactly the reverberant
+#    scenes this study is about.
+#
+#    n = 3 is thin, and the honest treatment is not to hide that but to make every
+#    render check it: gen-scenes gates on the PREDICTION (it runs before any render
+#    exists), and every render FALSIFIES the prediction against realized
+#    `native_ir_samples` and reports the residual, exactly as `speed_of_sound_m_s`
+#    is falsified against the paths. A prediction that over-reads is a defect in
+#    THIS declaration, and the render is where it surfaces.
+predicted_support_coefficient_s: 1.1806
+predicted_support_t60_exponent: 0.2541
+#
+#    What this predicts, as captured decay range (60 * support / T60_eff):
+#      T60_eff 0.134 s -> 301.6 dB   T30 admissible
+#      T60_eff 0.767 s ->  93.8 dB   T30 admissible
+#      T60_eff 8.294 s ->  14.1 dB   REFUSED -- below ISO 3382-1's 45 dB for T30
+#
+#    The refusal is the correct and intended outcome, not a failure of the fix: the
+#    largest declared rooms are not T30-measurable on this backend, and AC-176's
+#    estimator-side bound is what makes that explicit instead of returning a
+#    plausible 3.28 s for a room whose record is shorter than its own decay.
+
+# ── AIR ABSORPTION IS REALIZED AT alpha_ISO / 4 (AC-66) ───────────────────────
+#
+# AC-54's domain confusion has a second call site, and pre-compensating alpha at
+# `createbox` does not reach it. `SoundMedium::getAbsorption` already halves the ISO
+# pressure dB/m to get intensity dB/m (gsSoundMedium.cpp:227), `getAttenuation` then
+# converts with `dbToLinear` = 10^(dB/20) (omScalarMath.h:1935), and the synthesizer
+# takes sqrt() of the result again (binding.cpp:417,454). Net realized ENERGY
+# attenuation is alpha_ISO/4 dB per metre -- a factor of 4 too weak.
+#
+# Declared rather than corrected, because AIR_ABSORPTION is compiled ON
+# (Context.cpp:17) and is not exposed for pre-compensation the way surface alpha is.
+#
+# INERT at the reported bands: alpha_ISO ~ 0.0024 / 0.0041 dB/m at 500 / 1000 Hz,
+# <= 0.4% on T60 in a 60 m^3 room. It does NOT explain AC-54's -5.6% residual.
+# LIVE above them: `iso_eval_freqs` is a config list, and at 8 kHz the error reaches
+# ~19% of T60 in a small room. 4mV scales with volume while S*alpha scales with
+# surface, so in the largest declared room correct air absorption would DOMINATE the
+# Eyring term at high frequency.
+air_absorption_realized_fraction: 0.25
+# The highest band at which the alpha_ISO/4 error stays inside the tolerance below.
+# `iso_eval_freqs` above this is REFUSED rather than silently mis-rendered.
+air_absorption_max_eval_freq_hz: 2000.0
+air_absorption_t60_error_tolerance_frac: 0.05

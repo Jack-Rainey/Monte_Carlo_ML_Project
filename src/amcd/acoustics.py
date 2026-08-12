@@ -19,6 +19,43 @@ import math
 SABINE_K = 0.161
 
 
+def box_volume_and_surface(dims: tuple[float, float, float]) -> tuple[float, float]:
+    """Volume (m³) and total interior surface (m²) of a shoebox.
+
+    Shared for the AC-24 reason the T60 formulas are: `scenes/generator.py`
+    characterizes the room from these two numbers and `simulators/gsound_sir.py`
+    predicts its realized record length from them (AC-184). Two inlined copies of
+    `2*(lx*ly + ly*lz + lx*lz)` is exactly how the described room and the rendered
+    room drift apart.
+    """
+    lx, ly, lz = (float(d) for d in dims)
+    if lx <= 0 or ly <= 0 or lz <= 0:
+        raise ValueError(f"shoebox dims must all be positive; got {dims!r}.")
+    return lx * ly * lz, 2.0 * (lx * ly + ly * lz + lx * lz)
+
+
+def predicted_support_s(t60_s: float, coefficient_s: float, exponent: float) -> float:
+    """How many seconds of record a backend is predicted to produce for a `t60_s`
+    decay: `coefficient_s * t60_s ** exponent`.
+
+    The functional form, not the coefficients — those are a backend fact and are
+    declared per simulator in config, because a different raytracer trims its
+    record differently. An `exponent` below 1 means support grows more slowly than
+    the decay it must contain, so the captured fraction falls as rooms get more
+    reverberant; that is the AC-184 finding, and it is why a single declared record
+    length cannot express this bound.
+
+    Lives here rather than in `simulators/gsound_sir.py` so the gen-scenes gate and
+    the render-time falsification evaluate one formula, for the AC-24 reason the
+    T60s do.
+    """
+    if t60_s <= 0.0:
+        raise ValueError(f"t60_s must be positive; got {t60_s!r}.")
+    if coefficient_s <= 0.0:
+        raise ValueError(f"coefficient_s must be positive; got {coefficient_s!r}.")
+    return coefficient_s * t60_s**exponent
+
+
 def sabine_rt60(volume_m3: float, surface_m2: float, absorption: float) -> float:
     """Sabine reverberation time (s) for a room of `volume_m3` and `surface_m2`
     with a single mean absorption coefficient.

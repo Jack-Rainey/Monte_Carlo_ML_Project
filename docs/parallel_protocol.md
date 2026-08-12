@@ -54,8 +54,32 @@ The main checkout runs no lane; it is the **integrator**.
    lane touches.
 
 4. **A finding whose anchors span two lanes' files is not parallelized.** It goes
-   to the integrator's serial queue, applied after the merge and before the
-   reviewers. Declared per cycle under `integrator_queue:` in the partition file.
+   to the integrator, in one of **two** queues — and which one is the difference
+   between spanning work getting done and spanning work getting cut.
+
+   - **`pre_lane:`** — lands on `v3-rebuild` *before the partition is drawn*.
+     `scripts/new_lane.py` refuses to create worktrees while this list is
+     non-empty.
+   - **`post_merge:`** — applied after the merge and before the reviewers. This
+     is the old `integrator_queue:` and remains the default.
+
+   A row is `pre_lane:` if **either** (a) it changes what other lanes' evidence
+   would be measured against, **or** (b) its anchor files overlap files the
+   partition intends to assign to a lane. Test (b) is not redundant: a spanning
+   row can be evidence-neutral and still have to precede, because a lane will own
+   the file it must edit — the RD-153 shape, where a lane deleted the declared
+   edit site of a queued blocker cluster mid-queue.
+
+   **Why the split exists.** With one queue, spanning work is always last, and
+   last is what gets cut when budget runs out. ITEM 0 — the gsound absorption
+   convention and record-length fix — spans `simulators/`, `scenes/`,
+   `evaluation/` and `configs/` at once, so no partition can host it; it was
+   deferred by two consecutive cycles for exactly this reason while both cycles
+   moved the gate by zero.
+
+   `tests/test_lane_partition.py` asserts every `post_merge:` row's anchor files
+   fall outside every lane's `owns` — so a row that should have been `pre_lane:`
+   fails at declaration time rather than three sessions in.
 
 5. **Reviewers count only on the integrated tree.** A lane-branch review never
    counts toward a clean pass. CLAUDE.md's definition of done is unchanged.

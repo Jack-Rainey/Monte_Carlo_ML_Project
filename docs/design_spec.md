@@ -360,6 +360,25 @@ split separately** — D0a characterizes per-split headroom (it will differ, mos
 notably for `test_geometry_shift`), and E2+ must show generalization vs
 robustness as a per-shift breakdown, not a pooled test number.
 
+### 11.1 Render threshold (user decision, 2026-08-12)
+
+Real `gsound_sir` renders are emulated on this host and are the project's scarcest
+resource, so they are bounded — but by a **standing threshold**, not a per-cycle
+grant:
+
+- **Any session may render up to 30 scenes.** No permission clause, no allocation
+  table, no per-item sub-grant.
+- **Beyond 30, the session stops and asks the user**, giving the reason and an
+  estimated wall-clock. A full-dataset render for the Research I reproduction is
+  an expected and legitimate reason to exceed it; the point of the threshold is
+  that a session cannot spend a day of compute without the user knowing first.
+- **Every render records measured per-scene wall-clock**, so the estimate in that
+  request is measured rather than guessed. Nothing in the repo recorded this
+  before, which is why three cycles rationed renders against an unmeasured price.
+
+30 is also the smallest count at which a probe starts to say anything about
+statistical significance; the superseded ≤4/≤6 grants could not.
+
 ## 12. Environment (cross-platform is a project requirement)
 
 The pipeline must run in two host configurations with identical code — no

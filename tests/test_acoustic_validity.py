@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from amcd.acoustics import critical_distance
+from amcd.acoustics import critical_distance, predicted_support_s
 from amcd.config import Config
 from amcd.scenes.generator import _room_acoustics, run_gen_scenes
 
@@ -287,3 +287,71 @@ class TestValidityReachesTheReport:
         assert v["n_scenes"] == 40
         assert v["alpha_above_diffuse_limit"]["count"] == 40
         assert v["alpha_limit"] == Config.load(*_RI).scenes.diffuse_field_alpha_limit
+
+
+class TestRealizedRecordSupport:
+    """AC-184: the record gsound produces is a sub-linear FUNCTION of the decay.
+
+    Pinned against the three renders retained in `experiments/ac175_probe/`, which
+    are the only real measurements of this backend's adaptive energy trim. The
+    declaration these tests guard is `predicted_support_*` in
+    `configs/simulators/gsound_sir.yaml`; the render falsifies it per scene, and
+    these assert the fit it was derived from still holds.
+    """
+
+    PROBE = Path(__file__).resolve().parents[1] / "experiments" / "ac175_probe" / "ac175_results.json"
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def probe(cls) -> list[dict]:
+        if not cls.PROBE.exists():
+            pytest.skip(f"retained render artifacts absent: {cls.PROBE}")
+        return json.loads(cls.PROBE.read_text())
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def declared(cls) -> tuple[float, float]:
+        import yaml
+        params = yaml.safe_load(
+            (Path(__file__).resolve().parents[1] / "configs" / "simulators" / "gsound_sir.yaml").read_text()
+        )
+        return (
+            float(params["predicted_support_coefficient_s"]),
+            float(params["predicted_support_t60_exponent"]),
+        )
+
+    def test_a_constant_number_of_t60_multiples_is_refuted(self, probe: list[dict]) -> None:
+        """The form AC-184's remedy was first written against, and why it changed.
+
+        If support were a fixed multiple of T60 these would cluster; they span 21x.
+        """
+        multiples = [s["native_s"] / s["T60_alpha_eff"] for s in probe]
+        assert max(multiples) / min(multiples) > 20.0
+
+    def test_the_declared_power_law_predicts_every_retained_render(
+        self, probe: list[dict], declared: tuple[float, float]
+    ) -> None:
+        coefficient, exponent = declared
+        for scene in probe:
+            predicted = predicted_support_s(scene["T60_alpha_eff"], coefficient, exponent)
+            residual = (predicted - scene["native_s"]) / scene["native_s"]
+            assert abs(residual) < 0.10, (
+                f"{scene['scene']}: predicted {predicted:.4f} s against realized "
+                f"{scene['native_s']:.4f} s ({residual:+.2%})"
+            )
+
+    def test_support_grows_more_slowly_than_the_decay(self, declared: tuple[float, float]) -> None:
+        """The sub-unity exponent IS the finding — an exponent >= 1 would mean the
+        record keeps up with reverberance, which is the thing AC-184 refuted."""
+        assert 0.0 < declared[1] < 1.0
+
+    def test_the_largest_declared_room_is_not_t30_measurable(
+        self, probe: list[dict], declared: tuple[float, float]
+    ) -> None:
+        """The consequence that gates the dataset: at the reverberant end the record
+        holds ~14 dB of decay against ISO 3382-1's 45 dB for T30, so the honest
+        output is unscored-with-a-reason (AC-176), not a plausible 3.28 s."""
+        coefficient, exponent = declared
+        long = max(probe, key=lambda s: s["T60_alpha_eff"])
+        captured_db = 60.0 * predicted_support_s(long["T60_alpha_eff"], coefficient, exponent) / long["T60_alpha_eff"]
+        assert captured_db < 45.0

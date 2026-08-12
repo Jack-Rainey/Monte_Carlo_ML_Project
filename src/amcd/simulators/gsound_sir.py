@@ -26,6 +26,7 @@ from typing import Literal
 import numpy as np
 from pydantic import BaseModel, field_validator
 
+from ..acoustics import box_volume_and_surface, predicted_support_s, sabine_rt60
 from ..registry import simulator_registry
 from .base import IRResult, PathData, SceneSpec
 
@@ -482,6 +483,42 @@ class GsoundSirSimulator:
         #: under. No default — this is experiment-governing.
         absorption_convention: Literal["pre_compensate", "as_is"]
 
+        #: THE RECORD THIS BACKEND CAN FILL — the compiled cap (AC-175, AC-56).
+        #: `maxIRLength` is compiled at 3.0 s and not exposed by `module.cpp`, so
+        #: `ir_duration` cannot govern the native record and must be validated
+        #: against this rather than assumed. Declared, not configured: setting a
+        #: different value does not change the simulation.
+        max_ir_length_s: float
+
+        #: THE LIMIT THAT ACTUALLY BINDS (AC-184). Upstream's adaptive energy trim
+        #: closes the record long before the compiled cap — measured across the
+        #: retained renders, T60 swept 45.2x while the record grew only 2.89x — so
+        #: realized support is a FUNCTION of the scene's decay, not a constant:
+        #:
+        #:     support_s = coefficient * T60_eff ** exponent
+        #:
+        #: A constant number of T60-multiples is REFUTED by that data (the measured
+        #: multiples span 5.027 / 1.564 / 0.235). The sub-unity exponent is the
+        #: finding itself — support grows more slowly than the decay it must hold.
+        #:
+        #: gen-scenes gates on the PREDICTION, because it runs before any render
+        #: exists; `render` then falsifies it against realized `native_ir_samples`
+        #: and reports the residual, exactly as `speed_of_sound_m_s` is falsified
+        #: against the paths. A prediction that over-reads is a defect HERE, and the
+        #: render is where it surfaces — which is what makes an n=3 fit safe to
+        #: ship rather than a guess nobody re-checks.
+        predicted_support_coefficient_s: float
+        predicted_support_t60_exponent: float
+
+        #: AIR ABSORPTION IS REALIZED AT alpha_ISO/4 (AC-66) — AC-54's domain
+        #: confusion at a second call site, which pre-compensating surface alpha
+        #: does not reach. Compiled ON and not exposed, so it is DECLARED and
+        #: guarded rather than corrected: inert at 500/1000 Hz (<= 0.4% of T60),
+        #: ~19% at 8 kHz. `iso_eval_freqs` above the max below is refused.
+        air_absorption_realized_fraction: float
+        air_absorption_max_eval_freq_hz: float
+        air_absorption_t60_error_tolerance_frac: float
+
         #: Must stay false: per-IR normalization destroys low↔high energy
         #: comparability, which the paired-improvement spine and the D0b carrier
         #: test both rest on.
@@ -720,6 +757,51 @@ class GsoundSirSimulator:
             "truncation_qc_flag": flagged,
         }
 
+    def _support_falsification(self, scene: SceneSpec, n_native: int) -> dict:
+        """Falsify `predicted_support_t60_multiples` against the realized record.
+
+        The declaration in `configs/simulators/gsound_sir.yaml` predicts how much of
+        a scene's decay this backend's adaptive energy trim will retain (AC-184).
+        gen-scenes gates on that prediction because it runs before any render
+        exists; this is the other half — the render reporting what actually
+        happened, so an over-reading prediction becomes visible instead of
+        governing the dataset unchallenged. Same contract as
+        `speed_of_sound_m_s`: declare, then let upstream falsify it.
+
+        Uses the REALIZED absorption, not the scene's nominal alpha — the trim
+        responds to the decay that was rendered, and under `pre_compensate` those
+        are the same room by construction, while under `as_is` they are not
+        (AC-54).
+        """
+        volume, surface = box_volume_and_surface(scene.dims)
+        alpha_realized = _realized_absorption(
+            float(scene.material_absorption), str(self.params["absorption_convention"])
+        )
+        t60_s = sabine_rt60(volume, surface, alpha_realized)
+        predicted_s = predicted_support_s(
+            t60_s,
+            float(self.params["predicted_support_coefficient_s"]),
+            float(self.params["predicted_support_t60_exponent"]),
+        )
+        realized_s = n_native / float(self.sample_rate)
+        return {
+            "predicted_support_s": predicted_s,
+            "realized_support_s": realized_s,
+            # >= 1.0 means the backend retained at least what was predicted, so the
+            # gen-scenes gate was not optimistic. < 1.0 is the direction that
+            # matters: the dataset was admitted against a record it did not get.
+            "support_realized_over_predicted": (
+                realized_s / predicted_s if predicted_s > 0.0 else float("nan")
+            ),
+            "support_t60_s": t60_s,
+            # What the record holds of its own decay, in dB. This is the quantity
+            # AC-176's estimator bound is applied to downstream, reported here so
+            # the refusal can be predicted from the render record alone.
+            "realized_decay_range_db": (
+                60.0 * realized_s / t60_s if t60_s > 0.0 else float("nan")
+            ),
+        }
+
     # RD-19's declared-speed cross-check lives in the WORKER, not here (F-94). A
     # parent-side copy over the retained subset was kept briefly as "defence in
     # depth" and was in fact dead: it re-tested a subset of an array the worker had
@@ -796,6 +878,9 @@ class GsoundSirSimulator:
             )
 
         ir, truncation = self._fit_to_window(native)
+        # The other half of the AC-184 declaration: gen-scenes gated this scene on a
+        # PREDICTED record length; here is what the backend actually produced.
+        truncation.update(self._support_falsification(scene, truncation["native_ir_samples"]))
 
         # A leg with no energy is not a leg (F-84). Tested on the FITTED array — the
         # one written to disk and read by every metric (F-111).

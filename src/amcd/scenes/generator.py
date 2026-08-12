@@ -26,7 +26,13 @@ from pathlib import Path
 
 import numpy as np
 
-from ..acoustics import critical_distance, diffuse_field_drr_db, eyring_rt60, sabine_rt60
+from ..acoustics import (
+    box_volume_and_surface,
+    critical_distance,
+    diffuse_field_drr_db,
+    eyring_rt60,
+    sabine_rt60,
+)
 from ..config import Config, Margins, PlacementRegime
 from ..runtime import Verbosity, emit
 from ..simulators.base import SceneSpec, simulator_min_separation
@@ -343,9 +349,7 @@ def _room_acoustics(
             f"{distance}. Declare a placement `distance_range` with a positive "
             f"lower bound."
         )
-    lx, ly, lz = dims
-    volume = lx * ly * lz
-    surface = 2.0 * (lx * ly + ly * lz + lx * lz)
+    volume, surface = box_volume_and_surface(dims)
     # NOMINAL α, as configured — and it governs EVERY quantity below, not only the
     # d_min pair: t60_*, critical_distance_m, drr_db and the record-length flag all
     # scale with it. Pending AC-54, which holds that the backend realizes
