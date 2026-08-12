@@ -89,7 +89,19 @@ scenes:
   # BACKEND'S REALIZED SUPPORT, not against `ir_duration`. Under `dry_run` the two
   # coincide, because the scaffold fills its whole window. Under `gsound_sir` they
   # do not, and a config that passed at 4.25 s can fail here — correctly.
-  max_t60_over_ir_duration_frac: 0.0
+  # 0.05 against a MEASURED 2.8% (17/600), i.e. it permits the known censoring and
+  # still trips if that roughly doubles. It is NOT 0.0 any more, and the reason is
+  # a user decision of 2026-08-12 recorded at design_spec 11.2: GSound-SIR's
+  # adaptive energy trim makes T30 inadmissible above T60 ~ 1.85 s at ANY window,
+  # so a handful of the most reverberant draws cannot be scored on this backend.
+  # That is accepted as a documented limitation of the renderer rather than
+  # something to design the population around.
+  #
+  # It is NOT hidden by this number. Those scenes still render; their T30 comes back
+  # unscored WITH A REASON from the estimator's own ISO bound (AC-176), and the
+  # per-split scored-vs-attempted counts carry it into the report. The gate is a
+  # regression tripwire on the censoring RATE; the censoring itself is disclosed.
+  max_t60_over_ir_duration_frac: 0.05
   # Decay range a record must hold for an admissible T30 fit. ISO 3382-1 requires
   # 45 dB for T30 (35 for T20, 20 for EDT). Matches the estimator's own
   # measurement-time bound `metric_min_decay_range_db.T30` below; they answer the

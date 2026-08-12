@@ -622,11 +622,24 @@ class TestPerSplitOverLimitWarning:
         return {"train": _scored_entry(500, train_over),
                 "test_placement_shift": _scored_entry(30, shift_over)}
 
+    @staticmethod
+    def _cfg(ri_config: Config) -> Config:
+        """Tolerance pinned HERE, not inherited from the shipped config.
+
+        These test the per-split warning MECHANISM. The shipped tolerance moved to
+        0.05 when GSound-SIR's T30 ceiling was accepted as a renderer limitation
+        (design_spec 11.2), which is a decision about the dataset, not about this
+        machinery — and at 0.05 the arithmetic below stops exercising either branch.
+        """
+        cfg = ri_config.model_copy(deep=True)
+        cfg.scenes.max_t60_over_ir_duration_frac = 0.01  # 530 scenes -> at most 5
+        return cfg
+
     def test_a_split_over_its_own_limit_is_named_while_the_gate_passes(
         self, ri_config: Config, capsys
     ) -> None:
         # 1 of 30 is 3.3 % per split but 0.19 % overall: the gate allows it.
-        _disclose_and_gate_record_length(ri_config, self._report(0, 1), QUIET)
+        _disclose_and_gate_record_length(self._cfg(ri_config), self._report(0, 1), QUIET)
         warnings = capsys.readouterr().err
 
         assert "test_placement_shift" in warnings
@@ -638,7 +651,7 @@ class TestPerSplitOverLimitWarning:
     ) -> None:
         """Evidence a failing run still names the splits responsible."""
         with pytest.raises(ValueError):
-            _disclose_and_gate_record_length(ri_config, self._report(16, 1), QUIET)
+            _disclose_and_gate_record_length(self._cfg(ri_config), self._report(16, 1), QUIET)
         warnings = capsys.readouterr().err
 
         assert "test_placement_shift" in warnings and "train" in warnings
@@ -648,7 +661,7 @@ class TestPerSplitOverLimitWarning:
     ) -> None:
         """QUIET is show=0. Warnings bypass the ladder entirely (F-24), which is
         what makes "always-emitted" true rather than aspirational."""
-        _disclose_and_gate_record_length(ri_config, self._report(0, 1), QUIET)
+        _disclose_and_gate_record_length(self._cfg(ri_config), self._report(0, 1), QUIET)
         assert "WARNING" in capsys.readouterr().err
 
     def test_a_split_with_no_characterized_scene_is_named_as_undefined(

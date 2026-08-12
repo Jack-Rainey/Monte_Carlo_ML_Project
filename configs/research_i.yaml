@@ -166,7 +166,14 @@ scenes:
   # known deviation without licensing a materially worse one: at 720 scenes it
   # permits 7, and the run fails loudly if the ranges or the record ever move
   # enough to exceed that.
-  max_t60_over_ir_duration_frac: 0.01
+  # 0.05 against a MEASURED 3.8% (27/720). Was 0.01, set when the gate compared
+  # Sabine T60 against `ir_duration`; it now compares against the record GSound-SIR
+  # actually produces, which is much shorter (AC-175/AC-184). RI's 3.0 s record was
+  # always known not to cover its 4.09 s corner — the realized shortfall is simply
+  # larger than the old instrument could see. Accepted as a renderer limitation per
+  # the user decision at design_spec 11.2; the affected scenes return T30 unscored
+  # with a reason rather than a truncation-biased number.
+  max_t60_over_ir_duration_frac: 0.05
 
   # Figure 5: shoebox L 4.0-14.0 / W 3.0-10.0 / H 2.4-4.5 m;
   #           corridor L 8.0-24.0 / W 1.8-4.0 / H 2.4-4.0 m.

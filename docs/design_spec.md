@@ -379,6 +379,39 @@ grant:
 30 is also the smallest count at which a probe starts to say anything about
 statistical significance; the superseded ≤4/≤6 grants could not.
 
+### 11.2 GSound-SIR's T30 ceiling is a renderer limitation (user decision, 2026-08-12)
+
+**T30 stops being ISO-3382-1-admissible above Sabine T60 ≈ 1.85 s on this
+backend, and lengthening the record does not help.** Upstream's adaptive energy
+trim closes the IR as a sub-linear power of the decay —
+`support_s ≈ 1.1806 · T60^0.2541`, fitted on the retained renders in
+`experiments/ac175_probe/` — so the captured decay range `60·support/T60` falls
+below the 45 dB the standard requires for T30 at that point. Measured identical
+at 3.0 s, 4.25 s and 30 s of `ir_duration`: the binding limit is the trim, not the
+buffer.
+
+**Decision: this is accepted as a limitation OF GSOUND-SIR.** The study does not
+reshape its declared population around it. Consequences, all deliberate:
+
+- Affected scenes still render. Their T30 comes back **unscored with a reason**
+  from the estimator's own ISO bound (AC-176) — never as a truncation-biased
+  number — and the per-split scored-vs-attempted counts carry that into the
+  report.
+- The realized censoring is small because the unmeasurable corner is the product
+  of two independent extremes: **17/600 = 2.8 % of `base.yaml`**, **27/720 = 3.8 %
+  of the Research I reproduction**, concentrated in the reverberant splits and
+  zero in the near-anechoic `test_material_shift`.
+- `scenes.max_t60_over_ir_duration_frac` is 0.05 in both configs. It is now a
+  **regression tripwire on the censoring rate**, not an admissibility gate — it
+  trips if the rate roughly doubles.
+- Any E1/E2 claim over the reverberant end is a claim over a **censored
+  subpopulation**, and must be reported as such.
+
+**This strengthens the case for the custom renderer** in `research_I_paper.md` §6
+future work: a raytracer whose record length is a declared parameter rather than
+an emergent property of an energy heuristic would remove this ceiling outright.
+Recorded here so the eventual recommendation rests on a measurement.
+
 ## 12. Environment (cross-platform is a project requirement)
 
 The pipeline must run in two host configurations with identical code — no

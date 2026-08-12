@@ -67,53 +67,50 @@ class TestDeclaredSupportCorner:
 class TestRealizedRecordLengthGate:
     """AC-22's gate half: the population the metrics are actually computed over."""
 
-    def test_base_is_refused_because_gsound_cannot_support_its_declared_decays(
-        self, tmp_path: Path
-    ) -> None:
-        """AC-175/AC-184's consequence, and it is a RESEARCH result, not a bug.
+    def test_base_discloses_its_censoring_rather_than_refusing(self, tmp_path: Path) -> None:
+        """The user decision of 2026-08-12 (design_spec 11.2), enforced.
 
-        base.yaml passed this gate for as long as the gate asked "does Sabine T60
-        fit `ir_duration`". It does not survive the real question — "will the
-        backend produce a record holding 45 dB of that decay" — because gsound's
-        adaptive energy trim closes the record as T60**0.25. The admissible ceiling
-        is T60 ~ 1.85 s at ANY `ir_duration`, and base declares a shoebox corner at
-        4.20 s, where only 24.3 dB is available.
-
-        The gate refusing here is correct. What to do about it is a research
-        decision — narrow the declared T60 range, accept unscored scenes, or change
-        backend — and until it is taken, base is not renderable at ISO T30 fidelity.
+        GSound-SIR's adaptive energy trim makes T30 inadmissible above T60 ~ 1.85 s.
+        That is accepted as a limitation OF THE RENDERER, so the gate does not abort
+        — it bounds the censoring RATE, and the censoring itself is disclosed per
+        split and carried by the estimator's own unscored-with-a-reason path
+        (AC-176). Measured 17/600 = 2.8 %, against a declared tolerance of 0.05.
         """
         cfg = Config.load(_BASE)
-        assert cfg.simulator.name == "gsound_sir"
-        assert cfg.scenes.max_t60_over_ir_duration_frac == 0.0
-        with pytest.raises(ValueError, match="decay range"):
-            run_gen_scenes(cfg, tmp_path, QUIET)
+        assert cfg.scenes.max_t60_over_ir_duration_frac == 0.05
+        run_gen_scenes(cfg, tmp_path, QUIET)
+        report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
+        censored = sum(e["record_decay_range"]["decay_range_below_iso_t30"]["count"]
+                       for e in report.values())
+        total = sum(e["n_scenes"] for e in report.values())
+        assert (censored, total) == (17, 600)
+        assert 0 < censored / total < cfg.scenes.max_t60_over_ir_duration_frac
 
-    def test_the_admissible_ceiling_is_a_property_of_the_backend_not_the_window(
-        self,
+    def test_the_censoring_is_reported_per_split_not_only_in_aggregate(
+        self, tmp_path: Path
     ) -> None:
-        """~1.85 s for gsound, and lengthening `ir_duration` does not move it."""
-        from amcd.simulators.base import simulator_realized_support_s
+        """A pooled 2.8 % would hide that it is concentrated in the reverberant
+        splits — which is exactly where the study's interest lies."""
+        run_gen_scenes(Config.load(_BASE), tmp_path, QUIET)
+        report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
+        per_split = {s: e["record_decay_range"]["decay_range_below_iso_t30"]["count"]
+                     for s, e in report.items()}
+        assert per_split["id"] == 16
+        assert per_split["test_geometry_shift"] == 1
+        # Near-anechoic by construction: nothing there is long enough to censor.
+        assert per_split["test_material_shift"] == 0
 
-        cfg = Config.load(_BASE)
-        for window_s in (3.0, 4.25, 30.0):
-            admissible = [
-                t60 / 100.0
-                for t60 in range(20, 600)
-                if 60.0 * simulator_realized_support_s(cfg, t60 / 100.0, window_s) / (t60 / 100.0)
-                >= cfg.scenes.iso_t30_decay_range_db
-            ]
-            assert max(admissible) == pytest.approx(1.85, abs=0.05), window_s
-
-    def test_research_i_is_refused_for_the_same_reason(self, tmp_path: Path) -> None:
-        """RI's own 3.0 s record was already known not to cover its 4.09 s corner;
-        against realized support the shortfall is far larger — 24.8 dB available
-        where ISO wants 45 — and 27 of 720 scenes fall short against a declared
-        tolerance of 0.01."""
+    def test_research_i_discloses_its_own_larger_rate(self, tmp_path: Path) -> None:
+        """RI's 3.0 s record was always known not to cover its 4.09 s corner; the
+        realized shortfall is simply larger than the old instrument could see.
+        27/720 = 3.8 %."""
         cfg = Config.load(*_RI)
-        with pytest.raises(ValueError, match="decay range") as exc:
-            run_gen_scenes(cfg, tmp_path, QUIET)
-        assert "27 of 720" in str(exc.value)
+        run_gen_scenes(cfg, tmp_path, QUIET)
+        report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
+        censored = sum(e["record_decay_range"]["decay_range_below_iso_t30"]["count"]
+                       for e in report.values())
+        assert (censored, sum(e["n_scenes"] for e in report.values())) == (27, 720)
+        assert censored / 720 < cfg.scenes.max_t60_over_ir_duration_frac
 
     def test_exceeding_the_declared_tolerance_fails_loudly(self, tmp_path: Path) -> None:
         """A 0.1 s record against base's geometry: every scene is over."""
@@ -146,7 +143,8 @@ class TestRealizedRecordLengthGate:
                     "decay_range_below_iso_t30": {"count": shift_over}}},
             }
 
-        cfg = Config.load(*_RI)  # tolerance 0.01 over 530 scenes -> at most 5
+        cfg = Config.load(*_RI).model_copy(deep=True)
+        cfg.scenes.max_t60_over_ir_duration_frac = 0.01  # 530 scenes -> at most 5
         # 1 of 30 in the small split is 3.3 % per-split but 0.19 % overall: allowed.
         _disclose_and_gate_record_length(cfg, report(0, 1), QUIET)
         # 16 of 500 is 3.2 % per-split — the rate a per-split gate would have to
