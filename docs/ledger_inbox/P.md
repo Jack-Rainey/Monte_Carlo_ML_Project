@@ -131,7 +131,7 @@ identically, confirming `code_version` is path-relative.
 
 ---
 
-## Rows verified — CONFIRMED FIXED (34)
+## Rows verified — CONFIRMED FIXED (35)
 
 ### A1 · cache holes — F-63, F-64, F-66, RD-66
 
@@ -377,7 +377,7 @@ silence. Confirmed: the warning is invocation-scoped, exactly as F-102 states.
 
 ## The explicit `awaiting_re_review:` id list (RD-146's remedy)
 
-These 34 lane-P rows are CONFIRMED FIXED by this lane's evidence above and are
+These 35 lane-P rows are CONFIRMED FIXED by this lane's evidence above and are
 ready for deletion at gate step 7 — **except the three marked conditional**:
 
 ```

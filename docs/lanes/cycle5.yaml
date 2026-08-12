@@ -390,12 +390,11 @@ integrator_queue:
 # home for them — they are findings about this file, not about the code.
 raised_against_this_partition:
   [
-  AC-175, AC-176, AC-177, AC-178, AC-179, AC-180, AC-181, AC-182, AC-183,
-  F-215, F-216, F-217, F-218, F-219, F-220, F-221, RD-250, RD-251, RD-252,
-  RD-253, RD-254, RD-255, RD-256, RD-257, RD-258, RD-259, RD-260, RD-261,
-  RD-262, RD-263, RD-265, RD-267, RD-268, RD-269, RD-270, RD-271, RD-272,
-  RD-273, RD-274, RR-190, RR-191, RR-192, RR-193, RR-194, RR-195, RR-196,
-  RR-197, RR-198, RR-199, RR-200, RR-201
+  AC-175, AC-176, AC-177, AC-178, AC-180, AC-181, AC-182, AC-183, F-215,
+  F-216, F-217, F-218, F-219, F-220, F-221, RD-250, RD-251, RD-252, RD-253,
+  RD-254, RD-255, RD-256, RD-257, RD-258, RD-259, RD-260, RD-261, RD-262,
+  RD-263, RD-265, RD-267, RD-268, RD-269, RD-270, RD-271, RD-272, RD-273,
+  RD-274, RR-191, RR-192, RR-193, RR-194, RR-197, RR-198, RR-199, RR-200
 ]
 
 # THE FIFTH LIST (RD-146). These 142 rows were CREATED BY THIS CYCLE'S FOLD, so
@@ -414,16 +413,11 @@ raised_against_this_partition:
 # CYCLE 6 READS BOTH. `awaiting_re_review` rows need a reviewer VERDICT, not a
 # second fix stacked on an unchecked first. `unassigned` rows are real work.
 awaiting_re_review: [
-  RR-24,
-  AC-76, AC-77, AC-79, AC-80, AC-82, AC-84, AC-100, AC-103, AC-105, AC-106,
-  AC-107, AC-125, AC-126, AC-130, AC-153, F-111, F-112, F-113, F-114, F-115,
-  F-119, F-120, F-121, F-124, F-125, F-135, F-136, F-137, F-139, F-140,
-  F-141, F-142, F-144, F-163, F-164, F-165, F-168, F-169, F-210, F-211,
-  F-212, F-213, F-214, RD-150, RD-154, RD-159, RD-206, RD-264, RD-266, RR-90,
-  RR-93, RR-96, RR-99, RR-100, RR-101, RR-102, RR-103, RR-105, RR-107,
-  RR-115, RR-116, RR-117, RR-118, RR-119, RR-120, RR-121, RR-122, RR-123,
-  RR-124, RR-125, RR-126, RR-140, RR-141, RR-142, RR-144, RR-146, RR-147,
-  RR-148, RR-151, RR-152, RR-153, RR-166
+  AC-76, AC-77, AC-105, AC-107, F-111, F-112, F-113, F-114, F-115, F-119,
+  F-120, F-121, F-124, F-125, F-135, F-136, F-137, F-139, F-140, F-141,
+  F-142, F-144, F-163, F-164, F-165, F-168, F-169, F-210, F-211, F-212,
+  F-213, F-214, RD-150, RD-154, RD-159, RD-206, RD-264, RD-266, RR-24,
+  RR-115, RR-119, RR-121, RR-142, RR-152
 ]
 
 unassigned: [

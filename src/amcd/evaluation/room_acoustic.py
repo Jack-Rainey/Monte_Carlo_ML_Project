@@ -13,7 +13,7 @@ TWO DECLARED DEPARTURES FROM THE STANDARD, so "the standard ISO-3382 path" is re
 as the procedure and not as a conformance claim:
 
 * the octave filter is **not IEC 61260 class 1** — realized out-of-band rejection
-  is ~-37 to -41 dB one octave out, against the 60 dB+ class 1 asks. Measured
+  is ~-37 to -41 dB one octave out, against class 1's 70 dB (and class 2's 60 dB, which it also fails). Measured
   figures and why the order is not simply raised: `_butter_octave_filter` (AC-68);
 * the band-resolvability floor is a **project-defined** criterion (the filter's own
   measured decay times a declared margin), NOT ISO 3382-2's BT > 16, and is more
@@ -373,7 +373,7 @@ def _band_resolvable_decay_s(fc: float, sample_rate: int) -> dict[str, float]:
     MEASURED here rather than asserted, and the numbers scale exactly as 1/f
     (48 kHz): **500 Hz → T30 20.360 ms, EDT 9.556 ms; 1000 Hz → T30 10.162 ms,
     EDT 4.802 ms**.
-    THIS DOCSTRING IS THE ONE PLACE THOSE VALUES ARE WRITTEN DOWN (RR-39) — they
+    THESE VALUES ARE WRITTEN DOWN IN EXACTLY TWO PLACES (RR-39, RR-119) — they
     have moved twice as the filter path was corrected (AC-36's energy fold last),
     and every restatement elsewhere became a contradiction. Cite this function.
 

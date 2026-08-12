@@ -254,19 +254,7 @@ metric_onset_rel_db: -20.0
 # account of this filter's realized ringing, which is what actually limits us.
 #
 # THE MARGIN'S CALIBRATION DID NOT REPRODUCE, AND HAS BEEN RESTATED (AC-101).
-# This comment previously read: "with the floor disabled, the 500 Hz T30
-# estimator's bias is +12.8 % at margin 1.0, +4.9 % at margin 2.0 and +2.8 % at
-# 3.0, so 2.0 lands where the bias crosses d0b_t30_jnd_frac of 0.05". Re-measured
-# on the current tree — 300 realizations/point, true T60 log-spaced 0.015-0.30 s,
-# T30 through the real `_band_energy` path, seed 20260811 — the bias of the
-# population that stays UNFLAGGED at each margin is:
-#
-#     margin      1.0    1.5    2.0    2.5    3.0    4.0
-#     500 Hz    +5.91  +4.15  +3.63  +3.26  +2.97  +2.62   %
-#     1000 Hz   +2.22  +2.64  +2.62  +2.49  +2.33  +2.09   %
-#
-# UNDER THAT POPULATION the 500 Hz bias crosses the 5 % JND between margin 1.0 and
-# 1.5, and at 1000 Hz it is below the JND at every margin including 0.
+# superseded wording is in git history and docs/ledger_inbox/M.md (RR-115).
 #
 # BUT THE POPULATION IS THE GOVERNING PARAMETER, AND IT IS NOT A PROPERTY OF THE
 # ESTIMATOR (F-137). Holding seed, N, code path and duration rule fixed and changing

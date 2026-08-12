@@ -14,6 +14,8 @@ partition file in `docs/lanes/`, so a future cycle's declaration is covered the
 moment it is written.
 """
 import re
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -595,6 +597,35 @@ _FOLDED_RE = re.compile(r"\b(?:RD|F|AC|RR)-\d+\b[^\n]{0,80}?folded into\b", re.I
 _FOLD_DECISION_RE = re.compile(r"^- ((?:RD|F|AC|RR)-\d+)\s+—\s+\S", re.MULTILINE)
 
 
+@lru_cache(maxsize=1)
+def _ids_ever_a_row() -> frozenset[str]:
+    """Every id that has EVER been added as a row to the ledger, from git.
+
+    The fold guard below asks "did this finding become a row". A row that was
+    folded, re-review-confirmed and then correctly DELETED at gate step 7 answers
+    yes — but it is no longer OPEN, and without this the guard would demand its
+    resurrection, i.e. punish the loop for completing. That is not hypothetical:
+    it fired the moment cycle 5's first 44 confirmed rows were deleted.
+
+    Git history IS this project's audit trail for deleted rows (RR-25, and the
+    ledger header's own `git log -S` instructions), so it is the right oracle.
+    One subprocess, cached for the session.
+
+    Degrades to the empty set if git is unavailable — a shallow copy or an
+    exported tree — matching `provenance.git_sha`'s contract that the sha is
+    allowed to be missing. The guard then falls back to OPEN-only, which is
+    stricter, so a missing git cannot make it pass something it should catch.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "log", "-p", "--unified=0", "--", "docs/review_ledger.md"],
+            cwd=_REPO_ROOT, capture_output=True, text=True, timeout=120,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    return frozenset(re.findall(r"^\+\|\s*((?:RD|F|AC|RR)-\d+[a-z]?)\s*\|", out, re.M))
+
+
 def _fold_decisions() -> set[str]:
     """Ids an inbox mentions that the fold deliberately did NOT turn into a row.
 
@@ -659,7 +690,7 @@ def test_every_inbox_finding_reaches_the_ledger(path: Path, spec: dict) -> None:
             block |= {f"{prefix}-{n}" for n in range(int(lo), int(hi) + 1)}
 
         raised = {i for i in _ID_RE.findall(text) if i in block}
-        missing = sorted(raised - open_ids - folded - _fold_decisions())
+        missing = sorted(raised - open_ids - folded - _fold_decisions() - _ids_ever_a_row())
         assert not missing, (
             f"{path.name}: lane {lane['id']} raised {missing} in {lane['inbox']} "
             "and they are not OPEN rows in docs/review_ledger.md. The fold must "

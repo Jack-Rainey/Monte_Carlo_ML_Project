@@ -154,7 +154,7 @@ class DryRunSimulator:
         # DO NOT add an early-reflection model here — that is the real simulator's
         # job, and AC-43 says so explicitly. The artifact-side disclosure is not in
         # this lane's files (`diagnostics/probe.py`, `reporting/tables.py`) and is
-        # recorded in docs/ledger_inbox/M.md against those anchors.
+        # recorded as RD-190 in docs/ledger_inbox/M.md.
         direct = np.zeros(n_active, dtype=np.float32)
         if n_active > 0:
             direct[0] = direct_gain

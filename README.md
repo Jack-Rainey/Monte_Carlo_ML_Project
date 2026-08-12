@@ -155,7 +155,10 @@ src/amcd/
   stats/            # bootstrap CIs, aggregation
   diagnostics/      # D0a headroom + D0b oracle probes
   reporting/        # result tables
-configs/            # three kinds of file (see "Config, not code" above):
+  provenance.py     # code_version, git sha, per-stage source scoping
+  acoustics.py      # Sabine/Eyring closed forms, shared by scenes and eval
+  runtime.py        # verbosity ladder and emit()
+configs/            # three kinds of file (see "Configuration is the source of truth" above):
   base.yaml         #   the master config; research_i.yaml is the E1 overlay
   overlays/         #   composable run overrides (dry_run, test_tiny, smoke)
   models/           #   per-plugin params: one file per registered model,

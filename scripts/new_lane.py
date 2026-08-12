@@ -201,10 +201,8 @@ nothing, which is the only thing a pre-registration is for (RD-192, F-138).
 
 ## THE LANE EXIT GATE — you are not done until all six hold
 
-Full text and the reasoning: `docs/parallel_protocol.md`, "The lane exit gate".
-In cycle 5 every lane ran its reviewers once, fixed what they raised, and
-reported — so ~60 fixes reached the integrator as claims that nobody had
-re-derived. This is the fix for that.
+Full text, the six conditions and why they exist:
+`docs/parallel_protocol.md`, "The lane exit gate". Read it before reporting.
 
 1. **Run all four reviewers, BY NAME** — auto-delegation is unreliable:
    - `research-director` on your PLAN, before you implement;
