@@ -30,6 +30,10 @@
 # headline work.
 
 cycle: cycle4
+
+# Predates the lane exit gate, which was written at the cycle-5 integration.
+# Historical record; never to be backfilled (see cycle5.yaml's note).
+exit_gate: not_required
 base_branch: v3-rebuild
 
 lanes:

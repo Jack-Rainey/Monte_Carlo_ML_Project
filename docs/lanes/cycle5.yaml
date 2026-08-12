@@ -34,6 +34,18 @@
 cycle: cycle5
 base_branch: v3-rebuild
 
+# The lane exit gate was written AT this cycle's integration, in response to what
+# this cycle showed: all four lanes ran their reviewers, all four fixed what those
+# reviewers raised, and NOT ONE re-ran a reviewer over the fixed tree — so ~60
+# fixes reached the integrator as unverified claims. Lane S never ran
+# research-director at all.
+#
+# not_required here, and it must stay that way. These four inboxes were written
+# before the gate existed, and filling in their `## LANE EXIT` blocks now would
+# mean the integrator authoring reviewer evidence for passes nobody ran — the
+# exact thing the gate exists to forbid (RD-253). Cycle 6 declares `required`.
+exit_gate: not_required
+
 # What this cycle does to the GATE, declared machine-readably (planning steps 1
 # and 1b; asserted by tests/test_lane_partition.py). Prose said this before and
 # prose is not a check — cycle 5 drew four lanes and every one of them reported,

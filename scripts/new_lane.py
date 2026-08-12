@@ -188,17 +188,59 @@ PYTHONPATH={src} {_PYTHON} scripts/lane_preflight.py
 It prints the checkout, branch, lane id and the resolved `amcd` path. If any of
 the four disagree with this file, stop and say so rather than working.
 
+## FIRST commit — the pre-registration, ALONE
+
+Before any code change, commit ONLY your pre-registration: what you expect to
+happen to `ci_table.csv` (this partition declares **{lane.get('expected_ci_table_effect', 'UNDECLARED')}**),
+and which gate conditions your rows can lift or unblock.
+
+Alone, as its own commit. In cycle 5 a lane wrote "timestamped by its commit —
+this is the first commit on the branch" while ONE commit held the
+pre-registration, eight changed files and the results. Git then evidences
+nothing, which is the only thing a pre-registration is for (RD-192, F-138).
+
+## THE LANE EXIT GATE — you are not done until all six hold
+
+Full text and the reasoning: `docs/parallel_protocol.md`, "The lane exit gate".
+In cycle 5 every lane ran its reviewers once, fixed what they raised, and
+reported — so ~60 fixes reached the integrator as claims that nobody had
+re-derived. This is the fix for that.
+
+1. **Run all four reviewers, BY NAME** — auto-delegation is unreliable:
+   - `research-director` on your PLAN, before you implement;
+   - then, over the branch:
+     `Use the falsifier subagent to audit lane {lane['id']}'s changes.`
+     `Use the acoustics-reviewer subagent to check lane {lane['id']}'s changes.`
+     `Use the readability-reviewer subagent to review lane {lane['id']}'s changes.`
+   Record the commit sha each one ran on.
+2. **LOOP until the last pass is clean.** Re-run the reviewers over your FINAL
+   commit and get zero new in-lane-fixable findings. *A pass whose findings you
+   then fixed is not the last pass.*
+3. **Fix everything you CAN fix here.** If a finding's fix and test both fall
+   inside your owned set, it is yours and it ships fixed. Report it unfixed only
+   if a path lies outside `owns` (name the file) or it belongs to a cluster that
+   must close together (name the cluster). There is no third reason.
+4. **Re-measure the suite and the `ci_table.csv` A/B on your FINAL commit**, after
+   the last fix — not carried over from before it.
+5. **Every finding is a TABLE ROW** with `id | severity | anchor | finding`, the
+   anchor a real `path` or `path:line`. Prose-only ids are invisible to the fold.
+6. **Say what you LIFTED and what you UNBLOCKED** on the gate. "Nothing" is a fine
+   answer and a useful one — say it rather than leaving it to be inferred.
+
+Then fill in the `## LANE EXIT` block at the top of `{lane['inbox']}`.
+
 ## Before you report
 
 1. `git merge {base_branch}` — if it brought anything in that you import, re-run
    your pass condition. Evidence is only valid against the tree it was measured on.
 2. Commit on your branch. Do not merge into `{base_branch}` yourself.
 3. Write closures and any new findings to `{lane['inbox']}`.
+4. Confirm the exit gate above is satisfied and the `## LANE EXIT` block is filled.
 """
 
 
 def _inbox_header(lane: dict, cycle: str) -> str:
-    """Stamped into the lane's inbox so rule 5 has a mechanism, not just a rule.
+    """Stamped into the lane's inbox so rules 5 and the exit gate have mechanisms.
 
     Rules 1 and 3 are enforced by `lane_guard.py`, the partition by
     `test_lane_partition.py`, evidence isolation by
@@ -206,6 +248,10 @@ def _inbox_header(lane: dict, cycle: str) -> str:
     counts as a clean pass — had nothing (RD-85), and it is the one protecting
     the definition of done: a lane that runs `falsifier`, gets zero findings and
     writes "clean" here produces exactly what an integrator misreads as a pass.
+
+    The `## LANE EXIT` block below is the other half, added after cycle 5. Rule 5
+    bounds what a lane review can BUY; the exit gate states what a lane OWES, and
+    `tests/test_lane_exit.py` parses this block rather than trusting prose.
     """
     return f"""# Lane {lane['id']} inbox — {cycle}
 
@@ -216,6 +262,23 @@ the integrator.
 > NOT a clean pass** (`docs/parallel_protocol.md`, rule 5). A clean pass is the
 > reviewer pass over the merged tree, and only the integrator can produce one.
 > Say "self-check on {branch_name(lane['id'], cycle)}", never "clean".
+
+## LANE EXIT
+
+Fill this in before reporting. `tests/test_lane_exit.py` parses it, so keep the
+field names exactly as generated. Six conditions:
+`docs/parallel_protocol.md`, "The lane exit gate".
+
+- **final_commit:** `<sha of your last commit>`
+- **reviewers_last_run_on:** research-director=`<sha or PLAN>`, falsifier=`<sha>`, acoustics-reviewer=`<sha>`, readability-reviewer=`<sha>`
+- **last_pass_clean:** `<yes | no>` — did the FINAL reviewer pass, run over
+  `final_commit`, return zero new in-lane-fixable findings? A pass whose findings
+  you then fixed is not the last pass; re-run it.
+- **unfixed_in_lane:** `<none>` or one line per row: `<ID> — blocked by <file outside owns> | cluster <Cn>`
+- **evidence_remeasured_on_final_commit:** `<yes | no>` — suite and the
+  `ci_table.csv` A/B, after the last fix
+- **gate_lifts:** `<row ids, or none>`
+- **gate_unblocks:** `<row ids, or none>`
 
 Record, in whatever order things happened: rows you closed with the command and
 output that shows it; new findings, anchored by concrete file path; anything you

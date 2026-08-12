@@ -89,6 +89,14 @@ name → write findings to the ledger → address OPEN findings → repeat.
   awaiting re-review" backlog.** Send each reviewer its own such rows and require
   a per-row verdict. Only then can a row be deleted. A pass that only looks for
   new things guarantees the ledger grows monotonically.
+- **A pass whose findings you then fixed is NOT the last pass — re-run it.** The
+  loop ends on a pass over the tree that SHIPS, returning zero new findings; it
+  does not end on a pass followed by a fix phase. This binds the integrator
+  exactly as it binds a lane. Cycle 5 is the demonstration: all four lanes ran
+  their reviewers once, fixed what those reviewers raised, and reported, so ~60
+  fixes reached integration as claims nobody had re-derived — and when they were
+  finally checked, several were not fixed and two lanes had regressed their own
+  earlier work. Reviewing tree X and shipping tree Y is not reviewing.
 - **Deduplicate before you count.** Running N reviewers over M lanes produces
   N×M passes, and the same defect surfaces repeatedly from different angles.
   Keep every row — a second independent raiser is corroboration, and in cycle 4
@@ -115,9 +123,22 @@ machinery). What a session must know before reading anything else:
 2. **Lanes never edit `docs/review_ledger.md`, `CLAUDE.md`, `docs/design_spec.md`**
    — one writer, the integrator. Lanes write to `docs/ledger_inbox/<lane>.md`.
 3. **Reviewers count only on the integrated tree.** A lane-branch review is a
-   self-check, never a clean pass.
+   self-check, never a clean pass. That bounds what a lane review can BUY; what a
+   lane OWES is the **lane exit gate**, and the two are not the same rule.
 4. **Allocate new row ids only from your lane's declared `id_block`.** Cycle 4 had
    no such rule and four lanes collided four ways, including with live rows.
+5. **A lane is not done until all four reviewers have run and the LAST pass came
+   back clean over its FINAL commit**, and until every finding it could fix inside
+   its own owned files is fixed. Reporting a reachable finding unfixed needs a
+   named blocking file outside `owns`, or a named cluster — there is no third
+   reason. The six conditions and their evidence are the exit gate in the
+   protocol; `LANE.md` carries them and `tests/test_lane_exit.py` checks them.
+6. **A cycle must be able to move the gate.** The partition declares `gate:` with
+   `lifts:` / `unblocks:`, or an explicit `exception:`. Cycle 5 ran four lanes to
+   completion and every one reported, unprompted, that it moved neither RD-33a
+   condition — while the on-path blocker/major count rose 20 → 29. Local lane
+   progress is not project progress, and discovering that afterwards is the
+   failure; choosing a backlog-discharge cycle deliberately is not.
 
 The rest — rule 2's metric-path file list and the reported-column span (RD-82),
 rule 4's spanning rows, and the seven-step integration gate — is in the protocol.

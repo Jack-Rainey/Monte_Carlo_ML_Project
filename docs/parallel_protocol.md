@@ -28,6 +28,16 @@ The main checkout runs no lane; it is the **integrator**.
    both A/Bs at the merge. This rule is what caps the achievable speedup, and it
    is not negotiable for a speedup.
 
+   **The detector is the SET OF DECLARATIONS, not the premise that only the
+   metric lane can move the table.** That premise is false by construction
+   (RD-191/RD-261): the lane owning `stats/**` and `reporting/**` owns the code
+   that *writes* `ci_table.csv`, and the lane owning `scenes/` sets the population
+   every number is computed over. It held in cycles 4 and 5 because the other
+   lanes each declared *none* and honoured it — a property of those declarations,
+   not of the partition. So every lane declares `expected_ci_table_effect:` in the
+   partition file, `tests/test_lane_partition.py` asserts the declaration exists,
+   and **a row that moves without a pre-registered declaration is a finding.**
+
    **The lane that computes a number does not own the file that reports it.**
    `ci_table.csv` is written by `stats/aggregate.py:324` and `summary.txt` by
    `reporting/tables.py:144`. Those live wherever the cache/provenance lane
@@ -46,9 +56,76 @@ The main checkout runs no lane; it is the **integrator**.
    to the integrator's serial queue, applied after the merge and before the
    reviewers. Declared per cycle under `integrator_queue:` in the partition file.
 
-5. **Reviewers count only on the integrated tree.** A lane may run reviewers on
-   its branch as a cheap self-check, but that never counts toward a clean pass.
-   CLAUDE.md's definition of done is unchanged.
+5. **Reviewers count only on the integrated tree.** A lane-branch review never
+   counts toward a clean pass. CLAUDE.md's definition of done is unchanged.
+
+   This rule says what a lane review *cannot buy*. It said nothing about what a
+   lane must *do*, and for two cycles that was read as permission rather than
+   obligation — see the lane exit gate below, which is the other half.
+
+---
+
+## The lane exit gate — what a lane must satisfy before it reports
+
+Rule 5 is about authority: only the integrated tree produces a clean pass. This
+section is about completeness: what a lane owes before it says it is finished.
+They are not in tension, and neither replaces the other.
+
+**Why this exists.** In cycle 5 all four lanes ran reviewers, all four fixed what
+those reviewers raised, and **not one re-ran a reviewer over the fixed tree.**
+Every lane's last reviewer pass predated its last commit, so ~60 fixes arrived at
+the integrator as claims. Lane S never ran `research-director` at all. Lane B's
+readability findings had no findings table — eighteen ids in prose, several with
+no file anchor, invisible to the fold until a new guard caught them. The cause was
+structural, not a tooling failure: `LANE.md`'s "Before you report" section listed
+three steps — merge base, commit, write the inbox — and **did not mention
+reviewers**, while rule 5 said a lane *may* run them "as a cheap self-check".
+
+- **L1 — all four reviewers run, by name.** `research-director` on the PLAN before
+  implementation; `falsifier`, `acoustics-reviewer` and `readability-reviewer`
+  over the branch. Auto-delegation is unreliable; invoke each explicitly. Record
+  the commit sha each one ran on.
+
+- **L2 — loop until the last pass is clean.** The final reviewer pass must run
+  over the lane's **final commit** and return zero new in-lane-fixable findings.
+  *A pass whose findings you then fixed is not the last pass.* Fix, re-run,
+  repeat. One pass followed by a fix phase is the cycle-5 failure exactly.
+
+- **L3 — fix in lane what can be fixed in lane.** Any finding whose `fix:` and
+  `test:` paths all fall inside the lane's owned set MUST be fixed before
+  reporting. A finding may be reported unfixed only if (a) a path falls outside
+  `owns`, **naming that file**, or (b) it belongs to a declared cluster that must
+  close together, **naming the cluster**. There is no third reason. "Ran out of
+  time" is not one — report less scope, not unfixed reachable findings.
+
+- **L4 — evidence re-measured on the final commit.** Suite and the fixed-seed
+  `ci_table.csv` A/B, after the last fix. Lane S did this ("the A/B was re-run on
+  `4dfe46c`, not carried over"); lane B's numbers predated its final commit by
+  three new tests and a new stub switch.
+
+- **L5 — every finding is a TABLE ROW** with `id | severity | anchor | finding`,
+  the anchor a real `path` or `path:line`. No prose-only ids: the fold copies the
+  anchor into the ledger, and that column is what assigns the row to a lane next
+  cycle and what the RD-33a gate counts.
+
+- **L6 — declare the gate contribution, measured.** State what the lane LIFTED and
+  what it UNBLOCKED against the conditions its brief pre-declared. "Nothing" is a
+  permitted and useful answer — a backlog-discharge lane is legitimate — but it
+  must be *said*, and it is a signal for the next partition rather than a failure
+  of this one. Declaring alone is not enough, which is why the partition-level
+  clause in planning step 1 is asserted rather than advised.
+
+**Pre-registration is committed ALONE, as the lane's first commit** (RD-192),
+before any code change. Otherwise git cannot evidence that the declaration
+preceded the edits, which is the only thing a pre-registration is for: lane M's
+said "this entry is the first commit on the branch" while a single commit held the
+pre-registration, eight changed files and the results together.
+
+The gate is recorded in a `## LANE EXIT` block in the lane's inbox and asserted by
+`tests/test_lane_exit.py`, for partitions declaring `exit_gate: required`. It is
+NOT retroactive: cycle 5's inboxes predate it, and backfilling them would mean
+authoring evidence for passes nobody ran — the exact thing this machine exists to
+forbid.
 
 ---
 
@@ -302,6 +379,23 @@ part that changes; the machinery, the guard and the tests are cycle-agnostic.
    down is what stops cycle 5 being planned as though the gate had moved
    (RD-89c). A cycle that only unblocks is fine; a cycle that *believes* it
    lifted is not.
+
+   **1b is now DECLARED IN THE PARTITION AND ASSERTED, because prose was not
+   enough** (RD-254). `docs/lanes/<cycle>.yaml` carries a `gate:` block with
+   `lifts:`, `unblocks:` and — when both are empty — an `exception:` giving the
+   reason. `tests/test_lane_partition.py` fails a partition that omits it.
+
+   This is the rule the user asked for after cycle 5, and cycle 5 is why: four
+   lanes ran to completion and **every one of them reported, in its own inbox and
+   unprompted, that it moved neither condition of RD-33a.** Lane B "lifts NEITHER
+   condition"; lane P "neither LIFTS nor UNBLOCKS"; lane S "LIFTS NOTHING AND
+   UNBLOCKS NOTHING"; lane M that (i) could not lift for `evaluation/**`
+   regardless of its execution. Each was individually reasonable and the cycle as
+   a whole moved the project zero — with the on-path blocker/major count going
+   *up*, 20 → 29. **At least one lane must carry rows that can move a live gate
+   condition, or the partition must name the exception.** Discovering afterwards
+   that nothing could have moved is the failure; choosing a backlog-discharge
+   cycle deliberately is not.
 
    **1c. Name the deliverable, not only its requirements.** Cycle 4's declared
    content included the subprocess worker; the partition gave lane R the PathData
