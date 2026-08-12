@@ -562,6 +562,36 @@ def test_the_placement_axis_moves_c50_through_the_iso_path() -> None:
         f"re-band-limited"
     )
 
+    # THIS is the assertion that actually discriminates AC-28 (F-144). The two above
+    # do NOT: reverting the direct arrival to its pre-AC-28 one-pole envelope still
+    # gives a monotone C50 with a 23.41 dB swing, because the swing is delivered by
+    # the room-constant TAIL SCALING (RD-75), not by the arrival being broadband.
+    # Running that revert as a negative control is what exposed it.
+    #
+    # AC-28's own second consequence is the discriminating one: with a one-pole
+    # envelope the global peak sits 300-550 samples INTO the diffuse tail, which
+    # violates `_find_onset`'s documented AC-07 assumption that the direct sound is
+    # the loudest arrival. A broadband impulse is the first and largest sample by
+    # construction.
+    scene = SceneSpec(
+        scene_id="placement-peak", seed=7, geometry_family="shoebox",
+        dims=dims, material_absorption=alpha,
+        source_pos=(1.0, 1.0, 1.5), receiver_pos=(3.0, 1.0, 1.5),
+        sim_params={}, split_regime="test_placement_shift",
+        regime_axes={"placement": "near_corner"},
+    )
+    ir = sim.render(scene, cfg.high_ray_budget).ir[0]
+    onset = int(np.argmax(np.abs(ir) > 0))          # first non-silent sample = d/c
+    peak = int(np.argmax(ir.astype(np.float64) ** 2))
+    assert peak == onset, (
+        f"the loudest sample is at index {peak}, {peak - onset} samples INTO the "
+        f"diffuse tail rather than at the direct arrival ({onset}). A one-pole "
+        f"envelope puts it there; a broadband impulse cannot. This violates "
+        f"`_find_onset`'s AC-07 assumption that the direct sound is the loudest "
+        f"arrival, and it is the property that distinguishes AC-28's fix from the "
+        f"defect it replaced (the C50 swing above does NOT — it survives the revert)"
+    )
+
 
 def test_the_headroom_guard_reads_exactly_the_reported_metric_bands() -> None:
     """AC-37-R4 — the guard's declared band set must EQUAL `iso_eval_freqs`.
@@ -673,7 +703,7 @@ def test_the_headroom_guard_ignores_a_spectral_slope_outside_the_metric_bands() 
     peak_db = torch.amax(10.0 * torch.log10(torch.stack(bands).clamp(min=1e-10)), dim=2)
     headroom = peak_db - rep.min_db
     all_band_min = float(headroom.min())
-    iso_min = float(headroom[:, rep._headroom_band_idx].min())
+    iso_min = float(headroom[:, rep.headroom_band_indices].min())
 
     assert all_band_min < rep.min_db_headroom_db, (
         f"the lowpass no longer drives ANY ladder band below the guard threshold "
@@ -694,13 +724,15 @@ def test_the_headroom_guard_ignores_a_spectral_slope_outside_the_metric_bands() 
 #: declared and pinned instead of the conformance being assumed. Keyed by octaves
 #: from the band centre; the bound is the WORST (least negative) of the two eval
 #: bands at that offset, rounded outward by ~1 dB so a scipy point release does not
-#: fail the suite.
+#: fail the suite. The SAME bound is applied on BOTH sides of the band — the skirts
+#: are not symmetric in Hz (one octave below is fc/2, above is 2*fc) but the bound is
+#: the worse of the two, so it holds either way.
 #:
 #: NOT a config value. Nothing in the pipeline reads it and it governs no
 #: experiment — it is a declared property of the filter design, the same class as
 #: `_MIN_FILTER_SAMPLES` and `_DECLARED_FLOORS_48K`. Making it config-declared, as
 #: AC-68's remedy text asks, needs a field in `src/amcd/config.py`, which lane M
-#: does not own (`extra: forbid`), so that half is filed as a spanning row.
+#: does not own (`extra: forbid`), so that half is filed as spanning row RD-186.
 _DECLARED_STOPBAND_DB = {1: -36.5, 2: -45.5}
 
 
@@ -914,6 +946,14 @@ def test_the_band_resolvability_floors_are_the_declared_values(fc: float) -> Non
     """
     from amcd.evaluation.room_acoustic import _band_resolvable_decay_s
 
+    # The constant's name promises 48 kHz; nothing else enforces it. Without this,
+    # a change to `_SR` would silently compare 48 kHz floors against another rate
+    # and the name would lie (RR-122).
+    assert _SR == 48000, (
+        f"_DECLARED_FLOORS_48K holds floors measured at 48 kHz but _SR is {_SR}. "
+        f"The floors scale as 1/f and are sample-rate dependent — re-measure and "
+        f"rename the constant, or key it by sample rate."
+    )
     measured = _band_resolvable_decay_s(fc, _SR)
     declared = _DECLARED_FLOORS_48K[fc]
     for metric, want in declared.items():
@@ -1004,6 +1044,67 @@ def test_the_energy_fold_conserves_energy_at_every_record_length(
         f"twice, or — if the ratio is below 1 — pad samples beyond one record "
         f"length are being discarded again (F-68-R3)"
     )
+
+
+@pytest.mark.parametrize("fc", _ISO)
+def test_a_record_shorter_than_one_guard_width_is_unmeasurable_not_approximated(
+    fc: float,
+) -> None:
+    """AC-100 / AC-106 — below one guard width, NaN with a reason, never a number.
+
+    `_band_energy` folds the filter's acausal ringing onto its mirrored support.
+    Below one guard width that mirror falls outside the record, so the energy is
+    clamped to the record edge — conserving it, but depositing it at the far end
+    from the arrival it belongs to. MEASURED at n_record = 32: the last sample holds
+    30.24 % of the band's energy, 24x its neighbour, and T30 reads 0.00706 s against
+    0.00336 s for the same signal in a long record. The predecessor behaviour was
+    worse — it silently DISCARDED up to 29.7 %.
+
+    Neither is a number this project may report, so the third option is taken: the
+    metric is unmeasurable and says so, which is what the drop log exists for.
+
+    The fold itself is still exercised and still conserves energy at those lengths
+    (`test_the_energy_fold_conserves_energy_at_every_record_length`) — this bounds
+    what may be REPORTED, not what `_band_energy` computes.
+    """
+    from amcd.evaluation.room_acoustic import (
+        _filter_guard_samples, _iso3382_band_metrics,
+    )
+
+    guard = _filter_guard_samples(fc, _SR)
+
+    short = np.zeros(guard - 1, dtype=np.float32)
+    short[len(short) // 2] = 1.0
+    values, reasons, _res = _iso3382_band_metrics(
+        short, fc, _SR, band_resolvability_margin=2.0
+    )
+    for metric in ("T30", "EDT", "C50"):
+        assert np.isnan(values[metric]), (
+            f"{metric} returned {values[metric]} for a {len(short)}-sample record at "
+            f"{fc:g} Hz, below the {guard}-sample guard width — the clamped fold "
+            f"deposits energy at the record edge there, so this is an approximation "
+            f"reported as a measurement (AC-100/AC-106)"
+        )
+        assert "guard" in reasons[metric], (
+            f"{metric} is NaN but its reason does not name the guard width: "
+            f"{reasons[metric]!r}. Nothing may leave a result without a reason."
+        )
+
+    # ...and one sample above the bound it is measurable again, so the guard is a
+    # boundary and not a blanket refusal of short records.
+    ok = np.zeros(max(guard, _MIN_FILTER_SAMPLES_FOR_TEST), dtype=np.float32)
+    ok[len(ok) // 2] = 1.0
+    values_ok, _r, _res2 = _iso3382_band_metrics(
+        ok, fc, _SR, band_resolvability_margin=2.0
+    )
+    assert not np.isnan(values_ok["T30"]), (
+        f"a {len(ok)}-sample record at {fc:g} Hz is at or above the {guard}-sample "
+        f"guard width and must still be measurable"
+    )
+
+
+#: Mirrors `_MIN_FILTER_SAMPLES`; the guard-width bound is `max()` of the two.
+_MIN_FILTER_SAMPLES_FOR_TEST = 32
 
 
 def test_a_record_ending_at_full_scale_is_not_given_a_dc_tail() -> None:
@@ -1125,7 +1226,7 @@ def _oracle_t30_error_frac(cfg, rep, sim, scene, gain_db: float):
     # from the guard; leaving it here put the wrong definition next to the right one
     # as a template for the next test to copy (AC-69).
     peak = torch.amax(env, dim=2) - rep.min_db          # (C, n_bands)
-    headroom = float(peak[:, rep._headroom_band_idx].min())
+    headroom = float(peak[:, rep.headroom_band_indices].min())
     oracle = rep.decode(env, low)
 
     triples, _reasons, _window, _acct = compute_room_acoustic_metrics(

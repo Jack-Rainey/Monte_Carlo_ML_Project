@@ -1029,6 +1029,97 @@ modules in the repo follow that convention — they are §4.6 and §4.3).
 
 ---
 
+## SECOND FIX PASS — closing the in-lane reviewer findings
+
+Everything below was raised by the self-check passes above and is now RESOLVED in
+lane M's own files. Suite **537 passed, 1 skipped**; A/B still bit-identical.
+
+### AC-100 / AC-106 — CLOSED by a code change, not a caveat
+
+The first pass documented the clamped fold's placement error. That was the wrong
+resolution: a distorted number was still reaching a reported metric. Now
+`_iso3382_band_metrics` REFUSES a record shorter than its band's guard width and
+returns NaN with a reason naming the guard, the width in ms, and the measured
+30.2 % edge concentration. The third option — neither the old silent 29.7 % discard
+nor a clamped approximation, but "unmeasurable, and it says so".
+
+The guard width is now `_filter_guard_samples(fc, sample_rate)`, ONE definition
+shared by the filter that applies it and the check that enforces it, rather than the
+literal appearing twice (the AC-24 shape).
+
+VERIFIED INERT: shortest post-onset W record over the canonical run's 58 scene-legs
+is 10981 samples against guards of 4608 / 2304, and the A/B is unchanged. Pinned by
+`test_a_record_shorter_than_one_guard_width_is_unmeasurable_not_approximated`, which
+also asserts a record AT the bound is still measurable, so it is a boundary and not
+a blanket refusal.
+
+### F-144 — CLOSED, and running the controls exposed a WORSE defect
+
+**(a) The AC-28 placement test did not discriminate at all.** Running the missing
+control — reverting `dry_run.py`'s direct arrival to the pre-AC-28 one-pole
+envelope — the test PASSED. Measured on the reverted scaffold: C50 still monotone,
+swing **23.41 dB**. The swing is delivered by the room-constant TAIL SCALING
+(RD-75), not by the arrival being broadband, so both my assertions were testing
+something AC-28 is not about.
+
+Replaced with AC-28's own second consequence, which does discriminate: with a
+one-pole envelope the global peak sits INSIDE the diffuse tail, violating
+`_find_onset`'s documented AC-07 assumption that the direct sound is the loudest
+arrival. Control now fails: *"the loudest sample is at index 286, 6 samples INTO the
+diffuse tail rather than at the direct arrival (280)"*. The C50 assertions are kept
+with a comment stating plainly that they do NOT discriminate and why.
+
+**(b) The 1/f test is NOT decoration** — it needed a mutation on the right axis.
+Filter ORDER leaves `f·T30` invariant (which is why `butter2` and single-pass
+`sosfilt` both passed it), but a fixed-Hz bandwidth breaks it: `f·T30` spans
+**10.51-63.52** and the test fails. Control recorded.
+
+### RR-115 (major) — CLOSED
+
+`_butter_octave_filter` 89 → 78 lines (docstring 72 → 61); `_band_energy` 85 → 56.
+Cut throughout: the narration of what previous versions of each comment said, which
+reviewer caught it, and what the old code did. Every MEASUREMENT is kept, and the
+retraction is kept to one sentence rather than a post-mortem. History lives here, in
+this inbox, which already holds all of it.
+
+### RR-116 … RR-126 — all CLOSED
+
+- **RR-116**: `configs/base.yaml`'s `iso_eval_freqs` now declares that the set is
+  written twice, names the mirror, and names the test that forbids drift — the arm
+  of the AC-24 guard that was silent.
+- **RR-117 / RR-118**: the AC-38 suppression table has a header and no ragged row
+  (re-derived, both error columns present); both calibration tables state that
+  headroom is in dB and that "native" differs in kind from "last OK"/"breach".
+- **RR-119**: `_band_resolvable_decay_s` no longer claims to be the ONE place the
+  floors are written down — it names `_DECLARED_FLOORS_48K` as the second site and
+  says change both together. The stale quartet is gone from the source docstring.
+- **RR-120**: the dangling `RD-182` citation is replaced with the row that exists.
+- **RR-121**: all four "see the inbox row" pointers now name RD-186/RD-187/RD-190.
+- **RR-122**: the test asserts `_SR == 48000` before comparing against a constant
+  whose name promises 48 kHz; `_DECLARED_STOPBAND_DB` documents that the bound
+  applies on both sides.
+- **RR-123**: `_headroom_band_idx` → `_headroom_band_indices`, exposed as a public
+  `headroom_band_indices` property whose docstring says WHY it is public — any probe
+  reproducing the guard must use this exact operand, which is how F-135 happened.
+- **RR-124**: the AC-70 correction is two flat sentences, not a nested parenthetical.
+- **RR-125**: `_shared_truncation_per_band` moved out of "Public API" into
+  "Internal, but load-bearing to the paired path (private — do not import)".
+- **RR-126**: `room_acoustic.py` and `spectrogram.py` now cite paper §4.6 and §4.3,
+  matching the convention five other modules already follow.
+
+### F-139 / F-140 / F-141 / F-142 — CLOSED (see the falsifier section for each)
+
+### STILL OPEN after this pass, and why
+
+| row | why it cannot close in lane M |
+|---|---|
+| AC-102 | anchor is `docs/review_ledger.md` (AC-28's remedy text) — integrator's file |
+| AC-101 | the substantive defect is that the ORIGINAL calibration named no population; restating mine does not fix that record. Config now carries the correct framing |
+| F-143 | filter order needs a `config.py` field — lane P (`extra: forbid`) |
+| RD-186, RD-187, RD-188..RD-192 | all spanning or other-lane by construction |
+
+---
+
 ## GATE ACCOUNTING (RD-128)
 
 **Lane M carried zero blockers and ten majors**: AC-26, AC-28, AC-37, AC-36, AC-65,

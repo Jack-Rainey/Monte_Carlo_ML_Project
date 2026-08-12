@@ -4,6 +4,8 @@ Third-octave log power spectrogram representation (v1).
 encode: (C, T) → (C, n_bands, n_frames) log energy in dB
 decode: impose predicted envelope on low-ray carrier (D3, band-by-band rescaling)
 loss:   Huber on log-band-energy (δ is O(1) in dB → resolves H2)
+
+Implements the banded learning representation of `docs/research_I_paper.md` §4.3.
 """
 from __future__ import annotations
 
@@ -263,7 +265,11 @@ class ThirdOctaveSpectrogram:
         #: not matching justification — relocated from the band axis to the CHANNEL
         #: axis by the edit that fixed the band axis.
         #:
-        #:     scene         native   last OK   breach   err at breach
+        #: headroom = worst per-band peak above min_db, in dB, over the guard's
+        #: bands AND channels. "native" is the scene's own level; "last OK" and
+        #: "breach" are swept levels.
+        #:
+        #:     scene       native dB   last OK dB   breach dB   T30 err at breach
         #:     scene_0005      74.8      43.8     42.8       6.0 %
         #:     scene_0006      74.9      46.9     45.9       5.2 %
         #:     scene_0016      71.0      45.0     44.0       5.3 %
@@ -352,7 +358,7 @@ class ThirdOctaveSpectrogram:
         #: sole cross-cutting argument, and threading `iso_eval_freqs` through would
         #: touch `data/preprocess.py`, `training/infer.py` and `diagnostics/probe.py`
         #: — three files in two other lanes. Retiring it in favour of a derived
-        #: operand is filed as a spanning row.
+        #: operand is filed as spanning row RD-187.
         min_db_headroom_octave_centres_hz: list[float]
 
     # Per-channel third-octave log band-energy in dB (the banded-rep contract).
@@ -386,7 +392,7 @@ class ThirdOctaveSpectrogram:
         )
         self.center_freqs = self.band_description["center_freqs_hz"]
         self._window = torch.hann_window(n_fft)
-        self._headroom_band_idx = self._resolve_headroom_bands()
+        self._headroom_band_indices = self._resolve_headroom_bands()
 
     def _resolve_headroom_bands(self) -> list[int]:
         """Ladder-band indices the headroom guard reads: those inside the union of
@@ -417,6 +423,17 @@ class ThirdOctaveSpectrogram:
     @property
     def n_bands(self) -> int:
         return self._filter_bank.shape[0]
+
+    @property
+    def headroom_band_indices(self) -> list[int]:
+        """Ladder-band indices the AC-37 headroom guard reads.
+
+        Public because it is a CROSS-FILE CONTRACT, not an implementation
+        detail: any probe reproducing the guard's headroom must use this exact
+        operand or it measures a different statistic — which is how F-135
+        happened. `tests/test_metrics.py` reads it for precisely that reason.
+        """
+        return list(self._headroom_band_indices)
 
     def describe_bands(self) -> dict:
         """The band structure plus a MEASURED in-band energy fraction per band.
@@ -499,7 +516,7 @@ class ThirdOctaveSpectrogram:
         # spectral-flatness test decided by a low single-FFT-bin band, while the
         # threshold beside it is calibrated on oracle T30 — a 500/1000 Hz OCTAVE
         # quantity of the decoded waveform. See `min_db_headroom_octave_centres_hz`.
-        bands = self._headroom_band_idx
+        bands = self.headroom_band_indices
         operand = headroom[:, bands]
         flat = int(torch.argmin(operand))
         worst_c, worst_j = divmod(flat, operand.shape[1])

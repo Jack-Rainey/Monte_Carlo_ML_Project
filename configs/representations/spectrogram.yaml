@@ -43,7 +43,11 @@ min_db: -80.0
 # defect was AC-37-R4's own — operand not matching justification — relocated from
 # the band axis to the CHANNEL axis by the very edit that fixed the band axis.
 #
-#   scene         native   last OK   breach   err at breach
+#   headroom = worst per-band peak above min_db, in dB, over the bands the guard
+#   reads and over channels. "native" is the scene's own level; "last OK"/"breach"
+#   are swept levels.
+#
+#   scene         native dB   last OK dB   breach dB   oracle T30 err at breach
 #   scene_0005      74.8      43.8     42.8       6.0 %
 #   scene_0006      74.9      46.9     45.9       5.2 %
 #   scene_0016      71.0      45.0     44.0       5.3 %
@@ -104,7 +108,7 @@ min_db_headroom_db: 52.0
 # containment: over-coverage is the defect being fixed). It exists only because
 # `build_representation` takes sample_rate as its sole cross-cutting argument, so
 # the rep cannot see the master config; retiring it for a derived operand is filed
-# as a spanning row in the lane-M inbox.
+# as spanning row RD-187 in the lane-M inbox.
 min_db_headroom_octave_centres_hz: [500.0, 1000.0]
 
 # ── The fractional-octave ladder (AC-19) ──────────────────────────────────────
