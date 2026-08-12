@@ -48,7 +48,19 @@ it is built right, in three non-overlapping senses.
 ## Review ledger and definition of done
 
 `docs/review_ledger.md` holds ONLY unresolved findings — it is working memory for
-the loop, not an audit log. Resolved findings are DELETED, never marked resolved:
+the loop, not an audit log.
+
+**It says what still needs doing. It is not a record of how anything was done.**
+No integration records, no fold write-ups, no per-pass verdict summaries, no
+corrections to your own earlier claims, no narration of what a cycle did. If a
+fact matters durably it belongs in `docs/design_spec.md`; if it does not, it
+belongs nowhere. Cycle 5 ended with 898 of 1264 ledger lines being prose of
+exactly this kind, and 108 rows that changed no behaviour and meant nothing to
+a reader deciding what to work on.
+
+**A finished thing is DELETED, not marked OPEN.** A row whose fix is applied is
+gone. If the fix turns out to be wrong, a reviewer raises it fresh — that is
+what the loop is for, and it is cheaper than carrying a claim indefinitely. Resolved findings are DELETED, never marked resolved:
 the git history of the file is the audit trail, so nothing is lost and stale rows
 do not accumulate to confuse later sessions.
 

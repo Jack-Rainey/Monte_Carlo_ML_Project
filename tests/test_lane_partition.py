@@ -41,7 +41,7 @@ SHARED_AUTHORITY = ("docs/review_ledger.md", "CLAUDE.md", "docs/design_spec.md")
 #: in docs/lanes/ as the record of what was planned, and describe a ledger state
 #: that no longer exists — asserting them against today's ledger would fail for
 #: being history rather than for being wrong.
-_CURRENT_CYCLE = "cycle5"
+_CURRENT_CYCLE = "cycle6"
 
 
 def _partitions():
@@ -819,6 +819,13 @@ def test_unassigned_holds_only_rows_this_cycles_fold_created(path: Path, spec: d
 
     unassigned = set(spec.get("unassigned", []))
     if not unassigned:
+        return
+    # Before a lane reports, `unassigned:` is the INBOUND backlog a cycle is drawn
+    # against — carried-forward rows, legitimately. F-212's hazard is a FOLD that
+    # parks pre-existing rows there to make the coverage identity look total, and
+    # a fold only happens after lanes report. So the provenance constraint applies
+    # from the moment any inbox exists, and not before.
+    if not any((_REPO_ROOT / lane["inbox"]).exists() for lane in spec["lanes"]):
         return
 
     # `awaiting_re_review:` is a STATUS bucket and may legitimately hold rows the

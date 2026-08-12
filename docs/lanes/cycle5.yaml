@@ -299,7 +299,6 @@ serial_queue:
   - {id: AC-56, reason: "ITEM 0 — C6, with AC-54"}
   - {id: AC-66, reason: "ITEM 0 — C6, air absorption; AC-54's remedy does not reach it"}
   - {id: AC-67, reason: "ITEM 0 — C6, the source-derived confirmation and its two caveats"}
-  - {id: RD-144, reason: "ITEM 0 — the absorption convention belongs in the BACKEND's config"}
   - {id: AC-64, reason: "ITEM 0b — re-measure the truncation index with the artifact RETAINED"}
   - {id: AC-58, reason: "ITEM 0b — the gain-invariance half needs no render and fails today"}
   - {id: F-89, reason: "ITEM 0b — C5, with AC-58/AC-64/RD-55"}
@@ -324,11 +323,7 @@ serial_queue:
   - {id: F-M6, reason: "ITEM 5 — C4, narrowed half"}
   - {id: RD-126, reason: "ITEM 6 — C9 accounting machine, with RD-142/F-103/RD-148/RD-149"}
   - {id: RD-142, reason: "ITEM 6 — C9"}
-  - {id: F-103, reason: "ITEM 6 — C9"}
   - {id: RD-148, reason: "ITEM 6 — C9"}
-  - {id: RD-149, reason: "ITEM 6 — C9"}
-  - {id: RD-147, reason: "ITEM 6 — C9, this file's own shape"}
-  - {id: RD-146, reason: "ITEM 6 — C9, repopulate awaiting_re_review"}
   - {id: RR-80, reason: "ITEM 7 — the inbox-emptying data-loss instruction (already applied; confirm)"}
 
 integrator_queue:
@@ -337,9 +332,6 @@ integrator_queue:
   - {id: RD-69, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: F-65, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: AC-41, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RR-32, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RR-33, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RR-43, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: AC-50, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RD-111, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RD-128, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
@@ -347,14 +339,8 @@ integrator_queue:
   - {id: F-M4, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: F-M5, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: F-M8, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: AC-28-B2, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RD-94, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RD-97, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RD-100, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RD-109, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RD-110, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: AC-46, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RR-58, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RD-113, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: S-2, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: AC-49, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
@@ -366,22 +352,13 @@ integrator_queue:
   - {id: F-83, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: F-97, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: AC-61, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RR-73, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RR-79, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RD-127, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RD-130, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RD-131, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RD-132, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RD-133, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RD-134, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RD-135, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RD-136, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RD-145, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RR-81, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RR-82, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RR-86, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RR-87, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
-  - {id: RR-88, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
 
 
 # Raised BY research-director reviewing the cycle-5 INTEGRATION plan, before any
@@ -390,11 +367,9 @@ integrator_queue:
 # home for them — they are findings about this file, not about the code.
 raised_against_this_partition:
   [
-  AC-175, AC-176, AC-177, AC-184, AC-185, AC-178, AC-180, AC-181, AC-182, AC-183, F-215,
-  F-216, F-217, F-218, F-219, F-220, F-221, RD-250, RD-251, RD-252, RD-253,
-  RD-254, RD-255, RD-256, RD-257, RD-258, RD-259, RD-260, RD-261,
-  RD-263, RD-265, RD-267, RD-268, RD-269, RD-270, RD-271, RD-272, RD-273,
-  RD-274, RR-191, RR-192, RR-193, RR-194, RR-197, RR-198, RR-199, RR-200
+  AC-175, AC-176, AC-178, AC-180, AC-181, AC-182, AC-183, AC-184, AC-185,
+  F-215, F-216, F-217, F-218, F-219, F-220, F-221, RD-250, RD-251, RD-252,
+  RD-253, RD-254, RD-255, RD-257, RD-263, RD-265, RD-267
 ]
 
 # THE FIFTH LIST (RD-146). These 142 rows were CREATED BY THIS CYCLE'S FOLD, so
@@ -413,17 +388,15 @@ raised_against_this_partition:
 # CYCLE 6 READS BOTH. `awaiting_re_review` rows need a reviewer VERDICT, not a
 # second fix stacked on an unchecked first. `unassigned` rows are real work.
 awaiting_re_review: [
-  AC-76, AC-77, AC-105, AC-107, F-115, F-124, F-139, F-210, F-211, F-214,
-  RD-191, RD-202, RD-264, RD-266, RR-24, RR-115, RR-119, RR-121, RR-142,
-  RR-152
+  AC-105, F-211
 ]
 
 unassigned: [
-  AC-75, AC-78, AC-81, AC-83, AC-85, AC-101, AC-102, AC-104, AC-108, AC-109,
-  AC-127, AC-128, AC-129, AC-131, AC-132, AC-150, F-110, F-116, F-117, F-118,
-  F-122, F-123, F-143, F-160, F-161, F-162, F-166, F-167, F-185, F-186,
-  RD-151, RD-152, RD-153, RD-155, RD-156, RD-157, RD-158, RD-186, RD-187,
-  RD-188, RD-189, RD-190, RD-192, RD-200, RD-201, RD-203, RD-204, RD-205,
-  RD-207, RD-225, RD-226, RD-227, RR-91, RR-92, RR-97, RR-104, RR-106,
-  RR-143, RR-145, RR-149, RR-150, RR-154, RR-165
+  AC-09, AC-15, AC-16, AC-75, AC-78, AC-81, AC-83, AC-85, AC-101, AC-104,
+  AC-108, AC-109, AC-127, AC-128, AC-129, AC-131, AC-132, AC-150,
+  AC-19-value, F-06, F-110, F-116, F-117, F-118, F-122, F-123, F-143, F-160,
+  F-161, F-162, F-166, F-167, F-185, F-186, RD-04, RD-12, RD-14, RD-15,
+  RD-17, RD-23, RD-27, RD-28, RD-29, RD-38, RD-41, RD-46, RD-52, RD-151,
+  RD-152, RD-153, RD-158, RD-186, RD-187, RD-188, RD-189, RD-190, RD-200,
+  RD-201, RD-207, RD-227
 ]
