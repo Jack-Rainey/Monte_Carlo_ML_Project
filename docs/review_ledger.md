@@ -407,6 +407,94 @@ into protocol gate step 4).
 ---
 ## Resume here
 
+**2026-08-12 — CYCLE 5 INTEGRATED. NOT COMPLETE. Read this whole section before planning cycle 6.**
+
+Suite **607 passed, 12 skipped**. A/B reference: `experiments/cycle5_baseline`
+(pristine `92939e3`) vs `experiments/cycle5_merged`, both `ci_table.csv` sha256
+`74651cd26663fcc911979d9a7b9ddd8d97433ef4376fd829d35e6277d6f23052` —
+**but read F-218 before treating that as clearance.**
+Plan: `~/.claude/plans/spicy-napping-pixel.md` (research-director: DRIFTING, 14
+findings, all folded — `RD-250`…`RD-263`).
+
+### Gate status
+
+| step | state |
+|---|---|
+| 1 merge four lanes | **DONE** — zero textual conflicts, second cycle running |
+| 3 full suite | **DONE** — 607 passed, 12 skipped |
+| 4 dry run + fixed-seed A/B | **DONE, and its power is now in question — F-218 (blocker)** |
+| 5 fold inboxes | **DONE** — 144 inbox findings → 142 rows, machine-verified |
+| 6 four-reviewer pass | **PARTIAL, NOT CLEAN** — `falsifier` + `research-director` ran: 23 findings incl. 1 blocker |
+| 2 serial + integrator queue | **PARTIAL** — ITEMS 6 and 7 done; ITEM 0's render-free half done, its FIX not; ITEMS 1-5 and the 48-row integrator queue untouched |
+| 7 delete confirmed rows | **CORRECTLY NOT DONE** — the pass was not clean. **Zero rows deleted.** |
+
+### The four things cycle 6 must not meet cold
+
+**1. ITEM 0's FIX IS THE WHOLE JOB, AND IT IS PRE-LANE SERIAL WORK (RD-265).**
+Its render-free half is done and produced the strongest evidence in three cycles
+that the declared population is not renderable at ISO fidelity — F-186's own
+precursor shows a T60 = 8.294 s room in a 4.25 s record returns **T30 = 6.3868 s
+(+22.99 %) at 500 Hz with `nan_reason=None` and `resolvability=None`**: a
+plausible number, silently, for a room whose decay is twice its record. But the
+FIX did not land. It spans `gsound_sir.py` + `configs/simulators/**` (lane B),
+`scenes/generator.py` (lane S) and `configs/base.yaml` (lane M), so **no lane can
+host it** — deferring it into a partition defers it to the END of cycle 6, after
+four lanes spend a cycle on a population whose absorption convention is known
+wrong. C11 is already recorded as gated on C6. **Land it on `v3-rebuild` before
+drawing the partition.** The branch is decided (RD-144, now recorded in AC-54's
+own cell): the convention is a declared property of the BACKEND, applied at its
+own `createbox` call site; `generator.py` stays nominal-α.
+
+**2. THE RENDER GRANT IS 6 SCENES, 0 SPENT (RD-267).** Extended by the user
+2026-08-12; RD-17's permission clause carries the allocation and the order. The
+order is binding — ITEM 0's fix changes the population the later scenes measure,
+so RD-17's three come AFTER it (RD-251). Condition (ii) lifts on a 3-scene
+TOLERANCE CHECK against a config-declared key, not a CI-backed convergence claim
+(RD-263).
+
+**3. RD-33a CONDITION (i) REGRESSED, AND THE OFTEN-CITED BLOCKERS ARE THE WRONG
+ONES (RD-255).** On-path blocker/major went **20 → 29** (2 blocker + 27 major).
+`F-75` and `F-81` are **off** the path list and block it by ZERO. The two live
+on-path blockers are **AC-54 and AC-64**, both in ITEM 0 / ITEM 0b. Caveat
+RD-268: 29 is a PRE-step-7 count taken while 82 rows claim an unverified fix, so
+the direction is established and the magnitude is not.
+
+**4. THE STEP-4 INTERFERENCE DETECTOR IS NOT THE CLEARANCE IT HAS BEEN READ AS
+(F-218, blocker).** The canonical dry run uses `simulator: dry_run`, so lane B's
+entire changed surface never executes; records are 0.25 s, so C5/C6 truncation
+cannot manifest; and there is a DEMONSTRATED blindness — `min_db_headroom_db`
+moved 50.0 → 52.0, an experiment-governing scene-acceptance threshold, and the
+A/B reported "no change". Applies to cycles 4 and 5 retroactively. Report step 4
+per lane, over the files that run.
+
+### Accounting
+
+- **Ledger 219 → 398 OPEN** (+18 DEFERRED). +142 fold, +14 plan review, +23
+  integration reviewers. **Zero deleted**, correctly.
+- `docs/lanes/cycle5.yaml` buckets, machine-derived (RD-264):
+  `awaiting_re_review` **82** · `unassigned` **67** ·
+  `raised_against_this_partition` **30** · plus the serial and integrator queues.
+  Cycle 6 reads the first two differently: `awaiting_re_review` rows need a
+  reviewer VERDICT, never a second fix stacked on an unchecked first.
+- **A row count is not a work estimate.** The clusters section still governs.
+
+### What cycle 6 should be (research-director's recommendation, accepted)
+
+Pre-lane serial: land ITEM 0, then spend the 6 scenes in the registered order.
+Then four lanes with `exit_gate: required`, and **ONE MERGED METRIC LANE** owning
+`evaluation/** + representations/** + acoustics.py + stats/** + reporting/**`
+(RD-274) — under today's split, cluster C7 spans two lanes forever, so the column
+that gates AC-38 (on-path major) can never close in any lane, which is why it has
+sat in an integrator queue no cycle has ever drained.
+
+### Still owed by THIS gate
+
+`acoustics-reviewer` and `readability-reviewer` had not reported when this note
+was written; step 6 is therefore incomplete on its own terms. Step 7 stays at
+zero deletions until a pass comes back clean.
+
+---
+
 **2026-08-11 — cycle 4 (four parallel lanes) MERGED AND FOLDED. NOT COMPLETE.**
 HEAD after this commit; suite **497 passed**; `experiments/cycle4_baseline` is the A/B
 reference. Plan: `~/.claude/plans/peppy-swinging-barto.md`, reviewed by
