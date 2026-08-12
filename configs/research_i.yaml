@@ -192,7 +192,7 @@ scenes:
     # has shown the rendered effective absorption is 1-sqrt(1-alpha) and therefore
     # moves both corners. Stated here as well as in base.yaml because this is the
     # config that claims Research-I faithfulness, and correcting only base.yaml
-    # would leave the two disagreeing (AC-30 / AC-50, RD-182).
+    # would leave the two disagreeing (AC-30 / AC-50; disclosure half RD-189).
     interior_random:
       type: interior
       corner_frac: null

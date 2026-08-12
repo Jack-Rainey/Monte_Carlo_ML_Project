@@ -722,6 +722,10 @@ rather than a judgement call, so the correction improved the plan anyway.
 | RD-186 | builder (lane M) | minor | OPEN | `configs/base.yaml` + `src/amcd/config.py` | AC-68's remedy asks for a "config-declared rejection" threshold, which cannot be done in one lane: `configs/base.yaml` is lane M's but its schema is `src/amcd/config.py` (lane P) with `extra: forbid`, so a new key fails validation. Shipped instead as `_DECLARED_STOPBAND_DB` in `tests/test_metrics.py`, argued as a declared property of the filter design rather than an experiment-governing value. Rule-4 spanning row; also the config-contention case `docs/parallel_protocol.md` documents. | Integrator: add the schema field and move the mapping (octaves-out -> min rejection dB) into base.yaml, or ratify the test-pinned form and close AC-68's config clause. |
 | RD-187 | builder (lane M) | minor | OPEN | `src/amcd/representations/base.py:63` (`build_representation`) | `min_db_headroom_octave_centres_hz` is a SECOND declaration of the evaluation band set (`iso_eval_freqs` is the first) — the AC-24 divergence shape, admissible only while `test_the_headroom_guard_reads_exactly_the_reported_metric_bands` forbids the drift. It exists solely because `build_representation` takes `sample_rate` as its only cross-cutting argument, so a representation cannot read the master config; threading `iso_eval_freqs` through would touch `data/preprocess.py` and `training/infer.py` (lane P) and `diagnostics/probe.py` (lane S). | Integrator/next cycle: give `build_representation` the evaluation band set as a second cross-cutting argument and derive the guard's operand, retiring the duplicate declaration. |
 
+| F-143 | falsifier (lane M) | minor | OPEN | `src/amcd/evaluation/room_acoustic.py` `_butter_octave_filter` (`butter(4, ...)`) + `src/amcd/config.py` | The octave filter's ORDER is an experiment-governing literal. This module's own docstring argues the order sets the ringing `_band_resolvable_decay_s` measures, so steeper skirts buy selectivity with a longer unresolvable floor — a research trade that decides which bands carry the AC-38 caveat into reported metrics. CLAUDE.md allows CLI, config, or raise; it is currently a literal. Rule-4 spanning row (the schema is lane P's, `extra: forbid`). NOTE: `_DECLARED_FLOORS_48K` and `_DECLARED_STOPBAND_DB` were explicitly CLEARED as legitimate regression pins on measured outputs — the defect is the INPUT that produces them, and pinning the output in a test makes the literal harder to notice, not easier. | Integrator/lane P: add a `metric_octave_filter_order` field and declare it in base.yaml, or state in the docstring why the order is fixed by the ISO band definition rather than tunable. |
+| F-144 | falsifier (lane M) | minor | OPEN | `tests/test_metrics.py` `test_the_placement_axis_moves_c50_through_the_iso_path`, `test_the_resolvability_floors_scale_as_one_over_f` | Lane M claimed every new test carries a negative control; two do not. (a) The AC-28 placement test's discriminating mutation is reverting `dry_run.py`'s broadband direct arrival to the pre-AC-28 one-pole envelope, and it was never run — `dry_run.py`'s diff this cycle is comment-only, so nothing exercised it. (b) `test_the_resolvability_floors_scale_as_one_over_f` survives BOTH a 2nd-order filter and a single-pass `sosfilt`, so `f*T30` may be near-invariant to filter order, in which case the test asserts something the design cannot violate. | (a) run the one-pole revert as a control and record the result; (b) find a mutation that breaks 1/f scaling (e.g. a fixed-Hz rather than fractional-octave bandwidth) or delete the test as decoration. |
+| RD-192 | falsifier (lane M) | minor | OPEN | `docs/parallel_protocol.md` (the lane reporting sequence) | A lane's pre-registration currently lands in the SAME commit as the code and the results, so git provides no evidence it preceded the edits — which is the one thing a pre-registration is for. Lane M's says "Timestamped by its commit: this entry is the first commit on lane/M-cycle5"; there is exactly one commit and it contains everything. Not repairable retroactively. | Add to the protocol's lane sequence: commit the pre-registration ALONE as the first commit on the lane branch, before any code change. One line, and it makes the claim checkable by `git log --diff-filter` rather than by trust. |
+
 ## FINDINGS FOR OTHER LANES — anchored, not actionable here
 
 | ID | anchor (owning lane) | finding |
@@ -730,6 +734,298 @@ rather than a judgement call, so the correction improved the plan anyway.
 | RD-189 | `src/amcd/scenes/generator.py` (lane S) | AC-30's disclosure half: the realized below-d_min fraction per split (25.4 % of id, 42.5 % of `test_material_shift` by Sabine; 37.2 % / 92.5 % by Eyring) belongs in `placement_report.json` beside the existing `d_over_rc` summary, carrying the same "nominal α; pending AC-54" caveat (RD-131). |
 | RD-190 | `src/amcd/diagnostics/probe.py:256,262` (lane S); `src/amcd/reporting/tables.py` (lane P) | AC-43's artifact half: the D0a/D0b artifacts and the E1 report must state that the placement axis exercises C50 but NOT EDT under the scaffold (EDT non-monotone, ~1.5 % spread over a 16x distance range against C50's 9.9 dB). Same anchors carry RD-96's D0b resolvability-policy divergence. |
 | RD-191 | `docs/lanes/cycle5-M.md:21`; `docs/lanes/cycle5.yaml` (integrator) | The partition's premise "only the metric lane may legitimately move `ci_table.csv`" is false by construction: lane P owns `stats/**` and `reporting/**` — the code that WRITES the table — and the serial queue's F-M2 requires ADDING a column to it; lane S owns `scenes/generator.py`, whose placement/admission sampling moves every fixed-seed downstream number. It held empirically in cycle 4 but is a property of those lanes' declarations, not of the partition, so lane M's non-interference control depends on three other lanes declaring and honouring "none". |
+
+---
+
+## SELF-CHECK REVIEWER PASS — falsifier
+
+**Self-check on `lane/M-cycle5`, NOT a clean pass** (rule 5). Ids F-135..F-143 from
+lane M's block. Several attacks FAILED and are recorded as such below, because a
+refuted attack is evidence too.
+
+### F-135 (major) — MY RE-CALIBRATION WAS RUN IN THE WRONG MEASUREMENT SPACE
+
+`scratchpad/c4_calib.py` built the simulator with `n_channels=1`. **The pipeline
+renders 16**, and the shipped guard takes the min over channels *and* bands. The
+1-channel render is not the pipeline's channel 0 (`np.allclose(ir_nc1[0], disk[0])`
+is False; at `n_channels=16` it is True), so every figure I shipped was measured on
+a statistic the pipeline never computes.
+
+REPRODUCED by re-running my own sweep with `n_channels=cfg.n_channels` and the
+SHIPPED resolver (`rep._headroom_band_idx`) instead of a locally rebuilt mask:
+
+```
+   scene         native   last OK   breach   err at breach
+   scene_0005      74.8      43.8     42.8       6.0 %
+   scene_0006      74.9      46.9     45.9       5.2 %
+   scene_0016      71.0      45.0     44.0       5.3 %
+   scene_0017      73.3      43.3     42.3      29.8 %
+   scene_0018      73.7      46.7     45.7       5.0 %
+
+   worst breach 45.9 dB (I published 50.8); tightest last-OK 43.3 (I published 43.0)
+```
+
+**This is AC-37-R4's own defect — operand not matching justification — relocated
+from the band axis to the CHANNEL axis by the very edit that fixed the band axis.**
+
+The VALUE survives: 52.0 still exceeds the worst breach, now with **6.1 dB of
+cushion rather than the 1.2 dB I claimed**. Every NUMBER beside it did not: the
+headline "**8 dB inversion**" is really **2.6 dB**. Both the yaml and the `Params`
+docstring are restated in the shipped statistic, with the superseded sweep named as
+superseded.
+
+### F-140 (minor) — the native-headroom range I published was also from that space
+
+Claimed "every valid scene carries 72.0-81.8 dB". MEASURED over all 29 canonical
+renders through the shipped operand: **65.42-80.15 dB dataset-wide, 67.52-77.36 on
+`valid`**, nearest scene **13.42 dB** above the threshold. Corrected.
+
+### F-136 (major) — my CAUSAL ATTRIBUTION for AC-101 is REFUTED
+
+I wrote that the margin calibration's discrepancy was caused by the AC-36/F-67 fold
+moving the floors (AC-65's drift). Re-running the identical protocol against the OLD
+pre-AC-36 floors gives +6.23 / +4.53 / +3.82 / +3.17 % against my +5.91 / +4.15 /
++3.63 / +2.97 %. **The floor drift accounts for 0.32 pp of the 6.9 pp gap at margin
+1.0 — about 5 %.** The stated mechanism cannot explain the observation. The config
+now says so and leaves the remainder unattributed rather than offering a second
+guess.
+
+### F-137 (major) — "does not reproduce" was an overreach
+
+Holding seed, N, code path and duration rule fixed and changing ONLY the true-T60
+grid: my grid gives the JND crossing between margin 1.0 and 1.5; grid 0.015-0.10 s
+never crosses by margin 3.0; grid 0.05-1.0 s never crosses at ANY margin including
+0. **The conclusion is a property of `np.geomspace(0.015, 0.30, 14)`, not of the
+estimator**, and that grid lived only in a scratchpad file. I am entitled to "under
+this stated population I measure X" and not to "does not reproduce". Restated, with
+all three grids published so the sensitivity is visible. The real defect stands and
+is sharper than what I first wrote: **the original calibration named no population,
+so it cannot be checked at all.**
+
+My own duration-rule worry was tested and **FAILED as an attack** — `4*T60` and
+`max(8*T60, 0.5)` move the figures by 0.3-0.4 pp. The duration rule does not create
+the bias.
+
+### F-138 (major) — the pre-registration has no timestamp evidence
+
+It asserts "Timestamped by its commit: this entry is the first commit on
+`lane/M-cycle5`". It is not: there is **one** commit, `895c050`, containing the
+pre-registration, all eight code/config files and the results together. Git provides
+zero evidence the declaration preceded the edits — and the pre-registration's own
+sentence ("the declaration is worthless written afterwards") is exactly why that
+matters. It WAS written first, but the stated warrant is absent, which for this
+project is the same as not having one.
+
+**Cannot be repaired retroactively.** The protocol fix, for every lane next cycle:
+**commit the pre-registration ALONE, as the first commit, before touching code.**
+Recorded against `docs/parallel_protocol.md` as RD-192.
+
+### F-141 / F-142 / F-139 (minor) — all accepted and fixed
+
+- **F-141**: the F-M3 slope test promised "the slope is real" in a comment and
+  asserted nothing, so it would go vacuous the moment the cutoff or render level
+  moved. It now pins the stimulus from both sides: the all-band min must be BELOW
+  the threshold (so the old operand would have rejected it) and the ISO-band min
+  ABOVE it (so it really is a slope outside the metric bands).
+- **F-142**: 52.0 is a **sample** bound (n=5, sd 1.65 dB, sample max + 6.1 dB), not
+  a population bound, and the config stated it as the latter. Now stated as a sample
+  bound with its sd.
+- **F-139**: a stale "42.6 dB of headroom, against the shipped 50 dB" in
+  `_check_min_db_headroom`'s docstring — both halves stale, and measured under the
+  old all-band operand at n=1. The AC-65 drift pattern, reintroduced by me. Marked
+  as not comparable, pointing at the current table.
+
+### F-143 (minor, OPEN — spanning) — the filter ORDER is a hidden default
+
+`butter(4, ...)` in `_butter_octave_filter` is a literal, and my own new docstring
+argues the order "sets the ringing `_band_resolvable_decay_s` measures — steeper
+skirts buy selectivity with a longer unresolvable floor, a research trade". A
+research trade that decides which bands carry the AC-38 caveat into reported metrics
+is an experiment-governing value, and CLAUDE.md allows only CLI, config, or raise.
+Making it config-governed needs a field in `src/amcd/config.py` (lane P), so this is
+a rule-4 spanning row — same shape as RD-186. The falsifier explicitly cleared
+`_DECLARED_FLOORS_48K` and `_DECLARED_STOPBAND_DB` as legitimate regression pins on
+measured OUTPUTS; the defect is the INPUT that produces them.
+
+### Attacks that FAILED — recorded, because they bound what is still standing
+
+- **No test leakage in the calibration.** Only the five `valid` scenes are read;
+  splits verified disjoint across all 29 scenes.
+- **"Err toward rejecting is itself a selection effect" — FAILS.**
+  `src/amcd/data/preprocess.py` calls `rep.encode` and contains **no `except`
+  anywhere**, so an over-rejection ABORTS the run loudly; it cannot silently drop
+  scenes or bias surviving split composition. Worth a test pinning that, filed as
+  part of RD-188's neighbourhood.
+- **The oracle IS definitionally perfect.** T30 error at native level with no gain:
+  0.00-0.06 % across the five scenes at both n=1 and n=16. No carrier-dependent
+  error floor is being misattributed to `min_db`.
+- **No scaffold, platform or path coupling** anywhere in `evaluation/**`,
+  `representations/**` or `simulators/dry_run.py`.
+- **All five config combinations still load** with the new required key — adding it
+  orphaned no config.
+- **AC-38's disclose-beats-suppress result survived every attack** across all three
+  T60 grids and both duration rules; it is a mechanical consequence of one-sided
+  censoring.
+- **Negative controls all discriminate**, verified independently. Two BONUS controls
+  I had not run: `butter2` also fails the AC-65 floor pin, and single-pass `sosfilt`
+  fails the floor pin AND the −6 dB edge test — so those have teeth I had not shown.
+
+### My claim D was OVERSTATED — two tests still have NO negative control
+
+I said "every new test has one". Two do not:
+- `test_the_placement_axis_moves_c50_through_the_iso_path` (AC-28) — the mutation
+  that would catch it is reverting the scaffold's broadband direct arrival to the
+  pre-AC-28 one-pole envelope, and I never ran it. `dry_run.py`'s diff this cycle is
+  comment-only, so nothing exercised it.
+- `test_the_resolvability_floors_scale_as_one_over_f` — survives BOTH `butter2` and
+  single-pass `sosfilt`. `f·T30` may be near-invariant to order, in which case the
+  test asserts something the design cannot violate and is decoration.
+
+Both filed as **F-144** below rather than quietly left.
+
+---
+
+## SELF-CHECK REVIEWER PASS — acoustics
+
+**Self-check on `lane/M-cycle5`, NOT a clean pass** (rule 5). Ids AC-103..AC-109
+from lane M's block. Claims 3, 6, 7 and 8 CONFIRMED (floors reproduce exactly;
+AC-102's physics is right and the closed form gives C50 = +5.803 dB at d = r_c with
+a +1.469 dB asymptote; BT > 16 arithmetic exact at 353.55 Hz → 45.25 ms vs 40.72;
+the d_min volume-independence identity and AC-60's spreading law both verified).
+
+### AC-103 — MY CLAIM 2 IS REFUTED, AND I HAVE RETRACTED IT
+
+**I declared a ~2.2 dB convention bias on reported absolute C50 that does not
+exist.** The `sosfilt` comparator I measured against is not a fair reference: it is
+causal, so its 1.85 ms group delay at 500 Hz pushes energy past the 50 ms split, and
+in a short-T60 room the late window is nearly pure ringing so the error explodes.
+What I reported as the fold's bias was the comparator's.
+
+INDEPENDENTLY REPRODUCED before accepting (known answer: direct impulse + white
+exponential tail, for which the ideal band C50 equals the broadband C50 — no filter
+in the reference at all; n=200, 500 Hz, DRR 20 dB):
+
+```
+   true T60      0.300    0.100   0.0758    0.050    0.030   s
+   folded - true +0.066   +0.214   +0.276   +0.311   -0.363  dB
+   causal - true -0.506   -1.531   -2.056   -3.310   -6.855  dB
+```
+
+The zero-phase path tracks truth to within ~0.4 dB everywhere. My reported max of
++2.2294 dB is the T60 = 0.0758 s row's `folded - causal`, i.e. entirely the
+comparator's error.
+
+Two corollaries, both accepted:
+- the **+96.60 % / +93.32 %** measurement is real but was mis-framed. An onset
+  arrival's FULL band energy landing post-onset is what causality requires; the
+  **interior** impulse is the artifact, since `filtfilt` non-causally puts half its
+  energy before the arrival. The fold is doing the right thing.
+- "monotone in direct-dominance, therefore not common-mode across scenes" is
+  **mis-derived**. At fixed T60 the delta is flat in DRR (+0.505 vs +0.535 dB at
+  T60 0.30). It is monotone in **T60**, which co-varied with α across my corner
+  sweep — I confounded the two.
+
+`_butter_octave_filter`'s KNOWN RESIDUAL paragraph is rewritten: the fold is
+ACCURATE, the bias claim is retracted, and the known-answer table above replaces the
+causal comparison. **This is the most consequential thing the self-check caught** —
+the false caveat sat in the metric-source-of-truth module and was headed for the
+paper as a stated limitation that would have made absolute C50 unreadable at exactly
+the short-T60 corners `test_material_shift` selects.
+
+### AC-104 (major) — a FALSE PROPERTY I pinned by a test NAME
+
+`room_acoustic.py` claimed "adjacent bands are power-complementary at the crossover,
+so energy is conserved across the decomposition", and my test was named
+`..._and_power_complementary` while asserting only the −6 dB edges. VERIFIED — the
+squaring is precisely what BREAKS complementarity:
+
+```
+   crossover   single-pass |H|^2 sum   shipped zero-phase |H|^4 sum
+     353.6 Hz         1.00000               0.50000  (-3.010 dB)
+     707.1 Hz         1.00000               0.50000
+    1414.2 Hz         1.00000               0.50000
+    2828.4 Hz         1.00000               0.50000
+```
+
+Fixed: the docstring now states the bank is NOT power-complementary, and the test is
+renamed and now ASSERTS the crossover sum is 0.5 — so a drift toward 1.0 (which
+would mean the filtering became single-pass and reintroduced a group delay into EDT)
+fails. Nil consequence today (bands are averaged, never summed); live under AC-63.
+
+### AC-105 (accepted, fixed) — my declared floor was unsafe
+
+The excluded ladder bands are NOT out of band for the octave filter: 315.0 Hz
+carries −17.40 dB of the 500 Hz octave metric's weight, 1587.4 Hz −17.38 dB of the
+1000 Hz octave's. An excluded band pinned at `min_db` moves the 1000 Hz T30 by
++0.1 % at 52 dB headroom, +1.1 % at 40, **+4.4 % at 35, +91.7 % at 30**. So the
+shipped 52.0 is safe, but the docstring's "35 dB is the floor of what any declared
+value may permit" breaches `d0b_t30_jnd_frac` on leakage alone. Corrected to ~52,
+derived as 35 + 17.4. **Restricting the operand is confirmed the right call**; my
+bound was simply not stated.
+
+### AC-106 (accepted, fixed) — two overstated statements about the clamp
+
+The trade is right ("you do not have the trade backwards") but: (a) `np.minimum`
+sends LEADING-pad energy to the LAST sample and `np.maximum` sends TRAILING-pad
+energy to the FIRST — the far end from the arrival, not "the nearest in-record
+sample" in any physical sense; at n_record = 32 the last sample holds 30.24 % of
+band energy and T30 reads 0.00706 s against 0.00336 s. (b) My "< 96 ms" bound is the
+CLAMPING region, not the HARM region — fold/reference is 1.0002 at n=512 and 1.0266
+at n=128, so it bites materially only below ~128 samples. **C50 is never at risk**:
+any record that short already has `split >= trunc_idx` and C50 is NaN. Comment
+corrected on all three points.
+
+### AC-107 / AC-108 (accepted, fixed)
+
+"60 dB+" is IEC 61260 **class 2**'s far-stopband minimum; class 1 is ~70 dB, and at
+one octave out this filter fails **class 2 as well** — so "not class 1" understated
+it. Also the realized band is ~0.9 octave: ENBW **317.46 Hz against a nominal
+353.55**. Both now declared.
+
+---
+
+## SELF-CHECK REVIEWER PASS — readability
+
+**Self-check on `lane/M-cycle5`, NOT a clean pass** (rule 5). 2 major, 10 minor,
+no blocker. Ids from lane M's `RR-115..139` block. Two are verified below because
+they land on claims I made in this very file.
+
+**RR-115 (major) — I RE-FILLED THE DOCSTRING I WAS ASKED TO COMPRESS.** RR-38 was
+raised because `_butter_octave_filter` was a bug-report transcript; my rewrite for
+F-68-R2 and AC-68 made it worse. VERIFIED mechanically: **74 docstring lines on ~10
+code statements**. The measured tables earn their place; the narration of what a
+previous version of the docstring said does not — that is RR-38's exact shape,
+reintroduced by the edit meant to remove it. Same pattern in `_band_energy`'s fold
+comment, `configs/base.yaml`'s margin block (which quotes the refuted sentence
+verbatim), and both `spectrogram` files. **The history belongs HERE, in this inbox,
+which already holds all of it.**
+
+**RR-120 (minor) — a DANGLING LEDGER ID that I introduced.**
+`configs/research_i.yaml:195` cites `RD-182`, which resolves in neither
+`docs/review_ledger.md` nor this inbox. VERIFIED: the only occurrence in the repo is
+that one line. Cause: the plan said the plan-review findings would be filed as
+RD-175..185; I folded them into the work instead (correctly — they were discharged)
+but left one citation behind. A citation that resolves to nothing is worse than
+none.
+
+Remaining minors, all accepted: **RR-116** (`configs/base.yaml`'s `iso_eval_freqs`
+is the FIRST declaration of the band set and is silent about the second — only one
+arm of the AC-24 guard is legible, and it is the arm a researcher is likelier to
+edit); **RR-117 / RR-118** (two measured tables are not unambiguously readable —
+RR-45's shape: a header-less table with a ragged row, an unitless mean, an
+interleaved two-column layout, and a calibration table whose dB unit is only
+recoverable from prose two paragraphs down); **RR-119** (`_band_resolvable_decay_s`
+still claims to be "THE ONE PLACE THOSE VALUES ARE WRITTEN DOWN" while
+`_DECLARED_FLOORS_48K` now writes them down again — the stated invariant is false as
+written, and it is false *because of* my AC-65 fix); **RR-121** (seven "see the inbox
+row" pointers that name no row); **RR-122** (`_DECLARED_FLOORS_48K` promises 48 kHz
+but the test passes `_SR` with nothing asserting it equals 48000);
+**RR-123** (`_headroom_band_idx` — list named singular, read across files as a
+private attribute); **RR-124** (the AC-70 correction narrates the error as a nested
+parenthetical instead of stating the fact); **RR-125** (the module's "Public API"
+section lists the private `_shared_truncation_per_band`); **RR-126** (neither
+`room_acoustic.py` nor `spectrogram.py` cites its paper section, though five other
+modules in the repo follow that convention — they are §4.6 and §4.3).
 
 ---
 
@@ -793,3 +1089,58 @@ now rather than discovered at the merge.
 
 **This is a SELF-CHECK on `lane/M-cycle5`, NOT a clean pass.** The reviewer pass
 that counts is the integrator's over the merged tree.
+
+---
+
+## ACOUSTICS-REVIEWER PASS — self-check on `lane/M-cycle5` (NOT a clean pass)
+
+Reviewed the CURRENT state of `evaluation/room_acoustic.py`,
+`representations/spectrogram.py`, `simulators/dry_run.py`, `acoustics.py`,
+`configs/base.yaml`, `configs/representations/spectrogram.yaml`,
+`tests/test_metrics.py`, `tests/test_filterbank.py`. Every number below was
+re-measured on this checkout with
+`PYTHONPATH=/Volumes/T7/Monte_Carlo_Research/v3-lane-M/src`.
+
+`ID | source | severity | status | anchor | finding | resolution`
+
+| ID | source | sev | status | anchor | finding | resolution |
+|---|---|---|---|---|---|---|
+| AC-103 | acoustics-reviewer | major | OPEN | `src/amcd/evaluation/room_acoustic.py:153-181` | The KNOWN RESIDUAL paragraph declares a "+0.0122 to +2.2294 dB (mean +0.7280) MAGNITUDE BIAS on the early window" on absolute C50, attributed to the zero-phase convention. Against a KNOWN ANSWER (direct impulse + white exponential tail, so the ideal band C50 equals the broadband C50), the folded zero-phase path is accurate to **+0.09/-0.16 dB** at every T60 from 0.30 s down to 0.05 s, while the CAUSAL `sosfilt` reference reads **-0.47 dB (T60 0.30 s), -2.13 dB (T60 0.0758 s), -3.41 dB (T60 0.05 s), -7.04 dB (T60 0.03 s)** LOW. The declared delta IS the comparator's bias. Cause: the causal filter's 1.85 ms group delay at 500 Hz plus its one-sided ringing push energy past the 50 ms split, and in a short-T60 room the late window is nearly pure ringing so the effect explodes. The attribution "monotone in direct-dominance ... common-mode across LEGS but NOT across SCENES" is also mis-derived: at fixed T60 the delta is flat in DRR (+0.505 dB at DRR 20 vs +0.535 at DRR 0; +2.079 vs +2.095 at T60 0.0758) — it is monotone in T60, which co-varies with alpha across the corner sweep. | RETRACT the paragraph's bias claim. Re-state as: the fold restores causality at the onset boundary and reproduces the true C50 to <0.2 dB; a causal `sosfilt` comparator is NOT a valid reference for C50 and its own bias is what was measured. Replace the sweep with the known-answer test in the CONFIRMING TEST column. |
+| AC-104 | acoustics-reviewer | major | OPEN | `src/amcd/evaluation/room_acoustic.py:136-138`; `tests/test_metrics.py:725-751` | FALSE PHYSICAL CLAIM: "adjacent bands are power-complementary at the crossover, so energy is conserved across the decomposition". Measured over the 125-8000 Hz octave ladder: the SINGLE-PASS bank is power-complementary (sum of \|H\|^2 = 1.00004-1.00012 at every crossover), but the SHIPPED zero-phase bank sums \|H\|^4 = **0.50000 (-3.010 dB) at every crossover** — the squaring is exactly what BREAKS complementarity. White-noise energy recovered across the ladder span: **0.8935 (zero-phase) vs 0.9936 (single-pass)**, i.e. 10.6 % of the signal falls in no band. The test named `test_the_octave_filter_edges_are_minus_six_db_and_power_complementary` asserts ONLY the -6 dB edges; it never measures complementarity, so a false property is pinned by a name and a docstring rather than by an assertion. | Delete the complementarity/energy-conservation clause from the docstring and the test name+docstring, or add the assertion and watch it fail. No consequence for today's reported metrics (bands are averaged, never summed), but it is live under AC-63 per-band absorption and under any future band recombination. |
+| AC-105 | acoustics-reviewer | major | OPEN | `src/amcd/representations/spectrogram.py:281-283`, `:292-333`, `:477-482`; `configs/representations/spectrogram.yaml` (`min_db_headroom_db`) | Restricting the AC-37-R4 guard's operand to the reported ISO span is the physically RIGHT call, but it opens an unstated leakage path and the docstring's declared MINIMUM admissible threshold is unsafe. The ladder bands the guard now excludes are not out of band for the octave filter: measured coupling into the reported octave metric (weight = sum of \|H_oct\|^4 over each ladder band's FFT bins) is **315.0 Hz -> -17.40 dB of the 500 Hz octave's weight** and **1587.4 Hz -> -17.38 dB of the 1000 Hz octave's**, i.e. only 13.2-13.5 dB below the strongest contributing band. Guard-covered fraction of each octave's weight: 0.9818 / 0.9817. End to end, with `pred` inheriting the PHYSICAL legs' shared Schroeder window (AC-17, so no Lundeby cut of its own), a 1587 Hz band pinned at `min_db` alone moves the 1000 Hz octave T30 by **+0.1 % at headroom 52 dB, +0.3 % at 45, +1.1 % at 40, +4.4 % at 35, +91.7 % at 30** — every one of those rows PASSES the guard by construction. The shipped 52.0 is therefore safe, but the docstring's own stated floor — "T30 regresses the EDR over -5 to -35 dB, so **35 dB** of genuine range is the floor of what any declared value may permit" — crosses `d0b_t30_jnd_frac` (0.05) on out-of-span leakage alone between 35 and 40 dB. | Restate the floor as ~52 dB, not 35, and derive it: `min_db_headroom_db >= 35 + 17.4` (the T30 window plus the measured out-of-span coupling). Add the sweep above as a regression test. Do NOT widen the operand back — the correct operand is by FILTER OVERLAP weight, not by band centre. |
+| AC-106 | acoustics-reviewer | minor | OPEN | `src/amcd/evaluation/room_acoustic.py:274-287` | The clamped fold is the right trade (conservation over silent loss — reproduced: `folded/full = 1.000000000000000` in float64 at n_record ∈ {32,64,512,24000} x {500,1000} Hz; old form 0.7029 at n=32/500 Hz), but the comment mis-describes where the energy lands and how far the residual reaches. (a) "placed at the nearest in-record sample" is true only in mirror-index space: `np.minimum(guard+k, last)` sends LEADING-pad energy to the **last** sample and `np.maximum(last-k, guard)` sends TRAILING-pad energy to the **first** — the opposite end from the arrival it belongs to, which is the maximally EDR-biasing position. Measured, unit impulse at sample 0, 500 Hz: at n_record=32 the last sample carries **30.24 %** of the band's total energy and is **24.0x** its neighbour; T30 reads 0.00706 s against 0.00336 s for the same signal in a long record (2.1x). (b) the stated bound "< 96 ms at 500 Hz" is the clamping region, not the harm region: fold/reference energy is 1.0266 at n=128 and 1.0002 at n=512, so the material distortion is confined to n_record <~ 128 samples (2.7 ms). C50 is NOT at risk — any such record has `split >= trunc_idx` and C50 is already NaN — so the answer to "does clamping distort C50's early window worse than dropping" is NO. | Correct the two statements. Add a known-answer test at n_record ∈ {32, 64, 128}: T30/EDT from a short record must match the same signal measured in a long record within a declared tolerance, or the short-record branch must raise/NaN. Today a physical leg at n_record=32 REPORTS a 2.1x-inflated T30 as a scored number carrying only the AC-38 resolvability caveat. |
+| AC-107 | acoustics-reviewer | minor | OPEN | `src/amcd/evaluation/room_acoustic.py:138-143` | The class-1 gap is UNDERSTATED and the classes are conflated: "IEC 61260-1 class 1 requires far more (its far-stopband minimum is on the order of 60 dB+)". 60 dB is the CLASS 2 far-stopband minimum; class 1 is 70 dB (class 0, 75 dB). Also, one octave out corresponds to normalized frequency Omega = (2 - 1/2)/(2^0.5 - 2^-0.5) = 2.121 and two octaves to Omega = 5.303, where class 1 asks for roughly 44 dB and 70 dB respectively. Measured here (reproduced exactly): -37.43/-38.49 dB one octave out at 500 Hz, -46.59/-47.33 two octaves. The filter therefore fails class 2 as well as class 1, which the declaration does not say. | Restate with the correct class-1 figure and add "and does not meet class 2 either". Verify the exact Table-1 entries against the standard text before publishing the number. |
+| AC-108 | acoustics-reviewer | minor | OPEN | `src/amcd/evaluation/room_acoustic.py:135-137`; `configs/base.yaml:240-245` | "the -6 dB band edges are right" is a mechanism, not a correctness property, and one consequence is not declared: because `sosfiltfilt` squares \|H\|^2, the REALIZED band is narrower than an octave. Measured at 48 kHz: 500 Hz band effective -3 dB span **366.2-682.8 Hz (316.6 Hz wide)** against nominal 353.6-707.1; effective noise bandwidth **317.46 Hz vs the nominal 353.55** (-10.2 %); 1000 Hz band 634.96 vs 707.11 Hz. Under IEC 61260 the -3 dB points belong AT the band edges, so this is a second departure alongside the rejection. It also moves AC-26-R6's arithmetic: BT > 16 against the REALIZED bandwidth needs T > **50.40 ms** at 500 Hz (25.20 ms at 1000), so the shipped 40.72 ms floor is more permissive than ISO 3382-2's guidance by **9.68 ms**, not the 4.54 ms the config states from the nominal B = 353.55 Hz. | Declare the realized ENBW beside the -6 dB edges. Keep the nominal-B figure in base.yaml (it is the right quantity for the standard's own rule) but add the realized-B figure so the gap is not understated. |
+| AC-109 | acoustics-reviewer | minor | OPEN | `src/amcd/acoustics.py:19`; `configs/base.yaml:143-144` | Single-source-of-truth drift on a fixed acoustic constant (the AC-24 shape, small). `SABINE_K = 0.161` is the ROUNDED constant, but the d_min corners quoted in base.yaml reproduce only with the exact `24 ln 10 / 343 = 0.1611138`. Recomputed from the code's own `SABINE_K` over every declared geometry x material corner: **Sabine [0.412, 5.714] m, Eyring [0.417, 11.417] m**, against the declared [0.412, 5.712] / [0.417, 11.413]. 0.03 %, physically irrelevant, but the config quotes a number the code cannot produce. | Either set `SABINE_K = 24 * math.log(10) / 343.0` (and state c), or recompute the config's corners from `SABINE_K` as shipped. Also declare WHICH c the `2*sqrt(V/(cT))` reduction uses — `SABINE_K` embeds 343, `dry_run` declares 343.0, gsound is documented as 344. |
+
+### Claims re-derived and CONFIRMED (no finding)
+
+| Claim | Verdict | Evidence measured on this tree |
+|---|---|---|
+| 1 — fold conservation exact; old form lost 29.7 % at n=32 | **CONFIRMED** | float64 end to end: `folded/full = 1.000000000000000` at 500/1000 Hz, n ∈ {32,64,512,24000}; old form 0.7029 (500 Hz, n=32). Clamping is defensible — see AC-106 for the two mis-statements. |
+| 3 — AC-65 floors and 1/f scaling | **CONFIRMED exactly** | 500 Hz T30 20.3597 / EDT 9.5561 ms; 1000 Hz 10.1619 / 4.8018 ms; f*T30 = 9.880-10.183 across 125-4000 Hz. |
+| 4 — measured rejection table; NOT class 1 | **CONFIRMED** | Reproduced to 0.01 dB: 500 Hz -46.59 / -37.43 / -6.00 / -0.00 / -6.01 / -38.49 / -47.33; 1000 Hz -49.59 / -40.29 / -6.01 / -0.00 / -6.01 / -41.36 / -50.48. Not class 1 — see AC-107/AC-108 for two refinements. |
+| 6 — AC-28's prescribed test is invalid for C50 | **CONFIRMED; AC-102 is legitimate** | Closed form for direct + diffuse exponential tail, `C50 = 10 log10((D + 1 - A)/A)` with `D = (r_c/d)^2` and `A = exp(-0.050/tau)`, `tau = T60/(6 ln 10)`. At 10x8x3.5 m, alpha 0.2 (T60 0.7881 s, r_c 1.1927 m, A 0.4162) it reproduces the measured table: +11.782/+6.830/+3.535/+2.085/+1.631 dB at d = 0.5/1/2/4/8 m, deltas -4.951/-3.295/-1.450/-0.453 per doubling (measured -4.88/-3.23/-1.38/-0.41). **C50 at d = r_c is +5.803 dB and the d -> inf floor is +1.469 dB — C50 cannot cross 0 in this room and cannot fall 6 dB/doubling**, because the 50 ms early window holds the direct arrival PLUS `1 - A` of the tail. 6 dB/doubling and 0-at-r_c are DRR properties; the scaffold does satisfy them in DRR by construction (`dry_run.py:162-180`). |
+| 7 — BT > 16 arithmetic, B = 354 Hz for the 500 Hz octave | **CONFIRMED** | B = fc/sqrt2 = 353.55 Hz; 16/B = 45.25 ms; shipped floor 2.0 x 20.3597 = 40.72 ms; more permissive by 4.54 ms. 354 Hz is the right nominal bandwidth. See AC-108 for the realized-B refinement. |
+| 8 — d_min volume-independence; AC-60 spreading | **CONFIRMED** | `2*sqrt(V/(cT))` == `2*sqrt(alpha*S/(c*K))` to 4 dp at 3x3x2.4, 6x5x3 and 12x10x5 m (1.0084 / 1.6547 / 3.1616). AC-60: 10log10((1/(1+d^2))/(1/d^2)) = -3.01 / -1.60 / -0.97 / -0.17 / -0.04 dB at d = 1 / 1.5 / 2 / 5 / 10 m — exact. (The upstream `gsSoundPropagator.cpp` form itself is not verifiable in this tree.) |
+| Checklist 1 — ambisonics | **CLEAN** | `n_channels = (ambisonics_order + 1)^2` (`config.py:725`); reported scalars read `ir[0]` only (`room_acoustic.py:805, 817`); ch 0 is W under both ACN/N3D and ACN/SN3D, so the reported path is convention-independent. |
+| Checklist 3 — Schroeder direction | **CLEAN** | `np.cumsum(e[::-1])[::-1]` at `room_acoustic.py:299` and `:1043` — backward, correct. No forward integration anywhere. |
+| Checklist 4 — ISO windows | **CLEAN** | C50 split `ceil(0.050*fs)` = 2400 exact; early `[0, 2400)`, late `[2400, trunc)`; T30 fits -5 to -35 dB with `-60/slope`; EDT fits 0 to -10 dB; onset at -20 dB in POWER (`10**(rel_db/10)`), which is ISO 3382-1's start-of-response. |
+| Checklist 5 — decode path | **CLEAN** | `evaluator.py:103-114` loads `<scene>_decoded_ir.npy` and calls `compute_room_acoustic_metrics`; the energy-domain helpers are unreferenced by eval. |
+
+### Confirming tests (reproduce or kill)
+
+* **AC-103 (the one that matters):** direct impulse of amplitude A at n=0 plus white
+  noise x `exp(-6.908 t/T60)`, 48 kHz, 1 s, ensemble of 200. The ideal band C50
+  equals the broadband C50 because both components are white. Sweep T60 ∈ {0.30,
+  0.10, 0.0758, 0.05, 0.03} s x DRR ∈ {20, 0} dB and compare `_band_energy`'s C50,
+  a `sosfilt` C50 and the broadband truth. If the folded path is within ~0.2 dB
+  and the causal one is 0.5-7 dB low, the declared bias is the comparator's.
+* **AC-104:** sum `|H_fc|^4` over the 125-8000 Hz octave ladder at 176.8, 353.6,
+  707.1, 1414.2, 2828.4 Hz. Power-complementary means 1.0; measured 0.5000.
+* **AC-105:** the headroom sweep in the row — a 1587 Hz third-octave band pinned at
+  `min_db` added to a 1000 Hz-octave decay whose in-span peak sits `H` dB above
+  `min_db`, both legs sharing the CLEAN leg's Lundeby index.
+* **AC-106:** `_band_energy` of a unit impulse at sample 0 for n_record ∈ {32, 64,
+  128, 512, 24000} at 500 Hz; check `e[-1]/e.sum()` and T30 against the long-record
+  reference.

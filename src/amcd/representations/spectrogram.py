@@ -252,34 +252,57 @@ class ThirdOctaveSpectrogram:
         #: perfect oracle `decode(encode(high), low)` through the REPORTED path, so
         #: it inherits the physical legs' shared Schroeder window (AC-17/RD-43) —
         #: given its own Lundeby cut the oracle truncates the injection away and the
-        #: defect hides entirely.
+        #: defect hides entirely. Verified definitionally perfect: at native level
+        #: the oracle's T30 error is 0.00-0.06 % across all five scenes, so there is
+        #: no carrier-dependent error floor being misattributed to `min_db`.
+        #:
+        #: STATISTIC: 16 channels, min over channels AND over the operand bands —
+        #: exactly what `_check_min_db_headroom` computes. An earlier version of this
+        #: table was swept at n_channels=1, which is NOT the pipeline's channel 0 and
+        #: moved every figure by 1.7-4.9 dB (F-135): AC-37-R4's own defect — operand
+        #: not matching justification — relocated from the band axis to the CHANNEL
+        #: axis by the edit that fixed the band axis.
         #:
         #:     scene         native   last OK   breach   err at breach
-        #:     scene_0005      81.8      51.8     50.8       6.0 %
-        #:     scene_0006      72.0      43.0     42.0       6.7 %
-        #:     scene_0016      75.0      48.0     47.0       5.5 %
-        #:     scene_0017      78.2      48.2     47.2       6.1 %
-        #:     scene_0018      77.3      49.3     48.3       6.3 %
+        #:     scene_0005      74.8      43.8     42.8       6.0 %
+        #:     scene_0006      74.9      46.9     45.9       5.2 %
+        #:     scene_0016      71.0      45.0     44.0       5.3 %
+        #:     scene_0017      73.3      43.3     42.3      29.8 %
+        #:     scene_0018      73.7      46.7     45.7       5.0 %
         #:
-        #: NO SINGLE SCALAR IS SIMULTANEOUSLY TIGHT AND SAFE, and by more than the
-        #: previous version of this docstring admitted. Rejecting every breaching
-        #: scene needs > 50.8 dB; admitting every scene that still measures within
-        #: JND needs <= 43.0 dB. Those are CONTRADICTORY — an 8 dB inversion, not
-        #: the "1 dB window" claimed before. Scene-dependence is ~9 dB here and was
-        #: ~8 dB in the old all-band operand (same scenes breached at 31.0-39.0 dB
-        #: there), so restricting the operand did not make the criterion SHARPER —
-        #: it made it CORRECT, which is a different and weaker claim, stated as such.
+        #: NO SINGLE SCALAR IS SIMULTANEOUSLY TIGHT AND SAFE. Rejecting every
+        #: breaching scene needs > 45.9 dB; admitting every scene that still measures
+        #: within JND needs <= 43.3 dB. Those are CONTRADICTORY — a 2.6 dB inversion.
+        #: Restricting the operand did not make the criterion SHARPER — it made it
+        #: CORRECT, which is a different and weaker claim, stated as such.
         #:
-        #: The shipped 52.0 errs toward REJECTING, above the worst breach at 50.8,
+        #: The shipped 52.0 errs toward REJECTING, 6.1 dB above the worst breach,
         #: because the two errors are not symmetric: a false positive fails loudly
-        #: at preprocess, while a false negative is a silently wrong reported ISO
-        #: metric that surfaces as an apparent model failure. It ALSO rejects scenes
-        #: carrying 43.0-52.0 dB that would still have measured within JND — the
-        #: accepted cost, and zero in practice today, since every valid scene holds
-        #: 72.0-81.8 dB at its native level.
+        #: at preprocess (`data/preprocess.py` catches nothing, so it aborts the run
+        #: rather than silently dropping a scene — which is what stops over-rejection
+        #: becoming a selection effect on the surviving population), while a false
+        #: negative is a silently wrong reported ISO metric that surfaces as an
+        #: apparent model failure.
         #:
-        #: Physical reading: T30 regresses the EDR over -5 to -35 dB, so 35 dB of
-        #: genuine range is the floor of what any declared value may permit.
+        #: A SAMPLE BOUND, NOT A POPULATION BOUND (F-142): n=5, sd 1.65 dB, 52.0 is
+        #: the sample max + 6.1 dB. Accepted cost is that scenes at 43.3-52.0 dB
+        #: would have measured within JND and are refused anyway — zero in practice,
+        #: since native headroom over all 29 canonical renders is 65.42-80.15 dB
+        #: (67.52-77.36 on `valid`), 13.42 dB clear of the threshold.
+        #:
+        #: Physical reading, CORRECTED (AC-105): T30 regresses the EDR over -5 to
+        #: -35 dB, so 35 dB of genuine range is necessary — but it is NOT sufficient,
+        #: and a declared value of 35 would be unsafe. The ladder bands this guard
+        #: EXCLUDES are not out of band for the octave filter that computes the
+        #: metric: the 315.0 Hz band still carries -17.40 dB of the 500 Hz octave
+        #: metric's weight, and 1587.4 Hz carries -17.38 dB of the 1000 Hz octave's.
+        #: An excluded band pinned at `min_db` therefore leaks into a reported
+        #: metric: measured end to end, a 1587 Hz band on the floor moves the
+        #: 1000 Hz T30 by +0.1 % at 52 dB of headroom, +1.1 % at 40, +4.4 % at 35
+        #: and +91.7 % at 30 — so 35 breaches `d0b_t30_jnd_frac` on leakage alone.
+        #: The floor for any declared value is ~52 dB, derived as 35 + 17.4.
+        #: The shipped 52.0 satisfies it; that it also matches the calibration above
+        #: is a coincidence worth not relying on.
         #:
         #: The calibration is against the SCAFFOLD's level convention
         #: (`direct = 1/d`, room-constant tail). A real gsound render sets absolute
@@ -449,7 +472,9 @@ class ThirdOctaveSpectrogram:
         corrupts the band average even where the broadband peak looks healthy.
         Measured on a definitionally perfect oracle: a scene 30 dB below its native
         level reads T30 2.1959 s against its target's 0.9681 s — a 126.8 % error —
-        at 42.6 dB of headroom, against the shipped 50 dB.
+        at 42.6 dB of headroom — but note that figure was measured under the
+        pre-AC-37-R4 all-band operand at n_channels=1, so it is not comparable to the
+        shipped threshold; the current calibration is the table in `Params`.
 
         Raises rather than clamps. A representation cannot know whether a quiet
         scene is a modelling choice or a mis-scaled render, and silently returning

@@ -36,28 +36,41 @@ min_db: -80.0
 # defect is visible at all); record the headroom at which T30 first breaches
 # d0b_t30_jnd_frac.
 #
+# MEASURED IN THE SHIPPED DECISION STATISTIC — 16 channels, min over channels AND
+# over the operand bands, i.e. exactly what `_check_min_db_headroom` computes. An
+# earlier version of this table was swept at n_channels=1 and is superseded: that is
+# not the pipeline's channel 0 and it moved every figure by 1.7-4.9 dB (F-135). The
+# defect was AC-37-R4's own — operand not matching justification — relocated from
+# the band axis to the CHANNEL axis by the very edit that fixed the band axis.
+#
 #   scene         native   last OK   breach   err at breach
-#   scene_0005      81.8      51.8     50.8       6.0 %
-#   scene_0006      72.0      43.0     42.0       6.7 %
-#   scene_0016      75.0      48.0     47.0       5.5 %
-#   scene_0017      78.2      48.2     47.2       6.1 %
-#   scene_0018      77.3      49.3     48.3       6.3 %
+#   scene_0005      74.8      43.8     42.8       6.0 %
+#   scene_0006      74.9      46.9     45.9       5.2 %
+#   scene_0016      71.0      45.0     44.0       5.3 %
+#   scene_0017      73.3      43.3     42.3      29.8 %
+#   scene_0018      73.7      46.7     45.7       5.0 %
 #
-# NO SINGLE SCALAR IS SIMULTANEOUSLY TIGHT AND SAFE, and by more than the previous
-# comment admitted. Rejecting every breaching scene needs > 50.8; admitting every
-# scene that still measures within JND needs <= 43.0. Those are CONTRADICTORY — an
-# 8 dB inversion, not the "1 dB window" claimed before. The breach point is
-# scene-dependent by ~9 dB in this operand (and by ~8 dB in the old all-band one:
-# the same scenes breached at 31.0-39.0 dB there, so restricting the operand did
-# not make the criterion sharper — it made it CORRECT, which is a different claim).
+# NO SINGLE SCALAR IS SIMULTANEOUSLY TIGHT AND SAFE. Rejecting every breaching scene
+# needs > 45.9; admitting every scene that still measures within JND needs <= 43.3.
+# Those are CONTRADICTORY — a 2.6 dB inversion. (An earlier version of this comment
+# said 8 dB, from the n=1 sweep.) Restricting the operand did not make the criterion
+# SHARPER — it made it CORRECT, a different and weaker claim.
 #
-# 52.0 therefore errs toward REJECTING, above the worst breach at 50.8. The two
-# errors are not symmetric: a false positive fails loudly at preprocess, a false
-# negative is a silently wrong reported ISO metric that surfaces later looking like
-# a model failure. The accepted cost is that scenes carrying 43.0-52.0 dB would
-# have measured within JND and are refused anyway. That cost is ZERO in practice
-# today — every valid scene carries 72.0-81.8 dB at its native level, so ~20 dB of
-# margin separates the guard from normal operation.
+# 52.0 errs toward REJECTING, 6.1 dB above the worst breach at 45.9. The two errors
+# are not symmetric: a false positive fails loudly at preprocess (`data/preprocess.py`
+# calls `encode` and catches nothing, so an over-rejection ABORTS the run rather than
+# silently dropping a scene — which is what keeps over-rejection from becoming a
+# selection effect on the surviving population), while a false negative is a silently
+# wrong reported ISO metric that surfaces later looking like a model failure.
+#
+# THIS IS A SAMPLE BOUND, NOT A POPULATION BOUND (F-142). n=5, breach headrooms
+# {42.3, 42.8, 44.0, 45.7, 45.9}, sd 1.65 dB; 52.0 is the sample max + 6.1 dB. It is
+# not a guarantee about unseen scenes.
+#
+# Accepted cost: scenes carrying 43.3-52.0 dB would have measured within JND and are
+# refused anyway. Zero in practice today — measured over all 29 canonical dry-run
+# renders through the shipped operand, native headroom is 65.42-80.15 dB dataset-wide
+# (67.52-77.36 on `valid`), so the nearest scene sits 13.42 dB above the threshold.
 #
 # Calibrated against the SCAFFOLD's level convention, so it must be re-measured at
 # the dataset-render gate, where a real render sets level from source_power and

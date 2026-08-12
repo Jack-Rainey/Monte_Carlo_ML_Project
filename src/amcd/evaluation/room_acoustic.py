@@ -110,75 +110,73 @@ def _butter_octave_filter(
     response (no group-delay offset in EDT). Returns (filtered, guard), the guard
     still attached — `_band_energy` owns what happens to it.
 
+    Implements the octave-band decomposition of `docs/research_I_paper.md` §4.6
+    (background §3.1.7).
+
     THE PAD IS EXPLICIT ZEROS AT BOTH ENDS, NOT scipy's DEFAULT (AC-36). An impulse
-    response is silent before its direct arrival and its surroundings are 0.0 at
-    both ends, so that is what the filter must see. Neither scipy default supplies
-    it: `padtype="odd"` reflects about the first sample (420x the 500 Hz band's
-    in-band energy, ~23 dB on C50); `padtype="constant"` replicates the EDGE sample,
-    giving a record ending at full scale a DC tail (-25.5 % band energy). Padding
-    with explicit zeros first makes "constant" replicate 0.0, correct at both ends.
+    response is silent before its direct arrival and its surroundings are 0.0 at both
+    ends, so that is what the filter must see. `padtype="odd"` reflects about the
+    first sample (420x the 500 Hz band's in-band energy, ~23 dB on C50) and
+    `padtype="constant"` replicates the EDGE sample (-25.5 % band energy on a record
+    ending at full scale); padding with explicit zeros makes "constant" replicate 0.0.
 
     The guard scales as 1/fc because the filter's ringing does;
-    `_band_resolvable_decay_s` measures that ringing and is the ONE place its values
-    are written down (RR-39).
+    `_band_resolvable_decay_s` measures that ringing and, with
+    `_DECLARED_FLOORS_48K` in tests/test_metrics.py, is one of the only two sites
+    those values are written down (RR-39) — change both together.
 
-    REALIZED SELECTIVITY — DECLARED, AND IT IS NOT IEC 61260 CLASS 1 (AC-68).
-    ISO 3382-1 specifies octave filters conforming to IEC 61260 class 1. This one
-    does not, and until AC-68 nothing in `src/`, `configs/` or `docs/` said so
-    while the module docstring called this "the standard ISO-3382 path". MEASURED
-    through `_band_energy` with a pure tone, in dB re the tone's total energy:
+    REALIZED SELECTIVITY — DECLARED, AND IT MEETS NO IEC 61260 CLASS (AC-68/AC-107).
+    ISO 3382-1 specifies IEC 61260 class 1. MEASURED through `_band_energy` with a
+    pure tone, dB re the tone's total energy:
 
-        fc      -2 oct   -1 oct   lo edge   centre   hi edge   +1 oct   +2 oct
-        500 Hz  -46.59   -37.43    -6.00     -0.00    -6.01    -38.49   -47.33
-       1000 Hz  -49.59   -40.29    -6.01     -0.00    -6.01    -41.36   -50.48
+        fc        -2 oct   -1 oct   lo edge   centre   hi edge   +1 oct   +2 oct
+        500 Hz    -46.59   -37.43    -6.00     -0.00    -6.01    -38.49   -47.33
+        1000 Hz   -49.59   -40.29    -6.01     -0.00    -6.01    -41.36   -50.48
 
-    Two properties are CORRECT and worth keeping: the -6 dB band edges are right
-    (`sosfiltfilt` squares |H|², so the -3 dB points become -6 dB) and adjacent
-    bands are power-complementary at the crossover, so energy is conserved across
-    the decomposition. What is short is out-of-band REJECTION: ~-37 to -41 dB one
-    octave out, where IEC 61260-1 class 1 requires far more (its far-stopband
-    minimum is on the order of 60 dB+). Raising the filter order is NOT the remedy
-    chosen — the declaration is, because the order also sets the ringing that
-    `_band_resolvable_decay_s` measures, and trading a wider caveat for a longer
-    unresolvable floor is a research decision, not a code cleanup.
+    Class 1 wants ~70 dB in the far stopband and class 2 ~60 dB, so at one octave out
+    (~-37 to -41 dB) this filter meets NEITHER — not merely "not class 1". The order
+    is not raised, because it also sets the ringing `_band_resolvable_decay_s`
+    measures: steeper skirts buy selectivity with a longer unresolvable floor, which
+    is a research trade rather than a cleanup. Two further realized properties, both
+    measured, neither what a reader would assume:
 
-    BENIGN TODAY, LIVE UNDER AC-63. `createbox` applies ONE scalar absorption to
-    every simulated band, so every band decays alike and leakage carries no wrong
-    decay; `iso_eval_freqs` is [500, 1000], adjacent octaves. The case this matters
-    in is per-band absorption (AC-63, lane B): a steep inter-band level difference
-    would leak the loud band's decay into the quiet band's T30 at only ~38 dB down.
-    `test_the_octave_filter_meets_its_declared_stopband_rejection` pins the figures
-    above so a change of order or padding cannot move them silently.
+      * the -6 dB band EDGES are correct — `sosfiltfilt` squares |H|², so the -3 dB
+        points present as -6 dB;
+      * but that squaring BREAKS power-complementarity rather than preserving it
+        (AC-104). At every crossover the single-pass bank sums |H|² = 1.00000 while
+        the shipped zero-phase bank sums |H|⁴ = 0.50000 (-3.010 dB). The realized
+        band is also ~0.9 octave: ENBW 317.46 Hz against a nominal 353.55 (AC-108).
+        Nil consequence today — bands are AVERAGED, never summed — and live under
+        AC-63.
 
-    KNOWN RESIDUAL — A MAGNITUDE BIAS ON THE EARLY WINDOW, NOT A PLACEMENT ONE
-    (F-68, corrected by F-68-R2). `filtfilt` is non-causal, so a sample at index i
-    produces a response SYMMETRIC about i, and the half lying outside the record is
-    real in-band energy. `_band_energy` folds it back rather than discarding it, so
-    the ISO integral conserves energy and still starts at the direct arrival.
+    Benign today for leakage too: `createbox` applies one scalar absorption to every
+    simulated band, so leakage carries no wrong decay. Under AC-63's per-band
+    absorption a steep inter-band level difference would leak the loud band's decay
+    into the quiet band's T30 at only ~38 dB down.
+    `test_the_octave_filter_meets_its_declared_stopband_rejection` pins these.
 
-    An earlier version of this paragraph called the remainder a placement residual
-    and said mirroring "is exact for an isolated arrival". That is false for the one
-    arrival that matters. Onset alignment puts the direct sound ON the boundary by
-    construction (`channel_per_band_metrics`), so its acausal half is folded back
-    onto the record and the fold nearly DOUBLES its post-onset in-band energy
-    relative to the identical impulse in the record interior: MEASURED +96.60 % at
-    500 Hz and +93.32 % at 1000 Hz. Total energy is unaffected (onset/interior =
-    1.0000 either way) — this is a redistribution into the ISO early window, which
-    is C50's numerator.
+    THE FOLD IS ACCURATE — NO CONVENTION BIAS ON ABSOLUTE C50 (F-68 / F-68-R2,
+    corrected by AC-103). `filtfilt` is non-causal, so a sample at index i produces
+    a response SYMMETRIC about i; the half lying outside the record is real in-band
+    energy, and `_band_energy` folds it back rather than discarding it.
 
-    Consequence for ABSOLUTE C50, measured against a CAUSAL reference (`sosfilt`,
-    same 4th-order band edges) over 28 (corner, distance, band) cells spanning
-    base.yaml's declared support — `configs/base.yaml` +
-    `configs/overlays/simulator_dry_run.yaml`, scene seed 7, `high_ray_budget`:
+    Onset alignment puts the direct sound ON the boundary, so its acausal half is
+    folded forward and its FULL band energy lands post-onset — which is what
+    causality requires. Measured against a KNOWN ANSWER (direct impulse + white
+    exponential tail, for which the ideal band C50 equals the broadband C50;
+    n=200 realizations, 500 Hz, DRR 20 dB):
 
-        delta C50 (folded - causal)   min +0.0122 dB   max +2.2294 dB   mean +0.7280
+        true T60      0.300    0.100   0.0758    0.050    0.030   s
+        folded - true +0.066   +0.214   +0.276   +0.311   -0.363  dB
+        causal - true -0.506   -1.531   -2.056   -3.310   -6.855  dB
 
-    It is monotone in direct-dominance — +0.01 dB at d/r_c = 1.44 (large, a 0.05)
-    against +2.23 dB at d/r_c = 0.15 (small, a 0.98) — so it is common-mode across
-    LEGS but NOT across SCENES. Paired improvements are therefore largely protected;
-    a reported ABSOLUTE C50 carries up to ~2.2 dB of convention bias, which exceeds
-    this project's own `d0b_c50_jnd_db` of 1.0 and must be read as a property of the
-    zero-phase convention rather than of the room.
+    So the zero-phase path tracks truth to within ~0.4 dB everywhere. An earlier
+    version of this paragraph declared a "+0.0122 to +2.2294 dB magnitude bias"
+    measured against a CAUSAL `sosfilt` comparator; that comparator is itself biased
+    LOW by its group delay (1.85 ms at 500 Hz) pushing energy past the 50 ms split,
+    and the error grows as T60 shrinks because the late window becomes nearly pure
+    ringing. The quantity reported was the comparator's bias, not the filter's, and
+    it is RETRACTED. The residual is placement within a guard width, not magnitude.
     """
     nyq = sample_rate / 2.0
     f_lo = fc / 2.0 ** 0.5
@@ -271,12 +269,30 @@ def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.ndarray:
     #     with nothing logged, against a project rule that nothing leaves a result
     #     silently.
     #
-    # Clamping keeps the fold exact at every length. Where the mirror would land
-    # outside the record the energy is placed at the nearest in-record sample
-    # instead of being dropped: conservation is exact, and the residual becomes a
-    # PLACEMENT approximation confined to records shorter than one guard width
-    # (< 96 ms at 500 Hz) — see the inbox row for its measured size. In the normal
-    # case (n_record > guard) no clamping occurs and this is the plain mirror.
+    # Clamping keeps the fold exact at every length: where the mirror would land
+    # outside the record the energy goes to the nearest in-record INDEX rather than
+    # being dropped. Conservation becomes exact and the residual becomes placement
+    # rather than loss.
+    #
+    # BE PRECISE ABOUT WHERE THAT RESIDUAL BITES, because two weaker statements are
+    # tempting and both are wrong (AC-106). Clamping ENGAGES below one guard width
+    # (< 96 ms at 500 Hz) but is numerically negligible over most of that span —
+    # fold/reference energy is 1.0002 at n_record = 512 and 1.0266 at 128, so it
+    # only materially bites below ~128 samples (2.7 ms). And "nearest index" is not
+    # "nearest physically": leading-pad energy clamps to the LAST record sample and
+    # trailing-pad energy to the FIRST, i.e. the far end from the arrival it belongs
+    # to, which is the maximally EDR-biasing position. At n_record = 32 the last
+    # sample holds 30.24 % of band energy, 24x its neighbour, and T30 reads 0.00706 s
+    # against 0.00336 s for the same signal in a long record.
+    #
+    # C50 is never at risk from this: any record that short already has
+    # `split >= trunc_idx`, so C50 is NaN with a reason. T30/EDT at those lengths sit
+    # far below the resolvability floor and carry the AC-38 caveat. It is still
+    # strictly better than the silent 29.7 % discard it replaces, but it is not free
+    # — tracked as AC-106.
+    #
+    # In the normal case (n_record > guard) no clamping occurs and this is the plain
+    # mirror.
     if guard > 0 and n_record > 0:
         k = np.arange(1, guard + 1)
         last = guard + n_record - 1
@@ -331,15 +347,12 @@ def _band_resolvable_decay_s(fc: float, sample_rate: int) -> dict[str, float]:
     have moved twice as the filter path was corrected (AC-36's energy fold last),
     and every restatement elsewhere became a contradiction. Cite this function.
 
-    THE VALUES ABOVE ARE PINNED BY A TEST (AC-65). The previous four — 17.881 /
-    11.765 and 8.924 / 5.771 ms — survived the AC-36/F-67 energy fold that moved
-    them (T30 +13.9 %, EDT -18.8 % / -16.8 %) because nothing asserted them:
-    `tests/test_metrics.py` called this function but never checked its result. The
-    ledger noticed before the code did — AC-27's resolution already quoted
-    f·T30 = 9.85-10.18, which reproduces here (measured 9.88-10.18 across
-    125-4000 Hz) and contradicted the docstring it sat beside.
-    `test_the_band_resolvability_floors_are_the_declared_values` now fails if a
-    filter-path change moves them again.
+    WRITTEN DOWN IN EXACTLY TWO PLACES — here and `_DECLARED_FLOORS_48K` in
+    tests/test_metrics.py, which pins them (AC-65/RR-119). Change both together.
+    The values drifted once already through the AC-36/F-67 energy fold (T30 +13.9 %,
+    EDT -18.8 % / -16.8 %) precisely because nothing asserted them; the ledger
+    noticed before the code did, since AC-27's resolution quoted f·T30 = 9.85-10.18,
+    which reproduces here (measured 9.88-10.18 across 125-4000 Hz).
     `sosfiltfilt` runs the 4th-order section forwards and backwards, which doubles
     the effective order — the reason an earlier estimate of "~3 ms of ringing" from
     the nominal 353 Hz bandwidth understated it by 3-7x (AC-27).

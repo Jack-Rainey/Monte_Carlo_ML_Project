@@ -221,6 +221,15 @@ d0b_edt_jnd_frac: 0.05      # 5% of reference EDT (ISO 3382-1 Annex A: EDT limen
 d0b_c50_jnd_db: 1.0         # 1 dB absolute
 
 # ── ISO 3382 evaluation bands (Hz) — design_spec §7 / §3 ──────────────────────
+#
+# DECLARED TWICE, AND BOTH MUST MOVE TOGETHER (RR-116).
+# `min_db_headroom_octave_centres_hz` in configs/representations/spectrogram.yaml
+# mirrors this set: it is the band set the AC-37 headroom guard reads, and it is a
+# separate declaration only because a representation cannot see the master config
+# (`build_representation` takes `sample_rate` as its sole cross-cutting argument —
+# RD-187). `test_the_headroom_guard_reads_exactly_the_reported_metric_bands`
+# asserts the two are EQUAL, so changing this line alone fails the suite rather
+# than silently mis-calibrating the guard.
 iso_eval_freqs: [500, 1000]
 
 # Direct-arrival onset detection: integration starts at the first sample this many dB
@@ -256,11 +265,30 @@ metric_onset_rel_db: -20.0
 #     500 Hz    +5.91  +4.15  +3.63  +3.26  +2.97  +2.62   %
 #     1000 Hz   +2.22  +2.64  +2.62  +2.49  +2.33  +2.09   %
 #
-# So the 500 Hz bias crosses the 5 % JND between margin 1.0 and 1.5, NOT at 2.0,
-# and at 1000 Hz it is below the JND at every margin including 0 — there the floor
-# buys nothing on this criterion. The old figures were measured against the OLD
-# resolvability floors, which the AC-36/F-67 energy fold moved by +13.9 % (T30) and
-# -18.8 % (EDT) without the declaration following: exactly AC-65's drift.
+# UNDER THAT POPULATION the 500 Hz bias crosses the 5 % JND between margin 1.0 and
+# 1.5, and at 1000 Hz it is below the JND at every margin including 0.
+#
+# BUT THE POPULATION IS THE GOVERNING PARAMETER, AND IT IS NOT A PROPERTY OF THE
+# ESTIMATOR (F-137). Holding seed, N, code path and duration rule fixed and changing
+# ONLY the true-T60 grid moves the conclusion entirely:
+#
+#     grid 0.015-0.30 s   m1.0 +5.91  m1.5 +4.15  m2.0 +3.63  m3.0 +2.97 %
+#     grid 0.015-0.10 s   m1.0 +7.96  m1.5 +6.03  m2.0 +5.53  m3.0 +5.42 %  never crosses
+#     grid 0.05 -1.0  s   m1.0 +1.42  m1.5 +1.42  m2.0 +1.51  m3.0 +1.82 %  never crosses
+#
+# So this is "under the stated population I measure X", NOT "the documented figures
+# do not reproduce" — one grid reproduces the original's qualitative shape (crossing
+# above margin 3.0) and another abolishes the crossing at every margin. The original
+# named no population, which is the actual defect: a calibration whose governing
+# parameter is undeclared cannot be checked.
+#
+# THE CAUSAL ATTRIBUTION THIS COMMENT ONCE MADE IS REFUTED (F-136). It blamed the
+# AC-36/F-67 energy fold moving the floors (AC-65's drift). Re-running the identical
+# protocol against the OLD pre-AC-36 floors gives +6.23 / +4.53 / +3.82 / +3.17 %,
+# i.e. the floor drift accounts for 0.32 pp of the 6.9 pp gap at margin 1.0 — about
+# 5 % of it. The floor drift is real (AC-65) but it is NOT why these numbers differ.
+# The remaining difference is unattributed, and is left unattributed rather than
+# given a second guess.
 #
 # 2.0 IS KEPT ANYWAY, and the reason is AC-38 rather than this calibration. Since
 # the floor now DISCLOSES rather than suppresses, a margin that is too wide costs

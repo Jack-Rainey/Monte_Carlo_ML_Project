@@ -657,7 +657,34 @@ def test_the_headroom_guard_ignores_a_spectral_slope_outside_the_metric_bands() 
     sos = butter(2, 4000.0, btype="lowpass", fs=cfg.sample_rate, output="sos")
     sloped = sosfilt(sos, ir.astype(np.float64), axis=-1).astype(np.float32)
 
-    # The slope is real: the top of the ladder must actually have lost level.
+    # PIN THE STIMULUS (F-141). Without this the test is vacuous the moment the
+    # cutoff or the render level moves: it would then assert only that a healthy IR
+    # encodes, which every other test already covers. The slope must be steep enough
+    # that the OLD all-band operand would have rejected it.
+    import torch
+
+    bands = []
+    for c in range(sloped.shape[0]):
+        st = torch.stft(
+            torch.from_numpy(sloped[c]), n_fft=rep.n_fft, hop_length=rep.hop_length,
+            window=rep._window, return_complex=True, center=True,
+        )
+        bands.append(torch.einsum("bf,fn->bn", rep._filter_bank, st.abs().pow(2)))
+    peak_db = torch.amax(10.0 * torch.log10(torch.stack(bands).clamp(min=1e-10)), dim=2)
+    headroom = peak_db - rep.min_db
+    all_band_min = float(headroom.min())
+    iso_min = float(headroom[:, rep._headroom_band_idx].min())
+
+    assert all_band_min < rep.min_db_headroom_db, (
+        f"the lowpass no longer drives ANY ladder band below the guard threshold "
+        f"({all_band_min:.2f} dB vs {rep.min_db_headroom_db:g}), so this test would "
+        f"pass even with the old all-band operand and proves nothing about F-M3"
+    )
+    assert iso_min >= rep.min_db_headroom_db, (
+        f"the lowpass drove a REPORTED-band down to {iso_min:.2f} dB; the stimulus "
+        f"is no longer a slope outside the metric bands"
+    )
+
     rep.encode(sloped)  # must NOT raise
 
 
@@ -722,16 +749,28 @@ def test_the_octave_filter_meets_its_declared_stopband_rejection(
         )
 
 
-def test_the_octave_filter_edges_are_minus_six_db_and_power_complementary() -> None:
-    """AC-68's other half: what the filter gets RIGHT, pinned so a 'fix' to the
-    rejection above cannot quietly break it.
+def test_the_octave_filter_edges_are_minus_six_db_and_bands_are_NOT_complementary(
+) -> None:
+    """AC-68 / AC-104 — the band edges, and the property they do NOT give.
 
     `sosfiltfilt` applies the section forwards and backwards, so |H|^2 is squared
-    and the nominal -3 dB band edges become -6 dB. That is correct, and it is what
-    makes adjacent octave bands power-complementary at their crossover — i.e.
-    energy is conserved across the band decomposition rather than double-counted or
-    lost. Raising the filter order to chase IEC 61260 class 1 would move these.
+    and the nominal -3 dB band edges present as -6 dB. That much is correct.
+
+    IT DOES NOT FOLLOW that adjacent bands are power-complementary, and an earlier
+    version of this test asserted that in its NAME and docstring while measuring
+    only the edges — a false property pinned by a test that could never have caught
+    it (AC-104). The squaring is exactly what breaks complementarity: at every
+    crossover the single-pass bank sums |H|^2 = 1.00000, while the shipped
+    zero-phase bank sums |H|^4 = 0.50000, i.e. -3.010 dB.
+
+    Both halves are asserted here so neither can be quietly restored: the edges must
+    stay at -6 dB, AND the crossover sum must stay at 0.5 rather than drifting toward
+    1.0, which would mean the zero-phase convention had changed. Nil consequence
+    today because bands are AVERAGED and never summed; live under AC-63's per-band
+    absorption.
     """
+    from scipy.signal import butter, sosfreqz
+
     from amcd.evaluation.room_acoustic import _band_energy
 
     n = _SR
@@ -746,9 +785,25 @@ def test_the_octave_filter_edges_are_minus_six_db_and_power_complementary() -> N
                 f"the {fc:g} Hz band's {edge:.1f} Hz edge reads {db:.2f} dB, not "
                 f"-6 dB. sosfiltfilt squares |H|^2, so -3 dB edges must present as "
                 f"-6 dB; a departure means the band edges or the zero-phase "
-                f"convention changed, and adjacent bands are no longer "
-                f"power-complementary at the crossover (AC-68)"
+                f"convention changed (AC-68)"
             )
+
+    # The crossover between the two eval octaves: 500*sqrt2 == 1000/sqrt2.
+    crossover = _ISO[0] * 2 ** 0.5
+    total_pow4 = 0.0
+    for fc in _ISO:
+        sos = butter(4, [fc / 2 ** 0.5, fc * 2 ** 0.5], btype="bandpass",
+                     fs=_SR, output="sos")
+        _w, h = sosfreqz(sos, worN=[crossover], fs=_SR)
+        total_pow4 += float(abs(h[0]) ** 2) ** 2
+
+    assert total_pow4 == pytest.approx(0.5, abs=0.02), (
+        f"adjacent octave bands sum to {total_pow4:.5f} of the input power at their "
+        f"{crossover:.1f} Hz crossover. The zero-phase bank squares |H|^2, so the "
+        f"correct value is 0.5 (-3.010 dB) and the bank is NOT power-complementary; "
+        f"a value near 1.0 would mean the filtering became single-pass, which would "
+        f"reintroduce a group delay into EDT (AC-104)"
+    )
 
 
 def test_a_leg_that_both_excludes_a_band_and_is_floor_limited_keeps_both_reasons(
