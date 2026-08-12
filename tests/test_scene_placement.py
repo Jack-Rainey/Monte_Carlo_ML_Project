@@ -11,12 +11,12 @@ per-split over-limit warning), RD-112 (a gate that scored nothing is unscored, n
 passed), RD-113 (the derived denominator is pinned to the published one) and AC-30
 (the realized shortfall against ISO 3382-1 §5.3's minimum distance).
 
-Added for cycle 5: S-F4 (the gate diagnoses a report key it cannot score instead
-of raising KeyError), S-F5 (the mixed characterized/uncharacterized split, which
-no shipped config can reach), S-F6 (a declared split that generated no scenes),
-AC-52 (the Eyring d_min pinned by known answers, not only by an inequality) and
-AC-53 (an excluded scene's record-length adequacy is UNCHECKED, not merely
-excluded).
+Also covers S-F4 (the gate diagnoses a report key it cannot score, in both
+directions, instead of raising KeyError or silently dropping a split), S-F5 (the
+mixed characterized/uncharacterized split, which no shipped config can reach),
+S-F6 (a declared split that generated no scenes), AC-52 (the Eyring d_min pinned
+by known answers, not only by an inequality) and AC-53 (an excluded scene's
+record-length adequacy is UNCHECKED, not merely excluded).
 
 The load-bearing property here is that a config CANNOT quietly mean something
 other than it says: mixed sizing modes, colliding split seeds, inert overrides
@@ -600,12 +600,23 @@ class TestPerSplitOverLimitWarning:
 
     @staticmethod
     def _report(train_over: int, shift_over: int) -> dict:
-        return {
-            "train": {"n_scenes": 500, "t60_over_ir_duration": {
-                "t60_exceeds_ir_duration": {"count": train_over}}},
-            "test_placement_shift": {"n_scenes": 30, "t60_over_ir_duration": {
-                "t60_exceeds_ir_duration": {"count": shift_over}}},
-        }
+        """Built through `_flag_counts`, not hand-shaped.
+
+        A hand-built block with no `n_scenes` key is a shape the producer never
+        emits, so a fixture carrying one pins the gate against a schema that cannot
+        occur — and blocks the gate from reading the published denominator at all.
+        """
+        def entry(n: int, over: int) -> dict:
+            rooms = [{"t60_exceeds_ir_duration": i < over} for i in range(n)]
+            return {
+                "n_scenes": n,
+                "t60_over_ir_duration": _flag_counts(
+                    rooms, ("t60_exceeds_ir_duration",),
+                    uncharacterized_consequence="unchecked.",
+                ),
+            }
+        return {"train": entry(500, train_over),
+                "test_placement_shift": entry(30, shift_over)}
 
     def test_a_split_over_its_own_limit_is_named_while_the_gate_passes(
         self, ri_config: Config, capsys
@@ -658,16 +669,46 @@ class TestPerSplitOverLimitWarning:
         """RD-112: with every scene uncharacterized the gate has nothing to measure.
         Falling through would be F-71's own defect one level up — a silent pass at
         exactly the outdoor/partially-open configuration the RD-64 seam enables."""
+        rooms = [{"characterization": "none"} for _ in range(3)]
         report = {
-            "test_openfield": {"n_scenes": 3, "t60_over_ir_duration": {
-                "n_uncharacterized": 3,
-                "t60_exceeds_ir_duration": {"count": 0, "fraction": None}}},
+            "test_openfield": {"n_scenes": 3, "t60_over_ir_duration": _flag_counts(
+                rooms, ("t60_exceeds_ir_duration",),
+                uncharacterized_consequence="unchecked.")},
         }
         _disclose_and_gate_record_length(tiny_config(), report, QUIET)
         warnings = capsys.readouterr().err
 
         assert "UNSCORED, not passed" in warnings
         assert "0 of 3 scenes" in warnings
+
+    def test_the_unscored_warning_names_the_realized_cause_not_the_declared_one(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A config CAN declare a `sabine` family and still generate no scene from
+        one, because the regime axes select the family. Saying "every geometry
+        family declares none" then sends the operator to `geometry_families` when
+        the lever is `id_regime` / a split's `axes`."""
+        cfg = tiny_config(scenes={
+            "geometry_families": {
+                # Declared `sabine` and never selected by any regime axis.
+                "shoebox": {"dims": [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]],
+                            "characterization": "sabine"},
+                "corridor": {"dims": [[15.0, 30.0], [1.5, 3.0], [2.4, 3.5]],
+                             "characterization": "none"},
+                "openfield": {"dims": [[8.0, 12.0], [8.0, 12.0], [3.0, 4.0]],
+                              "characterization": "none"},
+            },
+            "id_regime": {"geometry": "openfield"},
+        })
+        run_gen_scenes(cfg, tmp_path, QUIET)
+        warnings = capsys.readouterr().err
+
+        assert "UNSCORED, not passed" in warnings
+        assert "no scene in this run came from a family declaring" in warnings
+        assert "shoebox" in warnings and "id_regime" in warnings, (
+            "a sabine family exists and is simply unused — the warning must say so "
+            "rather than assert every family declares none"
+        )
 
     def test_the_same_config_survives_the_real_generation_path(
         self, tmp_path: Path, capsys
@@ -902,10 +943,96 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
 
     def test_the_declared_set_is_empty_today(self) -> None:
         """It is a seam for a coming key, not a live exemption list: anything in it
-        is a split the gate has stopped scoring."""
+        is a split the gate has stopped scoring.
+
+        A change-detector, not the guard — it expires the moment AC-54/RD-144 add a
+        legitimate metadata key. The invariant that SURVIVES that is the
+        disjointness check below.
+        """
         import amcd.scenes.generator as gen
 
         assert gen._NON_SPLIT_REPORT_KEYS == frozenset()
+
+    def test_declaring_a_real_split_as_metadata_is_refused(self, monkeypatch) -> None:
+        """The OVER-declared direction, and the dangerous one. An undeclared key
+        raises loudly; a key that names a real split would remove that split from
+        the warning loop AND from the gate's over/total sums with no error at all —
+        the silent drop the constant exists to prevent, in the other direction.
+        """
+        import amcd.scenes.generator as gen
+
+        monkeypatch.setattr(
+            gen, "_NON_SPLIT_REPORT_KEYS", frozenset({"test_geometry_shift"})
+        )
+        rooms = [{"t60_exceeds_ir_duration": True} for _ in range(2)]
+        block = _flag_counts(rooms, ("t60_exceeds_ir_duration",),
+                             uncharacterized_consequence="unchecked.")
+        report = {"test_geometry_shift": {"n_scenes": 2, "t60_over_ir_duration": block}}
+
+        with pytest.raises(ValueError, match="test_geometry_shift") as exc:
+            gen._disclose_and_gate_record_length(tiny_config(), report, QUIET)
+        assert "silent drop" in str(exc.value)
+
+    def test_a_disagreeing_published_denominator_is_refused(self) -> None:
+        """The gate reads the scored count `_flag_counts` PUBLISHES and cross-checks
+        it against the emit-iff-nonzero contract. Two expressions for one number is
+        the AC-24 shape, so a disagreement stops the run rather than being resolved
+        silently in favour of either (RD-113)."""
+        report = {"id": {"n_scenes": 10, "t60_over_ir_duration": {
+            "n_scenes": 7,                 # published
+            "n_uncharacterized": 6,        # implies 4
+            "t60_exceeds_ir_duration": {"count": 0}}}}
+
+        with pytest.raises(ValueError, match="have diverged"):
+            _disclose_and_gate_record_length(tiny_config(), report, QUIET)
+
+
+class TestTheGateNamesWhatItActuallyScored:
+    """S-F7 and the coverage disclosure. The docstring is not what an operator
+    reads — the warnings are."""
+
+    def test_the_frac_mode_pool_is_not_called_a_split(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """In frac mode `id` is a POOL three declared splits wide, separated later
+        by `data/splits.py`. Calling it a "split" invites the reader to hear
+        `train`."""
+        with pytest.raises(ValueError):  # 0.0 tolerance: the gate also refuses
+            run_gen_scenes(tiny_config(scenes={"max_t60_over_ir_duration_frac": 0.0}),
+                           tmp_path, QUIET)
+        warnings = capsys.readouterr().err
+
+        assert "regime 'id' (pools train/valid/test_id)" in warnings
+        assert "split 'id'" not in warnings
+
+    def test_a_shift_split_is_still_called_a_split(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A shift split IS its own generation entry, so the plain wording is right
+        there — the label must not become uniformly hedged."""
+        with pytest.raises(ValueError):
+            run_gen_scenes(tiny_config(scenes={"max_t60_over_ir_duration_frac": 0.0}),
+                           tmp_path, QUIET)
+        assert "split 'test_geometry_shift'" in capsys.readouterr().err
+
+    def test_coverage_is_disclosed_on_a_PASS_not_only_on_failure(
+        self, capsys
+    ) -> None:
+        """The gate used to state scored-vs-attempted only inside its failure
+        message, so a passing run over a partly-uncharacterized population reported
+        a verdict with no coverage. Needs a MIXED split, which no shipped config can
+        reach — which is exactly why it would go unnoticed."""
+        rooms = [{"t60_exceeds_ir_duration": False} for _ in range(4)]
+        rooms += [{"characterization": "none"} for _ in range(6)]
+        block = _flag_counts(rooms, ("t60_exceeds_ir_duration",),
+                             uncharacterized_consequence="unchecked.")
+        report = {"test_mixed": {"n_scenes": 10, "t60_over_ir_duration": block}}
+
+        _disclose_and_gate_record_length(tiny_config(), report, QUIET)  # passes
+        warnings = capsys.readouterr().err
+
+        assert "scored 4 of 10 scenes" in warnings
+        assert "UNCHECKED" in warnings
 
 
 class TestTheMixedCharacterizedSplit:
@@ -1052,8 +1179,14 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
         }
         assert len(set(notes.values())) == 3, notes
         assert "UNCHECKED" in notes["t60_over_ir_duration"]
-        assert "never inside it" in notes["diffuse_field_validity"]
-        assert "does not apply" in notes["below_iso_min_distance"]
+        assert "never applied to these scenes" in notes["diffuse_field_validity"]
+        assert "vacuous" in notes["below_iso_min_distance"]
+        # Each clause must distinguish the FREE-FIELD case from the PARTIALLY-OPEN
+        # one: `characterization: none` covers both, and the physics differs. One
+        # sentence spanning two heterogeneous cases is the defect AC-53 was raised
+        # for, one level down.
+        for block in ("diffuse_field_validity", "below_iso_min_distance"):
+            assert "partially-open" in notes[block], block
 
     def test_the_clause_is_required_not_defaulted(self) -> None:
         with pytest.raises(TypeError):

@@ -18,13 +18,15 @@ Run on ALL splits (train, valid, and every test split), reported separately.
 Never pool splits — per-split headroom genuinely differs (Invariant 9).
 
 PER-SPLIT RECORD SCHEMA (RR-64). Both probes write one entry per split into their
-artifact's `per_split` map, and both artifacts are read across lanes
-(`tests/test_dataset_integrity.py`), so the shape is declared here once rather
-than inferred from the six sites that construct it:
+artifact's `per_split` map, and both artifacts are read outside this module (see
+`tests/test_dataset_integrity.py`), so the shape is declared here once rather than
+inferred from the six sites that construct it:
 
-    n_scenes        int  — scenes SCORED. This IS the scored count; there is
-                           deliberately no second `n_scored` key, because two
-                           names for one number is how AC-24's pair drifted apart.
+    n_scenes        int  — scenes SCORED. The same quantity `stats/aggregate.py`
+                           and `reporting/tables.py` publish as `n_scored`; the
+                           probes keep `n_scenes` because existing consumers index
+                           it, and adding a second name here is how AC-24's pair
+                           drifted apart.
     n_attempted     int  — scenes the split contained, i.e. the denominator.
     dropped         list — [{"scene": str, "reason": str}], one per unscored
                            scene, mirroring the eval stage's drops.csv (F-21).
@@ -167,9 +169,7 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
             verdict = f"small gap ({gap_mean:.1f} dB < {config.d0a_gap_small_db} dB) — band energy may have converged; denoising unlikely to help"
 
         per_split[split_name] = {
-            # `n_scenes` IS the scored count; `n_attempted` is its denominator. No
-            # separate `n_scored` key — two names for one number is how the two
-            # expressions in AC-24 drifted apart.
+            # Schema: module docstring.
             "n_scenes": len(scene_gaps),
             "n_attempted": len(scene_ids),
             "dropped": dropped,
@@ -413,7 +413,12 @@ def _run_d0b(
         # with no scenes, or whose scenes all failed to load, carries only its
         # unscored reason — so it is INDETERMINATE, never a pass. Omitting such a
         # split (the pre-fix behaviour) left `all_clear` True over it silently.
-        if "T30" not in summary:
+        #
+        # Branches on the DECLARED condition (`n_scenes == 0`), the same one D0a's
+        # print loop uses. Branching on `"T30" not in summary` agreed with it only
+        # because `channel_band_avg_metrics` happens to return all three keys — an
+        # assumption the schema does not state.
+        if summary["n_scenes"] == 0:
             any_indeterminate = True
             emit(
                 verbosity, "metrics",
@@ -463,12 +468,24 @@ def _run_d0b(
         c50_s = f"{c50_r:.4f}dB" if not np.isnan(c50_r) else "   N/A"
 
         # A residual averaged over a subset of the split is only interpretable
-        # alongside how much of the split it covers (F-72).
-        n_dropped = len(summary.get("dropped", []))
-        coverage = (
-            f"  [{summary['n_scenes']}/{summary['n_attempted']} scored, "
-            f"{n_dropped} dropped]" if n_dropped else ""
-        )
+        # alongside how much of the split it covers (F-72). TWO axes of attrition,
+        # both annotated: scenes dropped before scoring, and scored scenes whose
+        # residual came back NaN for one metric — the latter thins a per-metric mean
+        # without touching `n_scenes`, so keying the annotation on drops alone
+        # printed a PASS over a subset with nothing said.
+        n_dropped = len(summary["dropped"])
+        thinned = {
+            key: summary[key]["n"] for key in ("T30", "EDT", "C50")
+            if summary[key]["n"] < summary["n_scenes"]
+        }
+        parts = []
+        if n_dropped:
+            parts.append(f"{summary['n_scenes']}/{summary['n_attempted']} scored, "
+                         f"{n_dropped} dropped")
+        if thinned:
+            parts.append("per-metric n: " + ", ".join(
+                f"{k} {v}/{summary['n_scenes']}" for k, v in thinned.items()))
+        coverage = f"  [{'; '.join(parts)}]" if parts else ""
         emit(
             verbosity, "metrics",
             f"  {split_name:<28} "
