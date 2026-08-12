@@ -613,6 +613,27 @@ class GsoundSirSimulator:
         return float(params["source_radius"]) + float(params["listener_radius"])
 
     @classmethod
+    def realized_support_s(cls, params: dict, t60_s: float, window_s: float) -> float:
+        """Required pre-render declaration (`Simulator`) — AC-184, AC-175, AC-56.
+
+        Two limits, and the ADAPTIVE ENERGY TRIM binds first. It closes the record
+        as a sub-linear power of the decay, so the captured fraction falls as rooms
+        get more reverberant; the compiled 3.0 s `maxIRLength` is only a ceiling on
+        top of that and no rendered scene has come near it.
+
+        Both coefficients are config-declared and falsified per render against
+        realized `native_ir_samples` (`_support_falsification`), so a prediction
+        that over-reads surfaces as a defect in the declaration rather than
+        governing the dataset unchallenged.
+        """
+        trim_s = predicted_support_s(
+            t60_s,
+            float(params["predicted_support_coefficient_s"]),
+            float(params["predicted_support_t60_exponent"]),
+        )
+        return min(trim_s, float(params["max_ir_length_s"]), float(window_s))
+
+    @classmethod
     def host_scoped_params(cls) -> tuple[str, ...]:
         """`render_python` is a machine-local interpreter path, not a dataset fact.
 

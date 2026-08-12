@@ -522,6 +522,53 @@ def _validate_min_separation_declared(SimClass, name: str, validated: dict) -> f
     return float(floor)
 
 
+def simulator_realized_support_s(config, t60_s: float, window_s: float) -> float:
+    """Seconds of usable record the active backend will produce for a `t60_s` decay.
+
+    The record-length gate needs this BEFORE any render exists, and it is a backend
+    fact, not a scene fact: gsound's adaptive energy trim closes the record as a
+    sub-linear function of the decay (AC-184), while the scaffold fills its whole
+    window. `ir_duration` is neither — it is the window the pipeline allocates, and
+    gating against it asks whether the decay fits a buffer rather than whether the
+    backend will fill that buffer.
+
+    Same shape as `simulator_min_separation` and for the same reasons: registry
+    lookup plus the backend's own `Params` validation, deliberately WITHOUT
+    instantiating, so scene generation stays runnable on a host with no render
+    environment (RD-60), and so no stage outside `simulators/` names a backend.
+    """
+    from ..registry import simulator_registry
+
+    name = config.simulator.name
+    SimClass = simulator_registry.get(name)
+    validated = SimClass.Params(**config.simulator.params).model_dump()
+    return _validate_realized_support_declared(SimClass, name, validated, t60_s, window_s)
+
+
+def _validate_realized_support_declared(
+    SimClass, name: str, validated: dict, t60_s: float, window_s: float
+) -> float:
+    """Raise unless `SimClass` declares a usable `realized_support_s`."""
+    getter = getattr(SimClass, "realized_support_s", None)
+    if not callable(getter):
+        raise TypeError(
+            f"simulator {name!r} does not declare the required classmethod "
+            f"`realized_support_s(params, t60_s, window_s) -> float`. Every backend "
+            f"must state "
+            f"how much record it will actually produce for a given decay, so scene "
+            f"generation can refuse an unmeasurable scene BEFORE a render. A backend "
+            f"that fills its whole window says so by returning that window "
+            f"(amcd.simulators.base.Simulator)."
+        )
+    support = getter(validated, t60_s, window_s)
+    if not isinstance(support, (int, float)) or isinstance(support, bool) or support <= 0:
+        raise ValueError(
+            f"simulator {name!r} declared realized_support_s={support!r} for "
+            f"t60_s={t60_s!r}; expected a positive number of seconds."
+        )
+    return float(support)
+
+
 def simulator_host_scoped_params(config) -> tuple[str, ...]:
     """The active backend's declared host-scoped param names (F-86).
 

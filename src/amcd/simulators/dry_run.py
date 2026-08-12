@@ -69,6 +69,18 @@ class DryRunSimulator:
         """
         return float(params["min_source_receiver_distance_m"])
 
+    @classmethod
+    def realized_support_s(cls, params: dict, t60_s: float, window_s: float) -> float:
+        """Required pre-render declaration (`Simulator`).
+
+        The scaffold synthesizes directly into the full window, so it fills whatever
+        record it is given regardless of the decay — the answer is `window_s`, and
+        `t60_s` does not enter. That is a real property of this backend, not a
+        stand-in: it is precisely why the record-length problem was invisible until
+        `gsound_sir` first ran (AC-184).
+        """
+        return float(window_s)
+
     def render(self, scene: SceneSpec, ray_budget: int) -> IRResult:
         # Separate RNG for scene structure vs noise — structure fixed, noise varies with budget
         rng_scene = np.random.default_rng(scene.seed)

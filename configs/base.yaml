@@ -80,12 +80,21 @@ scenes:
   # Rejection-sampling bound, consumed only by regimes declaring a distance_range.
   # Exceeding it raises with the geometry that made the constraint unreachable.
   max_placement_attempts: 1000
-  # Largest fraction of generated scenes whose Sabine T60 may exceed ir_duration
-  # (AC-22). ZERO here: ir_duration 4.25 s was chosen above specifically to cover
-  # this config's worst declared corner (4.20 s), so "the record covers the scene"
-  # is enforced rather than merely asserted. A run that trips this has either
-  # widened the geometry/absorption ranges or shortened the record.
+  # Largest fraction of generated scenes whose record cannot hold an admissible
+  # decay (AC-22). ZERO here: "the record covers the scene" is enforced rather than
+  # asserted. A run that trips this has widened the geometry/absorption ranges, or
+  # is using a backend whose realized record is shorter than the window.
+  #
+  # NOTE, and it is the point of AC-175/AC-184: this now binds against the ACTIVE
+  # BACKEND'S REALIZED SUPPORT, not against `ir_duration`. Under `dry_run` the two
+  # coincide, because the scaffold fills its whole window. Under `gsound_sir` they
+  # do not, and a config that passed at 4.25 s can fail here — correctly.
   max_t60_over_ir_duration_frac: 0.0
+  # Decay range a record must hold for an admissible T30 fit. ISO 3382-1 requires
+  # 45 dB for T30 (35 for T20, 20 for EDT). Matches the estimator's own
+  # measurement-time bound `metric_min_decay_range_db.T30` below; they answer the
+  # same question at design time and measurement time, and should agree.
+  iso_t30_decay_range_db: 45.0
   # Absorption above which the diffuse-field closed forms (Sabine, Eyring, critical
   # distance, DRR) become extrapolations rather than estimates (AC-21). ~0.3 is the
   # usual textbook limit. Scenes above it are FLAGGED in placement_report.json and

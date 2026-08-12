@@ -35,7 +35,11 @@ from ..acoustics import (
 )
 from ..config import Config, Margins, PlacementRegime
 from ..runtime import Verbosity, emit
-from ..simulators.base import SceneSpec, simulator_min_separation
+from ..simulators.base import (
+    SceneSpec,
+    simulator_min_separation,
+    simulator_realized_support_s,
+)
 
 #: c·SABINE_K — the only place either appears in the ISO 3382-1 §5.3 minimum
 #: measurement distance d_min = 2·sqrt(V/(c·T60)). Substituting either T60 leaves
@@ -50,7 +54,7 @@ _C_TIMES_SABINE_K = 24.0 * math.log(10.0)
 
 #: Why excluding a non-enclosure from the record-length fractions is not the same
 #: as it being fine (AC-53). Emitted twice — per scene in `uncharacterized_reason`
-#: and per split in `t60_over_ir_duration`'s `uncharacterized_note` — so it is
+#: and per split in `record_decay_range`'s `uncharacterized_note` — so it is
 #: declared once here rather than drifting between the two.
 _RECORD_LENGTH_UNCHECKED = (
     "its record-length adequacy is therefore UNCHECKED, not merely excluded: it is "
@@ -274,7 +278,8 @@ def _room_acoustics(
     distance: float,
     *,
     alpha_limit: float,
-    ir_duration_s: float,
+    realized_support_s,
+    iso_t30_decay_range_db: float,
     characterization: str,
 ) -> dict:
     """Closed-form acoustic descriptors of one scene, from geometry alone.
@@ -326,7 +331,7 @@ def _room_acoustics(
                 f"distance and diffuse-field DRR are undefined for it, and "
                 f"{_RECORD_LENGTH_UNCHECKED} (AC-53)"
             ),
-            # `t60_exceeds_ir_duration` is OMITTED, not False (F-71). A False here
+            # `decay_range_below_iso_t30` is OMITTED, not False (F-71). A False here
             # reads as "measured, and within the record", so the scene entered the
             # record-length gate's denominator as passing and N uncharacterized
             # scenes shrank the overall over-limit fraction by N/(N+M) — a dataset
@@ -365,6 +370,12 @@ def _room_acoustics(
     # Eyring is the better estimate at high absorption, where Sabine overpredicts
     # — and ceiling_absorptive reaches α = 0.98.
     t60_eyring = eyring_rt60(volume, surface, alpha)
+    # How much record the active backend will produce for THIS scene's decay, and
+    # the decay range that record therefore holds. Resolved through the caller's
+    # seam, so this module stays backend-agnostic (RD-144). Sabine, not Eyring: the
+    # longer T60 gives the smaller decay range, which errs toward refusing.
+    support_s = float(realized_support_s(t60_sabine))
+    available_decay_db = 60.0 * support_s / t60_sabine
     # Room constant, critical distance and diffuse-field DRR come from
     # `amcd.acoustics` for the AC-24 reason the T60s already did (RD-75): the
     # scaffold now scales its reverberant tail from the SAME formulas, so the DRR
@@ -431,31 +442,39 @@ def _room_acoustics(
         # disagree substantially at high α, and the reader needs to see by how much.
         "below_iso_min_distance_sabine": bool(distance < d_min_sabine),
         "below_iso_min_distance_eyring": bool(distance < d_min_eyring),
-        # AC-22's design-time record-length flag: this scene's ESTIMATED decay
-        # against the record length. Sabine (the longer estimate) so the flag errs
-        # toward declaring a scene unsupported rather than silently truncating it.
+        # AC-22's design-time record-length flag, re-founded on the BACKEND'S OWN
+        # REALIZED SUPPORT rather than on `ir_duration` (AC-175, AC-184).
         #
-        # NOT A MEASUREMENT, and the gate built on it is not one either (F-60). This
-        # is Sabine from geometry × a scalar α; nothing here compares a RENDERED
-        # decay against `ir_duration`. Ways a truncated scene passes it:
-        #   * α_eff (AC-54). Evaluated at nominal α while the backend realizes
-        #     1−sqrt(1−α), so every T60 is under-stated by 1.45-1.98×. This is the
-        #     one that changes a pass/fail decision: base declares zero tolerance,
-        #     and over its shoebox × `mixed` support P(T60 > ir_duration) is 0.00 at
-        #     nominal α against 0.018 at α_eff. See F-186.
-        #   * Sabine assumes a 4V/S mean free path and under-predicts decay in a
-        #     disproportionate enclosure — base.yaml's corridor family is exactly
-        #     that. (The family with the LONGEST declared decays is the shoebox, at
-        #     4.20 s against a 4.25 s record; the corridor's longest is 2.47 s. The
-        #     two are different concerns and were conflated here.)
-        # Separately, and in the OPPOSITE direction: the scaffold clips rt60 to its
-        # own bounds on the same formula this reports, so the upper clip only ever
-        # SHORTENS the rendered decay against the description — a false positive on
-        # this flag, never a missed truncation. A missed truncation would need
-        # `ir_duration` below the lower clip, which no shipped config approaches.
-        # The realized check — a FITTED T30 against the realized record length,
-        # counted in the eval output — is the F-60 residual (F-185).
-        "t60_exceeds_ir_duration": bool(t60_sabine > ir_duration_s),
+        # `ir_duration` is the window the pipeline ALLOCATES. It is not what a
+        # backend fills, and gating against it asks whether the decay fits a buffer
+        # instead of whether the record will hold the decay. On gsound those differ
+        # enormously: the adaptive energy trim closes the record as a sub-linear
+        # power of T60, so the captured fraction COLLAPSES as rooms get more
+        # reverberant, and the largest declared room's record is shorter than the
+        # T30 it is measuring. Against a 4.25 s `ir_duration` that scene passed;
+        # against realized support it does not.
+        #
+        # The criterion is DECAY RANGE, not seconds, because that is what ISO
+        # 3382-1 states and what the estimator's own admissibility bound applies:
+        # a record holds 60·support/T60 dB of decay, and T30 needs 45 dB of it.
+        # `support_s` is resolved by the caller through the simulator seam, so this
+        # module names no backend (RD-144).
+        #
+        # STILL NOT A MEASUREMENT (F-60). Sabine from geometry × a scalar α, erring
+        # long so the flag declares a scene unsupported rather than silently
+        # truncating it. Sabine also assumes a 4V/S mean free path and under-predicts
+        # decay in a disproportionate enclosure — base.yaml's corridor family. The
+        # realized check, a FITTED T30 against the realized record, is F-185; the
+        # per-render falsification of `support_s` itself is in the backend.
+        #
+        # α: nominal, as everywhere in this module (RD-144). Whether the backend
+        # realizes that α is the backend's own declared convention, and where it
+        # pre-compensates so the rendered room IS the declared room, this flag is
+        # evaluated at the right decay — which is what closes F-186. A backend that
+        # renders an uncorrected room decays longer than stated and this under-reads.
+        "record_decay_range_db": available_decay_db,
+        "record_support_s": support_s,
+        "decay_range_below_iso_t30": bool(available_decay_db < iso_t30_decay_range_db),
     }
 
 
@@ -566,7 +585,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     """Disclose the declared-support corner; gate on the over-limit rate of the
     closed-form ESTIMATE.
 
-    Not on a measurement: `t60_exceeds_ir_duration` is Sabine from geometry, and
+    Not on a measurement: `decay_range_below_iso_t30` is Sabine from geometry, and
     nothing in gen-scenes compares a RENDERED decay against `ir_duration`. The
     instrument's limitations are named at the flag's own definition in
     `_room_acoustics`; the realized check is the F-60 residual (F-185). It is still
@@ -615,17 +634,17 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
         if name in _NON_SPLIT_REPORT_KEYS:
             continue
         # Diagnosed, not a bare KeyError from the next line (S-F4).
-        if not isinstance(entry, dict) or "t60_over_ir_duration" not in entry:
+        if not isinstance(entry, dict) or "record_decay_range" not in entry:
             raise ValueError(
                 f"placement_report key {name!r} is neither a split record nor a "
                 f"declared non-split key: the record-length gate scores every "
                 f"top-level key of the report, and this one carries no "
-                f"'t60_over_ir_duration' block. If it is metadata rather than a "
+                f"'record_decay_range' block. If it is metadata rather than a "
                 f"split, add it to `_NON_SPLIT_REPORT_KEYS` in the same commit that "
                 f"writes it — a report key nothing scores and nothing declares is "
                 f"how a split would go missing from the gate unnoticed."
             )
-        block = entry["t60_over_ir_duration"]
+        block = entry["record_decay_range"]
         attempted = entry["n_scenes"]
         # `_flag_counts` PUBLISHES the scored count as the block's own `n_scenes`.
         # Read it, and cross-check against the emit-iff-nonzero `n_uncharacterized`
@@ -642,7 +661,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
                 f"scored denominator have diverged (AC-24 shape); the gate refuses "
                 f"to pick one."
             )
-        per_split[name] = (block["t60_exceeds_ir_duration"]["count"], scored, attempted)
+        per_split[name] = (block["decay_range_below_iso_t30"]["count"], scored, attempted)
 
     _warn_regimes_over_limit(config, per_split, limit, verbosity)
 
@@ -698,11 +717,17 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
             f"fraction as uncharacterized (RD-64)." if excluded else ""
         )
         raise ValueError(
-            f"ir_duration is {config.ir_duration} s, but {over} of {total} scenes "
-            f"({over / total:.3%}) exceed it — more than "
-            f"scenes.max_t60_over_ir_duration_frac ({limit}) allows:\n{lines}{exclusion}\n"
+            f"{over} of {total} scenes ({over / total:.3%}) get less than "
+            f"{config.scenes.iso_t30_decay_range_db:g} dB of decay range from the "
+            f"record the {config.simulator.name!r} backend will actually produce — "
+            f"more than scenes.max_t60_over_ir_duration_frac ({limit}) allows:\n"
+            f"{lines}{exclusion}\n"
+            f"This is measured against the backend's DECLARED REALIZED SUPPORT, not "
+            f"against ir_duration ({config.ir_duration} s), which is only the window "
+            f"allocated (AC-175, AC-184). A backend whose record is shorter than the "
+            f"window will fail here while appearing to 'fit'.\n"
             f"A T30/EDT fitted over a truncated record measures the truncation, not "
-            f"the room. Lengthen ir_duration, narrow the geometry/absorption ranges, "
+            f"the room. Narrow the geometry/absorption ranges, "
             f"or raise the declared tolerance and say why. For reference the declared "
             f"support reaches Sabine T60 {corner['t60_sabine_s']:.2f} s "
             f"({corner['geometry_family']} {corner['dims_m']} m at alpha "
@@ -800,6 +825,13 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # active backend could not render (AC-13/F-48/RD-45).
     _check_regimes_clear_backend_floor(config)
 
+    # The record-length gate's denominator (AC-175, AC-184). Resolved ONCE here and
+    # passed down as a plain callable, so `_room_acoustics` never touches the
+    # registry and this module still names no backend (RD-144). Validation of the
+    # declaration happens on the first call, before any scene is written.
+    def support_of(t60_s: float) -> float:
+        return simulator_realized_support_s(config, t60_s, config.ir_duration)
+
     scenes_cfg = config.scenes
     id_axes = dict(scenes_cfg.id_regime)  # {geometry, placement, material}
     plan = _generation_plan(config)
@@ -857,7 +889,8 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             room = _room_acoustics(
                 dims, absorption, distance,
                 alpha_limit=scenes_cfg.diffuse_field_alpha_limit,
-                ir_duration_s=config.ir_duration,
+                realized_support_s=support_of,
+                iso_t30_decay_range_db=config.scenes.iso_t30_decay_range_db,
                 characterization=(
                     scenes_cfg.geometry_families[axes["geometry"]].characterization
                 ),
@@ -943,14 +976,14 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 ),
                 alpha_limit=scenes_cfg.diffuse_field_alpha_limit,
             ),
-            "t60_over_ir_duration": _flag_counts(
-                room_stats, ("t60_exceeds_ir_duration",),
+            "record_decay_range": _flag_counts(
+                room_stats, ("decay_range_below_iso_t30",),
                 uncharacterized_consequence=(
                     f"For each of them {_RECORD_LENGTH_UNCHECKED} (AC-53). The "
                     f"n_uncharacterized count above is the number of scenes nothing "
                     f"checked."
                 ),
-                ir_duration_s=config.ir_duration,
+                iso_t30_decay_range_db=config.scenes.iso_t30_decay_range_db,
             ),
             # AC-30: the REALIZED shortfall of the single global placement floor
             # against the per-scene ISO 3382-1 §5.3 minimum, so the E1 report

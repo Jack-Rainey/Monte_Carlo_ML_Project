@@ -571,6 +571,24 @@ class Scenes(BaseModel):
     #: declaring a scene unsupported rather than silently truncating it.
     max_t60_over_ir_duration_frac: float
 
+    #: Decay range, in dB, that a record must hold for a T30 fit to be admissible —
+    #: ISO 3382-1's requirement (45 dB for T30; 35 for T20, 20 for EDT).
+    #:
+    #: The gate above is a FRACTION of scenes allowed to fail; this is the per-scene
+    #: criterion it counts. It replaces "Sabine T60 exceeds `ir_duration`", which
+    #: asked whether the decay fits the allocated BUFFER — a different question from
+    #: whether the backend fills that buffer, and one gsound answers very
+    #: differently: its adaptive energy trim closes the record as a sub-linear power
+    #: of T60, so the largest declared room's record is shorter than the T30 it is
+    #: measuring while comfortably "fitting" a 4.25 s window (AC-175, AC-184).
+    #:
+    #: Declared here rather than taken from `evaluation/`'s
+    #: `metric_min_decay_range_db` on purpose: this is the DESIGN-TIME admission
+    #: rule over closed-form estimates, that one is the MEASUREMENT-TIME bound the
+    #: estimator applies to a rendered decay (AC-176). They should agree, and a
+    #: config that sets them apart is making a deliberate statement.
+    iso_t30_decay_range_db: float
+
     #: Absorption above which the diffuse-field assumptions behind Sabine/Eyring,
     #: the critical distance and DRR stop holding well (AC-21). Textbook guidance
     #: puts the practical limit near alpha = 0.3; beyond it those closed forms are

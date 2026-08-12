@@ -67,27 +67,53 @@ class TestDeclaredSupportCorner:
 class TestRealizedRecordLengthGate:
     """AC-22's gate half: the population the metrics are actually computed over."""
 
-    def test_base_has_no_scene_over_its_record(self, tmp_path: Path) -> None:
-        cfg = Config.load(_BASE)
-        assert cfg.scenes.max_t60_over_ir_duration_frac == 0.0
-        run_gen_scenes(cfg, tmp_path, QUIET)
-        report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
-        for split, entry in report.items():
-            over = entry["t60_over_ir_duration"]["t60_exceeds_ir_duration"]
-            assert over["count"] == 0, f"{split}: {over}"
-
-    def test_research_i_discloses_its_realized_over_limit_scenes(
+    def test_base_is_refused_because_gsound_cannot_support_its_declared_decays(
         self, tmp_path: Path
     ) -> None:
+        """AC-175/AC-184's consequence, and it is a RESEARCH result, not a bug.
+
+        base.yaml passed this gate for as long as the gate asked "does Sabine T60
+        fit `ir_duration`". It does not survive the real question — "will the
+        backend produce a record holding 45 dB of that decay" — because gsound's
+        adaptive energy trim closes the record as T60**0.25. The admissible ceiling
+        is T60 ~ 1.85 s at ANY `ir_duration`, and base declares a shoebox corner at
+        4.20 s, where only 24.3 dB is available.
+
+        The gate refusing here is correct. What to do about it is a research
+        decision — narrow the declared T60 range, accept unscored scenes, or change
+        backend — and until it is taken, base is not renderable at ISO T30 fidelity.
+        """
+        cfg = Config.load(_BASE)
+        assert cfg.simulator.name == "gsound_sir"
+        assert cfg.scenes.max_t60_over_ir_duration_frac == 0.0
+        with pytest.raises(ValueError, match="decay range"):
+            run_gen_scenes(cfg, tmp_path, QUIET)
+
+    def test_the_admissible_ceiling_is_a_property_of_the_backend_not_the_window(
+        self,
+    ) -> None:
+        """~1.85 s for gsound, and lengthening `ir_duration` does not move it."""
+        from amcd.simulators.base import simulator_realized_support_s
+
+        cfg = Config.load(_BASE)
+        for window_s in (3.0, 4.25, 30.0):
+            admissible = [
+                t60 / 100.0
+                for t60 in range(20, 600)
+                if 60.0 * simulator_realized_support_s(cfg, t60 / 100.0, window_s) / (t60 / 100.0)
+                >= cfg.scenes.iso_t30_decay_range_db
+            ]
+            assert max(admissible) == pytest.approx(1.85, abs=0.05), window_s
+
+    def test_research_i_is_refused_for_the_same_reason(self, tmp_path: Path) -> None:
+        """RI's own 3.0 s record was already known not to cover its 4.09 s corner;
+        against realized support the shortfall is far larger — 24.8 dB available
+        where ISO wants 45 — and 27 of 720 scenes fall short against a declared
+        tolerance of 0.01."""
         cfg = Config.load(*_RI)
-        run_gen_scenes(cfg, tmp_path, QUIET)
-        report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
-        over = sum(e["t60_over_ir_duration"]["t60_exceeds_ir_duration"]["count"]
-                   for e in report.values())
-        total = sum(e["n_scenes"] for e in report.values())
-        assert total == 720
-        # Declared tolerance is 0.01, set just above the measured 4/720 = 0.56 %.
-        assert 0 < over / total <= cfg.scenes.max_t60_over_ir_duration_frac
+        with pytest.raises(ValueError, match="decay range") as exc:
+            run_gen_scenes(cfg, tmp_path, QUIET)
+        assert "27 of 720" in str(exc.value)
 
     def test_exceeding_the_declared_tolerance_fails_loudly(self, tmp_path: Path) -> None:
         """A 0.1 s record against base's geometry: every scene is over."""
@@ -103,7 +129,7 @@ class TestRealizedRecordLengthGate:
             run_gen_scenes(cfg, tmp_path, QUIET)
         message = str(exc.value)
         assert "shoebox" in message and "scenes" in message
-        assert "ir_duration is 0.1 s" in message
+        assert "0.1 s" in message and "decay range" in message
 
     def test_the_gate_is_overall_not_per_split(self) -> None:
         """A single over-limit scene in a 30-scene split is 3.3 %. Gating per split
@@ -114,10 +140,10 @@ class TestRealizedRecordLengthGate:
 
         def report(train_over: int, shift_over: int) -> dict:
             return {
-                "train": {"n_scenes": 500, "t60_over_ir_duration": {
-                    "t60_exceeds_ir_duration": {"count": train_over}}},
-                "test_placement_shift": {"n_scenes": 30, "t60_over_ir_duration": {
-                    "t60_exceeds_ir_duration": {"count": shift_over}}},
+                "train": {"n_scenes": 500, "record_decay_range": {
+                    "decay_range_below_iso_t30": {"count": train_over}}},
+                "test_placement_shift": {"n_scenes": 30, "record_decay_range": {
+                    "decay_range_below_iso_t30": {"count": shift_over}}},
             }
 
         cfg = Config.load(*_RI)  # tolerance 0.01 over 530 scenes -> at most 5
@@ -141,7 +167,8 @@ class TestDiffuseFieldValidityFlags:
         return _room_acoustics(
             dims, alpha, distance,
             alpha_limit=kw.get("alpha_limit", 0.3),
-            ir_duration_s=kw.get("ir_duration_s", 3.0),
+            realized_support_s=kw.get("realized_support_s", lambda _t60: kw.get("ir_duration_s", 3.0)),
+            iso_t30_decay_range_db=kw.get("iso_t30_decay_range_db", 45.0),
             characterization=kw.get("characterization", "sabine"),
         )
 
@@ -192,7 +219,7 @@ class TestReceiverInsideCriticalDistance:
         r_c = critical_distance(surface, alpha)
         return _room_acoustics(
             dims, alpha, d_over_rc * r_c,
-            alpha_limit=0.3, ir_duration_s=3.0, characterization="sabine",
+            alpha_limit=0.3, realized_support_s=lambda _t60: 3.0, iso_t30_decay_range_db=45.0, characterization="sabine",
         )
 
     def test_half_the_critical_distance_flags(self) -> None:
@@ -234,7 +261,7 @@ class TestNonEnclosureGeometryIsNotCharacterized:
     def test_a_non_enclosure_gets_a_reason_not_a_number(self) -> None:
         room = _room_acoustics(
             (10.0, 8.0, 3.5), 0.2, 3.0,
-            alpha_limit=0.3, ir_duration_s=3.0, characterization="none",
+            alpha_limit=0.3, realized_support_s=lambda _t60: 3.0, iso_t30_decay_range_db=45.0, characterization="none",
         )
         for key in ("t60_sabine_s", "critical_distance_m", "drr_db", "d_over_rc"):
             assert key not in room, (
@@ -259,8 +286,19 @@ class TestValidityReachesTheReport:
     @pytest.fixture(scope="class")
     @classmethod
     def ri_report(cls, tmp_path_factory) -> dict:
+        """RI's scenes, with the RECORD-LENGTH gate relaxed so it does not abort.
+
+        These tests are about the DIFFUSE-FIELD block (AC-21). RI's record-length
+        gate now refuses that config outright — correctly, see
+        `TestRealizedRecordLengthGate` — and letting that abort here would silently
+        stop AC-21 from being tested at all. The relaxation is scoped to this
+        fixture and changes no diffuse-field quantity: the flags below are
+        functions of alpha and geometry, not of record length.
+        """
         run_dir = tmp_path_factory.mktemp("ri_validity")
-        run_gen_scenes(Config.load(*_RI), run_dir, QUIET)
+        cfg = Config.load(*_RI).model_copy(deep=True)
+        cfg.scenes.max_t60_over_ir_duration_frac = 1.0
+        run_gen_scenes(cfg, run_dir, QUIET)
         return json.loads((run_dir / "scenes" / "placement_report.json").read_text())
 
     def test_material_shift_is_entirely_outside_the_diffuse_domain(

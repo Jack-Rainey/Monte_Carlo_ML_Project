@@ -508,12 +508,12 @@ def _scored_entry(n: int, over: int, n_none: int = 0) -> dict:
     it pins the gate against a state that cannot occur, and blocks the gate from
     ever reading its own published denominator.
     """
-    rooms: list[dict] = [{"t60_exceeds_ir_duration": i < over} for i in range(n)]
+    rooms: list[dict] = [{"decay_range_below_iso_t30": i < over} for i in range(n)]
     rooms += [{"characterization": "none"} for _ in range(n_none)]
     return {
         "n_scenes": n + n_none,
-        "t60_over_ir_duration": _flag_counts(
-            rooms, ("t60_exceeds_ir_duration",),
+        "record_decay_range": _flag_counts(
+            rooms, ("decay_range_below_iso_t30",),
             uncharacterized_consequence="unchecked.",
         ),
     }
@@ -557,15 +557,15 @@ class TestUncharacterizedScenesLeaveTheRecordLengthGate:
         self, tmp_path: Path
     ) -> None:
         run_gen_scenes(_openfield_config(), tmp_path, QUIET)
-        block = self._report(tmp_path)["test_openfield"]["t60_over_ir_duration"]
+        block = self._report(tmp_path)["test_openfield"]["record_decay_range"]
 
         assert block["n_scenes"] == 0, (
             "uncharacterized scenes are still in the denominator — the sibling "
             "diffuse_field_validity block has honoured this rule all along (F-71)"
         )
         assert block["n_uncharacterized"] == 3
-        assert block["t60_exceeds_ir_duration"]["count"] == 0
-        assert block["t60_exceeds_ir_duration"]["fraction"] is None, (
+        assert block["decay_range_below_iso_t30"]["count"] == 0
+        assert block["decay_range_below_iso_t30"]["fraction"] is None, (
             "an unscored quantity was rendered as a number"
         )
 
@@ -574,9 +574,9 @@ class TestUncharacterizedScenesLeaveTheRecordLengthGate:
     ) -> None:
         room = _room_acoustics(
             (10.0, 10.0, 3.5), 0.3, 4.0,
-            alpha_limit=0.5, ir_duration_s=0.1, characterization="none",
+            alpha_limit=0.5, realized_support_s=lambda _t60: 0.1, iso_t30_decay_range_db=45.0, characterization="none",
         )
-        assert "t60_exceeds_ir_duration" not in room, (
+        assert "decay_range_below_iso_t30" not in room, (
             "present-and-False reads as 'measured, and within the record' (F-71)"
         )
         assert "uncharacterized_reason" in room
@@ -606,7 +606,7 @@ class TestUncharacterizedScenesLeaveTheRecordLengthGate:
         drifted apart, so they are pinned to each other here."""
         run_gen_scenes(_openfield_config(), tmp_path, QUIET)
         for name, entry in self._report(tmp_path).items():
-            block = entry["t60_over_ir_duration"]
+            block = entry["record_decay_range"]
             derived = entry["n_scenes"] - block.get("n_uncharacterized", 0)
             assert derived == block["n_scenes"], name
 
@@ -664,8 +664,8 @@ class TestPerSplitOverLimitWarning:
         report = json.loads(
             (tmp_path / "scenes" / "placement_report.json").read_text()
         )
-        over = report["test_openfield"]["t60_over_ir_duration"]
-        assert over["t60_exceeds_ir_duration"]["fraction"] is None
+        over = report["test_openfield"]["record_decay_range"]
+        assert over["decay_range_below_iso_t30"]["fraction"] is None
 
     def test_a_wholly_uncharacterized_config_is_unscored_not_passed(
         self, capsys
@@ -730,7 +730,7 @@ class TestPerSplitOverLimitWarning:
             (tmp_path / "scenes" / "placement_report.json").read_text()
         )
         assert all(
-            e["t60_over_ir_duration"]["n_scenes"] == 0 for e in report.values()
+            e["record_decay_range"]["n_scenes"] == 0 for e in report.values()
         )
 
 
@@ -744,7 +744,7 @@ class TestIsoMinimumDistanceDisclosure:
     def _d_min(dims, alpha) -> dict:
         return _room_acoustics(
             dims, alpha, 2.0,
-            alpha_limit=0.5, ir_duration_s=10.0, characterization="sabine",
+            alpha_limit=0.5, realized_support_s=lambda _t60: 10.0, iso_t30_decay_range_db=45.0, characterization="sabine",
         )
 
     @staticmethod
@@ -902,7 +902,7 @@ class TestIsoMinimumDistanceDisclosure:
 
 class TestTheGateDiagnosesAReportKeyItCannotScore:
     """S-F4: the gate iterates EVERY top-level key of `placement_report.json` and
-    indexes `entry["t60_over_ir_duration"]` unconditionally. A future non-split
+    indexes `entry["record_decay_range"]` unconditionally. A future non-split
     metadata key — which AC-30/AC-50's disclosure work and AC-54/RD-144's
     absorption convention both invite — raised a bare KeyError."""
 
@@ -972,10 +972,10 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
         it against the emit-iff-nonzero contract. Two expressions for one number is
         the AC-24 shape, so a disagreement stops the run rather than being resolved
         silently in favour of either (RD-113)."""
-        report = {"id": {"n_scenes": 10, "t60_over_ir_duration": {
+        report = {"id": {"n_scenes": 10, "record_decay_range": {
             "n_scenes": 7,                 # published
             "n_uncharacterized": 6,        # implies 4
-            "t60_exceeds_ir_duration": {"count": 0}}}}
+            "decay_range_below_iso_t30": {"count": 0}}}}
 
         with pytest.raises(ValueError, match="have diverged"):
             _disclose_and_gate_record_length(tiny_config(), report, QUIET)
@@ -1032,14 +1032,14 @@ class TestTheMixedCharacterizedSplit:
     ever sees 0 or n. The roadmap's outdoor families make it reachable, and until
     then this is the only thing that exercises it."""
 
-    FLAGS = ("t60_exceeds_ir_duration",)
+    FLAGS = ("decay_range_below_iso_t30",)
 
     @staticmethod
     def _mixed(n_sabine: int, n_none: int, n_over: int) -> list[dict]:
         """`n_sabine` characterized scenes of which `n_over` breach the record,
         plus `n_none` uncharacterized ones carrying no flag at all."""
         rooms = [
-            {"characterization": "sabine", "t60_exceeds_ir_duration": i < n_over}
+            {"characterization": "sabine", "decay_range_below_iso_t30": i < n_over}
             for i in range(n_sabine)
         ]
         rooms += [
@@ -1051,12 +1051,12 @@ class TestTheMixedCharacterizedSplit:
     def test_flag_counts_scores_only_the_characterized_half(self) -> None:
         block = _flag_counts(
             self._mixed(n_sabine=4, n_none=6, n_over=4), self.FLAGS,
-            uncharacterized_consequence="unchecked.", ir_duration_s=0.1,
+            uncharacterized_consequence="unchecked.", iso_t30_decay_range_db=45.0,
         )
         assert block["n_scenes"] == 4, "the denominator kept the non-enclosures"
         assert block["n_uncharacterized"] == 6
-        assert block["t60_exceeds_ir_duration"]["count"] == 4
-        assert block["t60_exceeds_ir_duration"]["fraction"] == 1.0, (
+        assert block["decay_range_below_iso_t30"]["count"] == 4
+        assert block["decay_range_below_iso_t30"]["fraction"] == 1.0, (
             "4 of 4 characterized scenes breach: diluting to 4/10 = 0.4 is the "
             "F-71 attack surviving inside a single split (S-F5)"
         )
@@ -1065,9 +1065,9 @@ class TestTheMixedCharacterizedSplit:
         """RD-113's pin, on the population RD-113's own test cannot construct."""
         block = _flag_counts(
             self._mixed(n_sabine=4, n_none=6, n_over=2), self.FLAGS,
-            uncharacterized_consequence="unchecked.", ir_duration_s=0.1,
+            uncharacterized_consequence="unchecked.", iso_t30_decay_range_db=45.0,
         )
-        entry = {"n_scenes": 10, "t60_over_ir_duration": block}
+        entry = {"n_scenes": 10, "record_decay_range": block}
         assert entry["n_scenes"] - block["n_uncharacterized"] == block["n_scenes"]
 
     def test_the_gate_refuses_on_the_characterized_fraction(self, capsys) -> None:
@@ -1075,9 +1075,9 @@ class TestTheMixedCharacterizedSplit:
         counting the six non-enclosures would give."""
         block = _flag_counts(
             self._mixed(n_sabine=4, n_none=6, n_over=4), self.FLAGS,
-            uncharacterized_consequence="unchecked.", ir_duration_s=0.1,
+            uncharacterized_consequence="unchecked.", iso_t30_decay_range_db=45.0,
         )
-        report = {"test_mixed": {"n_scenes": 10, "t60_over_ir_duration": block}}
+        report = {"test_mixed": {"n_scenes": 10, "record_decay_range": block}}
         cfg = tiny_config(scenes={"max_t60_over_ir_duration_frac": 0.5})
 
         with pytest.raises(ValueError, match="4 of 4 scenes") as exc:
@@ -1126,7 +1126,7 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
     def test_the_scene_reason_names_record_length(self) -> None:
         room = _room_acoustics(
             (10.0, 10.0, 3.5), 0.3, 4.0,
-            alpha_limit=0.5, ir_duration_s=0.1, characterization="none",
+            alpha_limit=0.5, realized_support_s=lambda _t60: 0.1, iso_t30_decay_range_db=45.0, characterization="none",
         )
         reason = room["uncharacterized_reason"]
         assert "UNCHECKED" in reason and "record" in reason, (
@@ -1153,7 +1153,7 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
             assert "UNCHECKED" in e["reason"]
         # The count in the flag block and the per-unit list must agree — one is the
         # aggregate OF the other, not a second independent tally (AC-24 shape).
-        block = report["test_openfield"]["t60_over_ir_duration"]
+        block = report["test_openfield"]["record_decay_range"]
         assert block["n_uncharacterized"] == len(entries)
 
     def test_a_fully_characterized_split_carries_no_empty_list(
@@ -1177,7 +1177,7 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
         report = json.loads(
             (tmp_path / "scenes" / "placement_report.json").read_text()
         )
-        block = report["test_openfield"]["t60_over_ir_duration"]
+        block = report["test_openfield"]["record_decay_range"]
 
         assert block["n_uncharacterized"] == 3
         assert "UNCHECKED" in block["uncharacterized_note"], (
@@ -1185,7 +1185,7 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
             "decision rather than an unguarded residual (AC-53)"
         )
         # An enclosed split has nothing to exclude, so it carries no note at all.
-        assert "uncharacterized_note" not in report["id"]["t60_over_ir_duration"]
+        assert "uncharacterized_note" not in report["id"]["record_decay_range"]
 
     def test_each_block_declares_its_own_consequence(self, tmp_path: Path) -> None:
         """The exclusion COSTS something different per block, so one shared
@@ -1199,11 +1199,11 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
 
         notes = {
             block: entry[block]["uncharacterized_note"]
-            for block in ("diffuse_field_validity", "t60_over_ir_duration",
+            for block in ("diffuse_field_validity", "record_decay_range",
                           "below_iso_min_distance")
         }
         assert len(set(notes.values())) == 3, notes
-        assert "UNCHECKED" in notes["t60_over_ir_duration"]
+        assert "UNCHECKED" in notes["record_decay_range"]
         assert "never applied to these scenes" in notes["diffuse_field_validity"]
         assert "vacuous" in notes["below_iso_min_distance"]
         # Each clause must distinguish the FREE-FIELD case from the PARTIALLY-OPEN
@@ -1215,4 +1215,4 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
 
     def test_the_clause_is_required_not_defaulted(self) -> None:
         with pytest.raises(TypeError):
-            _flag_counts([], ("t60_exceeds_ir_duration",), ir_duration_s=0.1)
+            _flag_counts([], ("decay_range_below_iso_t30",), iso_t30_decay_range_db=45.0)
