@@ -47,60 +47,45 @@ it is built right, in three non-overlapping senses.
 
 ## Review ledger and definition of done
 
-`docs/review_ledger.md` holds ONLY unresolved findings — it is working memory for
-the loop, not an audit log.
-
-**It says what still needs doing. It is not a record of how anything was done.**
-No integration records, no fold write-ups, no per-pass verdict summaries, no
-corrections to your own earlier claims, no narration of what a cycle did. If a
-fact matters durably it belongs in `docs/design_spec.md`; if it does not, it
-belongs nowhere. Cycle 5 ended with 898 of 1264 ledger lines being prose of
-exactly this kind, and 108 rows that changed no behaviour and meant nothing to
-a reader deciding what to work on.
-
-**A finished thing is DELETED, not marked OPEN.** A row whose fix is applied is
-gone. If the fix turns out to be wrong, a reviewer raises it fresh — that is
-what the loop is for, and it is cheaper than carrying a claim indefinitely. Resolved findings are DELETED, never marked resolved:
-the git history of the file is the audit trail, so nothing is lost and stale rows
-do not accumulate to confuse later sessions.
+`docs/review_ledger.md` holds ONLY unresolved findings. **It says what still
+needs doing. It is not a record of how anything was done.** No integration
+records, no fold write-ups, no per-pass verdict summaries, no corrections to your
+own earlier claims, no narration of what a cycle did. If a fact matters durably
+it belongs in `docs/design_spec.md`; if it does not, it belongs nowhere. Cycle 5
+ended with 898 of 1264 ledger lines being prose of exactly that kind.
 
 One row per finding:
 `ID | agent | severity (blocker|major|minor) | status | anchor | finding | resolution`
 
-- Status is exactly one of two values:
-  - OPEN — not yet resolved. A fix applied but not yet re-review-confirmed stays
-    OPEN; note "fix applied, awaiting re-review" in `resolution`.
-    **"Awaiting re-review" lasts ONE review pass, not one epoch.** The pass that
-    follows a fix MUST re-derive it and return CONFIRMED / NOT FIXED / REFUTED —
-    you do not wait for some later cycle to notice. Cycle 4 ended with 34 such
-    rows, some carried since cycle 3, and when they were finally checked several
-    were not fixed and one was refuted outright. An unverified fix is a claim,
-    and this project does not run on claims.
-  - DEFERRED — intentionally out of scope for the current gate, with a one-line
-    reason and the gate it belongs to. This is the live backlog.
-- There is NO ADDRESSED/RESOLVED status. The moment a finding is fixed AND
-  re-review-confirmed clean, delete its row.
-- Keep prose to a minimum: the DEFERRED backlog and a short "resume here" pointer
-  are the only durable content. Do NOT accumulate per-pass re-review write-ups
-  here — git log and the resume note cover that.
+**A finished thing is DELETED, not marked OPEN.** The moment a fix is applied,
+the row goes. Git is the audit trail — `git log -S '<id>' -p`. If the fix turns
+out to be wrong a reviewer raises it fresh, which is what the loop is for and is
+cheaper than carrying a claim indefinitely. There is no "awaiting re-review"
+status and no ADDRESSED/RESOLVED status; a row is OPEN or it is gone.
 
-Definition of done: complete only after a full plan → implement → review cycle in
-which every invoked reviewer returns zero new findings AND the ledger has zero
-OPEN rows (DEFERRED backlog may remain) AND **zero rows sit in "fix applied,
-awaiting re-review"** — that last clause because a fix nobody re-derived is a
-claim, and a backlog of them makes "zero new findings" look reachable while the
-unverified pile grows behind it. Because resolved rows are deleted, "zero OPEN
-rows" is now literally a near-empty ledger.
+Status is exactly one of two values:
+
+- **OPEN** — not yet fixed.
+- **DEFERRED** — deliberately out of scope for the current gate, with a one-line
+  reason and the gate it belongs to. This is the live backlog.
+
+**A row must be worth a reader's time.** If it changes neither what the code does
+nor what a reported number means, do not file it. Cycle 5 accumulated 108 such
+rows — comment length, docstring narration, bookkeeping about our own ledger and
+lane files — and they made the real work harder to see.
+
+Definition of done: a full plan → implement → review cycle in which every invoked
+reviewer returns zero new findings over the tree that ships, and the ledger has
+zero OPEN rows (DEFERRED may remain).
 
 ## Implementation loop
 
 Repeat until a clean pass: plan (Plan Mode) → implement → invoke reviewers by
 name → write findings to the ledger → address OPEN findings → repeat.
 
-- **A reviewer pass has TWO jobs: find new defects, AND verify the "fix applied,
-  awaiting re-review" backlog.** Send each reviewer its own such rows and require
-  a per-row verdict. Only then can a row be deleted. A pass that only looks for
-  new things guarantees the ledger grows monotonically.
+- **A reviewer pass has TWO jobs: find new defects, AND re-derive the rows its own
+  class already owns.** Send each reviewer its rows and require a per-row verdict.
+  A pass that only looks for new things guarantees the ledger grows monotonically.
 - **A pass whose findings you then fixed is NOT the last pass — re-run it.** The
   loop ends on a pass over the tree that SHIPS, returning zero new findings; it
   does not end on a pass followed by a fix phase. This binds the integrator

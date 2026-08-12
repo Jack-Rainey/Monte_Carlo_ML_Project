@@ -308,7 +308,8 @@ Serial, in the main checkout, after the lanes report:
 4. Canonical dry run, and a fixed-seed `ci_table.csv` A/B against the baseline
    captured before the lanes started.
 5. Fold `docs/ledger_inbox/*.md` into the ledger — new findings become rows,
-   closures get "fix applied, awaiting re-review". **Delete nothing yet.**
+   a fix a lane applied means the row is DELETED at the fold — the lane did the
+   work, and carrying it as a claim is what bloated cycle 5.
    Two things the fold must do, both learned the hard way in cycle 4:
    - **Every finding becomes a TABLE ROW with a FILE ANCHOR.** Not a prose
      enumeration — `tests/test_lane_partition.py` parses `| ID |` rows only, so a
@@ -413,9 +414,9 @@ part that changes; the machinery, the guard and the tests are cycle-agnostic.
    `integrator_queue:`, `awaiting_re_review:`, and anything raised against the
    partition itself. Print the arithmetic in the yaml header. A row in no list is
    the silent omission RD-73 exists to prevent; a row in two is two plans.
-3. **Exclude "FIX APPLIED, awaiting re-review" rows from every lane.** They are
-   confirmations the integration reviewer pass produces. Assigning one invites a
-   second fix stacked on a first that nobody checked.
+3. **A row a previous cycle already fixed is not work — it should not be in the
+   ledger at all.** If one survives, it does not go to a lane: assigning it
+   invites a second fix stacked on a first.
 4. **Draw ownership by file, then check the rows fit it** — not the reverse. For
    each row write the `fix:` and `test:` paths first; if they cross a lane
    boundary the row is a rule-4 spanning row, and no amount of redrawing lanes
