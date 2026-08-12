@@ -1,6 +1,7 @@
 """render stage: call simulator for each scene, save paired low+high IRs."""
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -13,19 +14,20 @@ from .base import (
     IRResult,
     SceneSpec,
     build_simulator,
+    simulator_host_scoped_params,
     simulator_min_separation,
     validate_path_descriptor,
     validate_provenance,
 )
 
-#: Simulator params that are HOST facts, not dataset facts, and so are redacted from
-#: the canonical provenance echo below (RD-114). `render_python` is an absolute path to
-#: a machine-local interpreter: stamping it would make the same render carry different
-#: provenance on the Apple-Silicon and the native-x86_64 host the project must both
-#: support, and would leak a user home path into every scene's meta.json. The value
-#: still governs nothing about the result — it only says which interpreter ran it —
-#: and it moves to `RunContext.host` when RD-20 lands.
-_HOST_SCOPED_PARAMS = ("render_python",)
+
+def _sha256(path: Path) -> str:
+    """Digest one written artifact, streamed — an IR pair is ~26 MB per scene."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _preflight_separations(config: Config, scenes: list[SceneSpec]) -> None:
@@ -67,6 +69,7 @@ def _canonical_meta(
     scene: SceneSpec,
     low: IRResult,
     high: IRResult,
+    artifact_sha256: dict[str, str] | None = None,
 ) -> dict:
     """The provenance record for one scene's rendered pair.
 
@@ -78,14 +81,20 @@ def _canonical_meta(
     Simulator-agnostic by construction: the stage contributes what IT knows (the
     resolved config context), and each leg's backend specifics come from the
     simulator's own `IRResult.meta`, validated against REQUIRED_PROVENANCE_KEYS.
-    No branch here knows what a gsound is.
+    No branch here knows what a gsound is — including which params are host-scoped,
+    which the BACKEND declares and this asks for (F-86).
+
+    `artifact_sha256` is the integrity record for the files written beside this one
+    (F-90). `rng_seeded: false` puts reproducibility on the cached artifacts rather
+    than on re-render bit-identity, so without digests two physically different
+    datasets carry byte-identical provenance and a truncated write is undetectable.
     """
-    params = {
-        k: v for k, v in config.simulator.params.items() if k not in _HOST_SCOPED_PARAMS
-    }
+    host_scoped = simulator_host_scoped_params(config)
+    params = {k: v for k, v in config.simulator.params.items() if k not in host_scoped}
     return {
         "scene_id": scene.scene_id,
         "simulator": {"name": config.simulator.name, "params": params},
+        "artifact_sha256": artifact_sha256 or {},
         "sample_rate": config.sample_rate,
         "n_samples": config.n_samples,
         "n_channels": config.n_channels,
@@ -151,13 +160,29 @@ def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 leg=leg,
             )
 
-        assert low_result.ir.shape == (config.n_channels, config.n_samples), (
-            f"Expected IR shape ({config.n_channels}, {config.n_samples}), "
-            f"got {low_result.ir.shape}"
-        )
+        # BOTH legs, and a raise rather than a bare `assert` (F-98): the high leg
+        # was checked by nothing, and `python -O` strips an assert — leaving the
+        # only shape guard on the canonical artifact silently absent.
+        expected_shape = (config.n_channels, config.n_samples)
+        for leg, result in (("low", low_result), ("high", high_result)):
+            if result.ir.shape != expected_shape:
+                raise ValueError(
+                    f"scene {scene.scene_id!r} leg {leg!r}: simulator "
+                    f"{config.simulator.name!r} returned an IR of shape "
+                    f"{result.ir.shape}, expected {expected_shape} "
+                    f"(n_channels, n_samples) from the resolved config."
+                )
+
+        # Names this stage WROTE, accumulated as it writes them. Not a listing of
+        # out_dir: a directory scan picks up whatever the host put there — on macOS
+        # over a non-native filesystem that means AppleDouble `._low.npy` sidecars —
+        # which would put a host fact into canonical provenance and make the same
+        # render's meta.json differ between the two supported hosts (F-90/RD-114).
+        written: list[str] = []
 
         np.save(out_dir / "low.npy", low_result.ir)
         np.save(out_dir / "high.npy", high_result.ir)
+        written += ["low.npy", "high.npy"]
 
         # The retained-path artifact, for backends that export paths (RD-08). Keyed
         # on the FIELD, never on the simulator's type: a backend without paths — the
@@ -174,12 +199,20 @@ def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 result.paths, simulator_name=config.simulator.name, scene_id=scene.scene_id
             )
             result.paths.to_parquet(out_dir / f"paths_{leg}.parquet")
+            written.append(f"paths_{leg}.parquet")
+
+        # Digest what this scene produced, AFTER the last write and BEFORE meta.json,
+        # which is the file that carries them (F-90).
+        digests = {name: _sha256(out_dir / name) for name in sorted(written)}
 
         # Canonical provenance — never verbosity-gated (RD-16). Diagnostic extras
         # (Step 4's per-criterion QC record) attach behind `saves("diagnostics")`
         # when they exist; there are none yet. See docs/verbosity.md.
         (out_dir / "meta.json").write_text(
-            json.dumps(_canonical_meta(config, scene, low_result, high_result), indent=2)
+            json.dumps(
+                _canonical_meta(config, scene, low_result, high_result, digests),
+                indent=2,
+            )
         )
 
     emit(verbosity, "progress", f"  Rendered {len(scene_paths)} scenes → {renders_dir}")
