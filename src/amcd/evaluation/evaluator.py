@@ -124,8 +124,17 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             # only for dropped ones (RD-44): reported ISO absolutes are windowed by
             # the noisier physical leg, so a reader must be able to see the window
             # that produced them.
+            # Units declared IN the artifact (AC-132): the index is in SAMPLES and
+            # the band key in Hz, and neither was stated — nor the sample_rate a
+            # reader needs to convert one to seconds.
             iso_windows[scene_id] = {
-                band: {"trunc_idx": idx, "set_by_leg": src}
+                band: {
+                    "trunc_idx_samples": idx,
+                    "trunc_s": idx / config.sample_rate,
+                    "band_hz": float(band),
+                    "sample_rate": config.sample_rate,
+                    "set_by_leg": src,
+                }
                 for band, (idx, src) in room_window.items()
             }
         else:

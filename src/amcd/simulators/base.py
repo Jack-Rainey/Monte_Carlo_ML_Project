@@ -151,7 +151,20 @@ class PathData:
     #: (N, num_bands) per-band energy. Bands are named by `band_edges_hz` /
     #: `band_centres_hz` in the descriptor — never positionally by convention.
     intensities: np.ndarray
-    #: (N, 3) unit vectors.
+    #: (N, 3) unit vectors in the WORLD frame, one per path (AC-81).
+    #:
+    #: SENSE, which the ambisonic encoding depends on and which was undeclared:
+    #: `listener_directions` is the direction of ARRIVAL AT THE LISTENER — it
+    #: points from the listener toward where the energy comes from, matching
+    #: upstream's `directionFromListener`. `source_directions` is the direction of
+    #: EMISSION AT THE SOURCE, pointing from the source along the path's departure.
+    #: They are NOT negatives of each other except on the direct path in free
+    #: field: a reflected path leaves the source and arrives at the listener along
+    #: different bearings, which is the whole reason both are stored.
+    #:
+    #: A sign error here rotates the soundfield rather than failing, so it would
+    #: survive every scalar metric in this project — T30, EDT and C50 are all
+    #: computed from the W channel alone and are blind to it.
     listener_directions: np.ndarray
     source_directions: np.ndarray
     #: (N,) upstream path-type bitmask. The bit→meaning mapping is upstream's

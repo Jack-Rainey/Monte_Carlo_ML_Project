@@ -10,26 +10,23 @@ import pandas as pd
 from ..config import Config
 from ..runtime import Verbosity, emit
 
-#: Marker for a metric whose unit is the OPERAND DOMAIN's, squared — it is not a
-#: fixed string because the same metric has different units under different
-#: representations. Resolved from the preprocess-stamped `value_domain`.
-_OPERAND_DOMAIN_SQUARED = object()
+class _OperandDomainSquared:
+    """A metric whose unit is the OPERAND DOMAIN's, squared.
+
+    Not a fixed string: the same metric carries different units under different
+    representations, so it is resolved from the preprocess-stamped `value_domain`.
+    A named type rather than a bare `object()` (RR-145) so that
+    `dict[str, str | _OperandDomainSquared]` tells a reader what a legal entry is.
+    """
+
+
+_OPERAND_DOMAIN_SQUARED = _OperandDomainSquared()
 
 #: Metric → the unit `paired_improvement` returns it in (evaluation/metric_row.py).
-#:
-#: A UNIT CANNOT BE DERIVED FROM `kind` (AC-48/RD-201). `kind` is
-#: match_reference|maximize|minimize, and `T30` and `C50` share `match_reference`
-#: while one is seconds and the other decibels — so the reported `Imp mean`, CI and
-#: MDES columns mixed s and dB in one table with nothing distinguishing them.
-#:
-#: Declared per metric rather than defaulted, and `_unit_for` RAISES on an
-#: unlisted one: a blank unit on a physical quantity is exactly the silent
-#: exclusion the drop log exists to prevent, and a metric added later must state
-#: its unit rather than inherit a guess. The durable form of this table is a
-#: `unit` declared beside `kind` on the metric itself and carried into
-#: `ci_table.csv`; that spans the metric-computation lane, so it is filed for the
-#: integrator rather than half-built here.
-_METRIC_UNITS: dict[str, object] = {
+#: A unit cannot come from `kind`: `T30` and `C50` are both `match_reference` and
+#: differ in unit. Unlisted → `_unit_for` raises. The durable form declares `unit`
+#: beside `kind` on the metric itself and carries it into `ci_table.csv` (RD-201).
+_METRIC_UNITS: dict[str, str | _OperandDomainSquared] = {
     "T30": "s",
     "EDT": "s",
     "C50": "dB",
@@ -66,7 +63,7 @@ def _unit_for(metric: str, value_domain: str) -> str:
             f"metrics measured in seconds and in decibels, so a reader cannot tell "
             f"what it is. Add it to `_METRIC_UNITS` in reporting/tables.py."
         ) from None
-    if unit is not _OPERAND_DOMAIN_SQUARED:
+    if isinstance(unit, str):   # narrows the union, so `-> str` is honest (RR-145)
         return unit
     try:
         return _DOMAIN_UNITS[value_domain]
@@ -115,9 +112,6 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
 
     df = pd.DataFrame(summary)
 
-    # "N sc/att" = scored/attempted per (split, metric) (F-21): the scored count
-    # is the paired-improvement population; a gap vs attempted means legs were
-    # dropped — per-leg reasons in the run's metrics/drops.csv.
     col_w = {"metric": 22, "n": 8, "pred": 10, "imp": 10, "ci": 22, "mdes": 10,
              "unit": 6, "improved": 14, "caveat": 18}
 
@@ -189,6 +183,7 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     ci_label = f"Imp {100 * (1 - config.bootstrap_alpha):g}% CI"
     hdr = (
         f"{'Metric':<{col_w['metric']}} "
+        # The scored count IS the paired-improvement population (F-21).
         f"{'N sc/att':>{col_w['n']}} "
         f"{'Pred mean':>{col_w['pred']}} "
         f"{'Imp mean':>{col_w['imp']}} "

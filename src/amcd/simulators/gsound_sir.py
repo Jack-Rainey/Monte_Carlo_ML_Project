@@ -42,8 +42,14 @@ _N_BANDS = 8
 #: which package code CANNOT import — `scripts/` has no `__init__.py`, is not
 #: installed, and is not on the `PYTHONPATH` the pipeline runs under. Reaching it
 #: would take a sys.path hack, i.e. an assumption about repo layout inside package
-#: code. Two small constants beat that. They are currently a THIRD copy, not a
-#: single source of truth — the worker inlines both literals again (F-123).
+#: code. Two small constants beat that.
+#:
+#: THE WORKER DOES NOT USE THEM (F-123). `_WORKER_SRC` is a raw string compiled in
+#: a separate interpreter, so it cannot close over module globals and inlines both
+#: literals itself. These two names are therefore the PARENT-side copy only, and
+#: the worker's inlined pair is a third. Interpolating them into `_WORKER_SRC`
+#: would make one source of truth of the two; until that happens, a change here
+#: must be made in the worker string as well.
 _RECEIPT_NAME = "amcd_gsound_install.json"
 _RECEIPT_SHA_KEY = "commit_sha"
 

@@ -347,7 +347,13 @@ def _run_d0b(
                 # The window both legs were integrated over, and which leg set it
                 # (AC-17/RD-44) — a residual is only interpretable alongside it.
                 "iso_integration_window": {
-                    f"{fc:g}": {"trunc_idx": idx, "set_by_leg": src}
+                    f"{fc:g}": {
+                        "trunc_idx_samples": idx,
+                        "trunc_s": idx / config.sample_rate,
+                        "band_hz": float(fc),
+                        "sample_rate": config.sample_rate,
+                        "set_by_leg": src,
+                    }
                     for fc, (idx, src) in zip(iso_eval_freqs, shared_trunc)
                 },
             }
