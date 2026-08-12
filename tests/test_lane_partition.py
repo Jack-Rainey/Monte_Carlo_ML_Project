@@ -207,6 +207,26 @@ def test_no_ledger_row_id_is_duplicated() -> None:
     )
 
 
+def _ids_lanes_raised_from_their_own_blocks(spec: dict) -> set[str]:
+    """Ids a lane actually raised: inside its OWN id_block AND in its OWN inbox.
+
+    This is the attribution both F-210 and F-212 rest on. Deriving it from the
+    partition's buckets would be circular — the buckets are what it validates —
+    and would have widened silently when RD-264 split the fold's output in two.
+    """
+    raised: set[str] = set()
+    for lane in spec["lanes"]:
+        inbox = _REPO_ROOT / lane["inbox"]
+        if not inbox.exists():
+            continue
+        block: set[str] = set()
+        for prefix, rng in (lane.get("id_block") or {}).items():
+            lo, _, hi = str(rng).partition("..")
+            block |= {f"{prefix}-{n}" for n in range(int(lo), int(hi) + 1)}
+        raised |= {i for i in _ID_RE.findall(inbox.read_text()) if i in block}
+    return raised
+
+
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
 def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
     """Rule 6: each lane allocates new ids only from its own declared block, and no
@@ -230,13 +250,22 @@ def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
 
     # A CONSUMED block is not a collision. Once a lane reports and its findings
     # are folded, ids from its own block are live OPEN rows BY DESIGN — that is
-    # rule 6 working, not failing. What RD-126 forbids is a lane allocating an id
-    # that names SOMEONE ELSE's live finding, so an id is exempt here only if the
-    # lane's own inbox is where it came from.
-    own: dict[str, set[str]] = {}
-    for lane in spec["lanes"]:
-        inbox = _REPO_ROOT / lane["inbox"]
-        own[lane["id"]] = set(_ID_RE.findall(inbox.read_text())) if inbox.exists() else set()
+    # rule 6 working, not failing.
+    #
+    # The exemption is ATTRIBUTION, not mention (F-210). Exempting any id the
+    # lane's inbox happens to NAME is blind to the exact failure this guard
+    # exists for: a lane that allocates a colliding id necessarily writes that id
+    # into its own inbox, so a mention-based exemption fires precisely in the case
+    # RD-126 forbids. Measured: with a mention-based rule, setting lane M's F
+    # block to "99..99" — F-99 is a live pre-existing row — PASSES as soon as M's
+    # inbox names F-99.
+    #
+    # Attribution is computed from AUTHORSHIP, not from a bucket: an id is exempt
+    # only if it lies in some lane's own declared block AND appears in THAT lane's
+    # own inbox. Deriving it from a partition list instead would make the guard
+    # depend on bucket hygiene — and RD-264 has since split the fold's output
+    # across two buckets, which would have silently widened the exemption.
+    consumed = _ids_lanes_raised_from_their_own_blocks(spec)
 
     seen: dict[tuple[str, int], str] = {}
     for lane in spec["lanes"]:
@@ -249,12 +278,12 @@ def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
             for n in range(int(lo), int(hi) + 1):
                 assert (
                     n not in used.get(prefix, ())
-                    or f"{prefix}-{n}" in own[lane["id"]]
+                    or f"{prefix}-{n}" in consumed
                 ), (
                     f"{path.name}: lane {lane['id']}'s block {prefix}-{rng} contains "
-                    f"{prefix}-{n}, which is ALREADY an OPEN ledger row raised "
-                    "somewhere other than this lane's own inbox. A lane that "
-                    "allocates it would overwrite a live finding (RD-126)."
+                    f"{prefix}-{n}, which is ALREADY an OPEN ledger row and is NOT "
+                    "one this cycle's fold created. A lane that allocates it would "
+                    "overwrite a live finding (RD-126, F-210)."
                 )
                 key = (prefix, n)
                 assert key not in seen, (
@@ -632,3 +661,113 @@ def test_every_inbox_finding_reaches_the_ledger(path: Path, spec: dict) -> None:
             "'Fold decisions' heading. A finding in none of the three is invisible "
             "to every later cycle (RD-142, F-160)."
         )
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_every_declared_inbox_exists(path: Path, spec: dict) -> None:
+    """A missing inbox must not read as "nothing to check" (F-211).
+
+    Both fold guards `continue` past an inbox that is not on disk, and nothing
+    asserted one should be — `test_every_declared_brief_exists` covers briefs
+    only. Measured consequences, both real:
+
+    * with `exit_gate: required` and every inbox path missing,
+      `test_every_gated_lane_satisfies_the_exit_gate` PASSES — so a lane that
+      reports NOTHING clears the exit gate;
+    * archiving an inbox at end of cycle (the protocol's own housekeeping) makes
+      `test_every_inbox_finding_reaches_the_ledger` pass VACUOUSLY.
+
+    That is RD-148's shape one level down, inside the guard the fold rests on. A
+    lane that genuinely has not reported yet says so with `reported: false`, which
+    is a declaration rather than an absence.
+    """
+    if path.stem != _CURRENT_CYCLE:
+        pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+
+    for lane in spec["lanes"]:
+        if lane.get("reported") is False:
+            continue
+        inbox = _REPO_ROOT / lane["inbox"]
+        assert inbox.exists(), (
+            f"{path.name}: lane {lane['id']} declares inbox '{lane['inbox']}', "
+            "which does not exist. If the lane has not reported yet, declare "
+            "`reported: false` — an absent file otherwise makes the fold and "
+            "exit-gate checks pass by having nothing to look at (F-211)."
+        )
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_unassigned_holds_only_rows_this_cycles_fold_created(path: Path, spec: dict) -> None:
+    """`unassigned:` must not become a place to park anything (F-212).
+
+    The bucket keeps the coverage identity total instead of forcing the check to
+    be weakened, which is the right trade (RD-146). But nothing constrained its
+    membership, so the identity would decay from "every OPEN row has a PLAN" to
+    "every OPEN row is NAMED in this file" — the coverage-equal-to-its-own-scope
+    figure RD-73 exists to prevent.
+
+    The constraint that makes it honest: an entry must be a finding one of THIS
+    cycle's lanes actually raised. A pre-existing row cannot be parked here to
+    make it look covered, and — since this same set is what exempts a consumed
+    `id_block` (F-210) — neither can a row be exempted from the collision check
+    by listing it.
+    """
+    if path.stem != _CURRENT_CYCLE:
+        pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+
+    unassigned = set(spec.get("unassigned", []))
+    if not unassigned:
+        return
+
+    # `awaiting_re_review:` is a STATUS bucket and may legitimately hold rows the
+    # integrator's own reviewers raised, plus carry-ins from an earlier cycle.
+    # `unassigned:` is the fold's unworked output and is the one with a
+    # provenance claim to keep honest.
+    strays = sorted(unassigned - _ids_lanes_raised_from_their_own_blocks(spec))
+    assert not strays, (
+        f"{path.name}: `unassigned:` lists {strays}, which no lane raised from its "
+        "own id_block in this cycle. That bucket is for rows THIS cycle's fold "
+        "created; anything else parked there makes the coverage identity report "
+        "its own scope, and silently exempts the id from the block-collision "
+        "check (F-212, F-210)."
+    )
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_some_lane_carries_a_row_that_can_move_the_gate(path: Path, spec: dict) -> None:
+    """RD-254's accepted resolution, in full this time (RD-266).
+
+    RD-254 asked for an assertion that "at least one lane's brief declares rows
+    anchored on a live gate condition's path list". What first shipped asserted
+    only that a `gate:` block EXISTS — a real improvement, because it moves the
+    answer from report time to planning time, but not the check that was agreed,
+    and it left `_GATE_PATH_LIST` defined and referenced nowhere.
+
+    This is the pre-measurement half of RD-255: the count of on-path
+    blocker/major rows a partition SCHEDULES is what it should be judged on, and
+    cycle 5's was zero across four lanes.
+    """
+    if path.stem != _CURRENT_CYCLE:
+        pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+
+    rows = _ledger_rows()
+    per_lane: dict[str, int] = {}
+    for lane in spec["lanes"]:
+        n = 0
+        for row in lane["rows"]:
+            cells = rows.get(row["id"])
+            if cells is None or cells[3] not in ("blocker", "major"):
+                continue
+            if any(_owns(p, list(_GATE_PATH_LIST)) for p in _anchor_paths(cells[5])):
+                n += 1
+        per_lane[lane["id"]] = n
+
+    if sum(per_lane.values()):
+        return
+    assert (spec.get("gate") or {}).get("exception"), (
+        f"{path.name}: no lane carries a blocker/major row anchored on the gate's "
+        f"path list — on-path rows scheduled per lane: {per_lane}. A cycle whose "
+        "lanes cannot move the gate ends where it started with a bigger ledger "
+        "(RD-81). Give the gate a lane, or declare `gate.exception` saying why "
+        "this cycle deliberately does not (RD-254, RD-266)."
+    )

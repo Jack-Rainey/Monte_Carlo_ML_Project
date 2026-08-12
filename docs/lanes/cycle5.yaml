@@ -383,16 +383,18 @@ integrator_queue:
   - {id: RR-87, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
   - {id: RR-88, reason: "anchor spans two lanes or names an integrator-owned file (rule 4)"}
 
-awaiting_re_review:
-  [RR-24]
 
 # Raised BY research-director reviewing the cycle-5 INTEGRATION plan, before any
 # implementation. RD-202 noted this list was empty while three lanes were each
 # raising rows against the partition; it is no longer empty, and it is the right
 # home for them — they are findings about this file, not about the code.
 raised_against_this_partition:
-  [RD-250, RD-251, RD-252, RD-253, RD-254, RD-255, RD-256,
-   RD-257, RD-258, RD-259, RD-260, RD-261, RD-262, RD-263]
+  [
+  F-215, F-216, F-217, F-218, F-219, F-220, F-221, RD-250, RD-251, RD-252,
+  RD-253, RD-254, RD-255, RD-256, RD-257, RD-258, RD-259, RD-260, RD-261,
+  RD-262, RD-263, RD-265, RD-267, RD-268, RD-269, RD-270, RD-271, RD-272,
+  RD-273, RD-274
+]
 
 # THE FIFTH LIST (RD-146). These 142 rows were CREATED BY THIS CYCLE'S FOLD, so
 # no partition could have planned them — they did not exist when cycle 5 was
@@ -402,21 +404,33 @@ raised_against_this_partition:
 # to write the rows down. THIS IS CYCLE 6'S INPUT: bucket these into lanes,
 # integrator_queue and awaiting_re_review when drawing that partition, and start
 # from the GATE (planning step 1), not from this list.
+# SPLIT PER RD-264. `unassigned:` alone collapsed the one distinction RD-146
+# exists to preserve: planning step 3 forbids assigning a fix-applied row to a
+# lane, and that is unenforceable if the two are pooled. Split MACHINE-DERIVED
+# from each row's resolution text, not by hand.
+#
+# CYCLE 6 READS BOTH. `awaiting_re_review` rows need a reviewer VERDICT, not a
+# second fix stacked on an unchecked first. `unassigned` rows are real work.
+awaiting_re_review: [
+  RR-24,
+  AC-76, AC-77, AC-79, AC-80, AC-82, AC-84, AC-100, AC-103, AC-105, AC-106,
+  AC-107, AC-125, AC-126, AC-130, AC-153, F-111, F-112, F-113, F-114, F-115,
+  F-119, F-120, F-121, F-124, F-125, F-135, F-136, F-137, F-139, F-140,
+  F-141, F-142, F-144, F-163, F-164, F-165, F-168, F-169, F-210, F-211,
+  F-212, F-213, F-214, RD-150, RD-154, RD-159, RD-206, RD-264, RD-266, RR-90,
+  RR-93, RR-96, RR-99, RR-100, RR-101, RR-102, RR-103, RR-105, RR-107,
+  RR-115, RR-116, RR-117, RR-118, RR-119, RR-120, RR-121, RR-122, RR-123,
+  RR-124, RR-125, RR-126, RR-140, RR-141, RR-142, RR-144, RR-146, RR-147,
+  RR-148, RR-151, RR-152, RR-153, RR-166
+]
+
 unassigned: [
-  AC-75, AC-76, AC-77, AC-78, AC-79, AC-80, AC-81, AC-82, AC-83, AC-84,
-  AC-85, AC-100, AC-101, AC-102, AC-103, AC-104, AC-105, AC-106, AC-107,
-  AC-108, AC-109, AC-125, AC-126, AC-127, AC-128, AC-129, AC-130, AC-131,
-  AC-132, AC-150, AC-153, F-110, F-111, F-112, F-113, F-114, F-115, F-116,
-  F-117, F-118, F-119, F-120, F-121, F-122, F-123, F-124, F-125, F-135,
-  F-136, F-137, F-138, F-139, F-140, F-141, F-142, F-143, F-144, F-160,
-  F-161, F-162, F-163, F-164, F-165, F-166, F-167, F-168, F-169, F-185,
-  F-186, RD-150, RD-151, RD-152, RD-153, RD-154, RD-155, RD-156, RD-157,
-  RD-158, RD-159, RD-186, RD-187, RD-188, RD-189, RD-190, RD-191, RD-192,
-  RD-200, RD-201, RD-202, RD-203, RD-204, RD-205, RD-206, RD-207, RD-208,
-  RD-225, RD-226, RD-227, RR-90, RR-91, RR-92, RR-93, RR-96, RR-97, RR-99,
-  RR-100, RR-101, RR-102, RR-103, RR-104, RR-105, RR-106, RR-107, RR-115,
-  RR-116, RR-117, RR-118, RR-119, RR-120, RR-121, RR-122, RR-123, RR-124,
-  RR-125, RR-126, RR-140, RR-141, RR-142, RR-143, RR-144, RR-145, RR-146,
-  RR-147, RR-148, RR-149, RR-150, RR-151, RR-152, RR-153, RR-154, RR-165,
-  RR-166
+  AC-75, AC-78, AC-81, AC-83, AC-85, AC-101, AC-102, AC-104, AC-108, AC-109,
+  AC-127, AC-128, AC-129, AC-131, AC-132, AC-150, F-110, F-116, F-117, F-118,
+  F-122, F-123, F-138, F-143, F-160, F-161, F-162, F-166, F-167, F-185,
+  F-186, RD-151, RD-152, RD-153, RD-155, RD-156, RD-157, RD-158, RD-186,
+  RD-187, RD-188, RD-189, RD-190, RD-191, RD-192, RD-200, RD-201, RD-202,
+  RD-203, RD-204, RD-205, RD-207, RD-208, RD-225, RD-226, RD-227, RR-91,
+  RR-92, RR-97, RR-104, RR-106, RR-143, RR-145, RR-149, RR-150, RR-154,
+  RR-165
 ]

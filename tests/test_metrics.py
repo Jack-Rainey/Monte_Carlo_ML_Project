@@ -1658,40 +1658,104 @@ class TestTheTruncationIndexUnderAZeroPad:
         )
 
 
+#: Realizations per (T60, band) cell. The estimator is stochastic — the decay is
+#: noise under an envelope — so a single draw measures a draw, not the estimator.
+#: This is not an experiment-governing value: it sets the resolution of a test's
+#: own claim, and it is stated here because the claim quotes it.
+_SEEDS = 30
+
+
 class TestT30RecoversAKnownDecayInAPaddedRecord:
     """AC-64's own no-render acceptance test, run as the row specifies.
 
     The row predicts a ~600 ms window that would under-read T30 by -43 % at
-    T60 = 2.0 s. Measured here: it does not happen on well-formed input — the
-    index lands at the native/pad boundary and all eight (T60, band) cells come
-    back inside the JND. That does NOT discharge AC-64: its 600 ms index was
-    measured on a real gsound IR whose artifact was destroyed by an in-memory
-    probe, and only a retained-artifact render can say whether that IR's tail is
-    genuinely ~280 dB down from there. This test pins the estimator so the render
-    measures the BACKEND rather than both at once.
+    T60 = 2.0 s. That does NOT happen: at every T60 the index lands at the
+    native/pad boundary, and the mean error runs 0.9-2.6 %.
+
+    But the estimator is NOT uniformly inside the JND, and the first version of
+    this test said it was — because it drew ONE realization per cell and got a
+    lucky one. Over `_SEEDS` draws (240 cells):
+
+        T60 0.5 s   500 Hz   4/30 breach   max err 0.0720   mean 0.0259
+        T60 0.5 s  1000 Hz   1/30 breach   max err 0.0571   mean 0.0193
+        T60 1.0 s   500 Hz   3/30 breach   max err 0.0579   mean 0.0216
+        T60 1.0 s  1000 Hz   0/30          max err 0.0360   mean 0.0122
+        T60 2.0 s   500 Hz   0/30          max err 0.0437   mean 0.0149
+        T60 2.0 s  1000 Hz   0/30          max err 0.0409   mean 0.0147
+        T60 3.0 s   500 Hz   0/30          max err 0.0355   mean 0.0126
+        T60 3.0 s  1000 Hz   0/30          max err 0.0255   mean 0.0092
+
+    Eight breaches in 240, all at the SHORT end, none worse than 1.44x the JND.
+    So the honest claim is about the MEAN and the tail, not about every draw, and
+    the short-T60 tail is real estimator variance that a reported number inherits.
+
+    This still does not discharge AC-64. Its 600 ms index was measured on a real
+    gsound IR whose artifact was destroyed by an in-memory probe, and only a
+    retained-artifact render can say whether that IR's tail is genuinely ~280 dB
+    down from there. What this pins is the ESTIMATOR, so that render measures the
+    backend rather than both at once.
     """
 
-    def test_every_declared_decay_is_recovered_within_the_jnd(self) -> None:
+    def test_the_mean_error_is_inside_the_jnd_at_every_declared_decay(self) -> None:
         from amcd.evaluation.room_acoustic import _iso3382_band_metrics
 
-        breaches = []
+        bad = []
         for rt60 in (0.5, 1.0, 2.0, 3.0):
-            ir = _padded_decay(rt60, seed=0)
             for fc in _ISO:
-                values, nan_reasons, _ = _iso3382_band_metrics(
-                    ir, fc, _SR, band_resolvability_margin=_NO_FLOOR
-                )
-                t30 = values["T30"]
-                assert np.isfinite(t30), (
-                    f"T30 is NaN at T60={rt60}s, {fc} Hz: {nan_reasons.get('T30')}"
-                )
-                err = abs(t30 - rt60) / rt60
-                if err > _T30_JND_FRAC:
-                    breaches.append((rt60, fc, t30, err))
-        assert not breaches, (
-            f"T30 breaches d0b_t30_jnd_frac={_T30_JND_FRAC} at {breaches}. The "
-            "estimator must recover a known decay through the shipped ISO path "
-            "before a render can be read as measuring the backend (AC-64)."
+                errs = []
+                for seed in range(_SEEDS):
+                    values, nan_reasons, _ = _iso3382_band_metrics(
+                        _padded_decay(rt60, seed=seed), fc, _SR,
+                        band_resolvability_margin=_NO_FLOOR,
+                    )
+                    t30 = values["T30"]
+                    assert np.isfinite(t30), (
+                        f"T30 is NaN at T60={rt60}s, {fc} Hz, seed {seed}: "
+                        f"{nan_reasons.get('T30')}"
+                    )
+                    errs.append(abs(t30 - rt60) / rt60)
+                mean_err = float(np.mean(errs))
+                if mean_err > _T30_JND_FRAC:
+                    bad.append((rt60, fc, mean_err))
+        assert not bad, (
+            f"MEAN T30 error breaches d0b_t30_jnd_frac={_T30_JND_FRAC} at {bad}. "
+            "The estimator must recover a known decay through the shipped ISO "
+            "path before a render can be read as measuring the backend (AC-64)."
+        )
+
+    def test_the_breach_rate_is_bounded_and_confined_to_the_short_end(self) -> None:
+        """The tail the mean hides — pinned so it cannot grow unnoticed.
+
+        Asserting only the mean would let the short-T60 variance widen silently,
+        and that variance is what a reported T30 inherits. Asserting zero breaches
+        is what the first version of this test did, and it was false.
+        """
+        from amcd.evaluation.room_acoustic import _iso3382_band_metrics
+
+        breaches: dict[tuple[float, float], int] = {}
+        for rt60 in (0.5, 1.0, 2.0, 3.0):
+            for fc in _ISO:
+                n = 0
+                for seed in range(_SEEDS):
+                    values, _, _ = _iso3382_band_metrics(
+                        _padded_decay(rt60, seed=seed), fc, _SR,
+                        band_resolvability_margin=_NO_FLOOR,
+                    )
+                    if abs(values["T30"] - rt60) / rt60 > _T30_JND_FRAC:
+                        n += 1
+                if n:
+                    breaches[(rt60, fc)] = n
+
+        total = sum(breaches.values())
+        assert total <= 16, (  # measured 8 of 240; 2x headroom for filter drift
+            f"T30 breaches the JND on {total} of {4 * len(_ISO) * _SEEDS} draws "
+            f"({breaches}), against 8 measured at the cycle-5 integration. The "
+            "estimator's short-decay variance has grown."
+        )
+        assert all(rt60 <= 1.0 for rt60, _ in breaches), (
+            f"a breach appeared at a LONG decay: {breaches}. Short-end variance "
+            "is expected and bounded above; a long-decay breach is the truncation "
+            "failure AC-64 predicts, and means the window moved."
         )
 
 
