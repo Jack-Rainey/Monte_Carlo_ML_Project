@@ -199,3 +199,51 @@ class TestAnAllFailedSplitIsUnscoredNeverPassed:
         assert f"{split!r}" in warnings
         assert "D0a scored 0 of" in warnings
         assert "D0b scored 0 of" in warnings
+
+
+class TestThePerSplitRecordSchema:
+    """RR-64: the record shape is built at six sites across both probes and was
+    declared at none, so the two consumers disagreed about whether the last key was
+    guaranteed — D0a indexed `unscored_reason` while D0b defended with a `.get`
+    default. It is now declared once in `probe.py`'s module docstring, and both
+    consumers index it. This pins the invariant that makes indexing safe."""
+
+    def test_unscored_reason_is_present_exactly_when_nothing_was_scored(
+        self, tmp_path: Path
+    ) -> None:
+        cfg = tiny_config()
+        _run_to_preprocess(cfg, tmp_path)
+
+        # A split scored in full, a split scored in part, and a split scored not at
+        # all — all three shapes in one artifact, which a healthy run never has.
+        starved = "test_geometry_shift"
+        for sid in _scenes_in(tmp_path, starved):
+            for suffix in ("low", "high"):
+                (tmp_path / "preprocessed" / starved / f"{sid}_{suffix}.pt").unlink()
+        partial = _scenes_in(tmp_path, "train")[0]
+        for suffix in ("low", "high"):
+            (tmp_path / "preprocessed" / "train" / f"{partial}_{suffix}.pt").unlink()
+
+        Pipeline(cfg, tmp_path, QUIET).run_stage("diagnostics")
+
+        seen = {"scored": 0, "unscored": 0}
+        for artifact in (_d0a(tmp_path), _d0b(tmp_path)):
+            for split, entry in artifact["per_split"].items():
+                assert {"n_scenes", "n_attempted", "dropped"} <= set(entry), split
+                assert entry["n_scenes"] <= entry["n_attempted"], split
+                if entry["n_scenes"] == 0:
+                    assert "unscored_reason" in entry, (
+                        f"{split}: nothing was scored and no reason was recorded — "
+                        f"the key D0a indexes directly (RR-64)"
+                    )
+                    seen["unscored"] += 1
+                else:
+                    assert "unscored_reason" not in entry, (
+                        f"{split}: a scored split carries an unscored reason, so "
+                        f"the key's presence no longer means what it says (RR-64)"
+                    )
+                    seen["scored"] += 1
+
+        assert seen["unscored"] >= 2 and seen["scored"] >= 2, (
+            f"fixture is inert — both shapes must occur: {seen}"
+        )

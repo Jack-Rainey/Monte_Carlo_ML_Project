@@ -16,6 +16,27 @@ D0b — oracle upper bound / carrier ceiling (design_spec §4.2):
 
 Run on ALL splits (train, valid, and every test split), reported separately.
 Never pool splits — per-split headroom genuinely differs (Invariant 9).
+
+PER-SPLIT RECORD SCHEMA (RR-64). Both probes write one entry per split into their
+artifact's `per_split` map, and both artifacts are read outside this module (see
+`tests/test_dataset_integrity.py`), so the shape is declared here once rather than
+inferred from the six sites that construct it:
+
+    n_scenes        int  — scenes SCORED. The same quantity `stats/aggregate.py`
+                           and `reporting/tables.py` publish as `n_scored`; the
+                           probes keep `n_scenes` because existing consumers index
+                           it, and adding a second name here is how AC-24's pair
+                           drifted apart.
+    n_attempted     int  — scenes the split contained, i.e. the denominator.
+    dropped         list — [{"scene": str, "reason": str}], one per unscored
+                           scene, mirroring the eval stage's drops.csv (F-21).
+    unscored_reason str  — present IF AND ONLY IF `n_scenes == 0`.
+
+The emit-iff invariant is what both consumers rely on, so both index
+`unscored_reason` directly; a `.get` default would say the contract is optional
+while the writers treat it as guaranteed. D0b entries additionally carry the
+per-metric residual blocks `T30`/`EDT`/`C50` — present iff `n_scenes > 0`, which
+is the condition its verdict loop branches on.
 """
 from __future__ import annotations
 
@@ -148,9 +169,7 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
             verdict = f"small gap ({gap_mean:.1f} dB < {config.d0a_gap_small_db} dB) — band energy may have converged; denoising unlikely to help"
 
         per_split[split_name] = {
-            # `n_scenes` IS the scored count; `n_attempted` is its denominator. No
-            # separate `n_scored` key — two names for one number is how the two
-            # expressions in AC-24 drifted apart.
+            # Schema: module docstring.
             "n_scenes": len(scene_gaps),
             "n_attempted": len(scene_ids),
             "dropped": dropped,
@@ -223,13 +242,8 @@ def _run_d0b(
     Per-split reporting (Invariant 9 — never pool splits).
     """
     # Config-declared enumeration, in declaration order — the same rule as D0a ~130
-    # lines above (F-45). This half was missed: `sorted(set(splits.values()))` lists
-    # only splits that RECEIVED a scene, so a declared split with none simply
-    # vanished from d0b_oracle.json, and the `if not scene_ids:` branch below was
-    # DEAD CODE (every member of that set has >= 1 scene by construction).
-    # Reproduced with an empty `test_id`: d0a_gap.json included it, d0b_oracle.json
-    # did not, and the run still printed "D0b verdict: CARRIER CEILING CLEARS" —
-    # a verdict over a split set that silently differed from the declared one.
+    # lines above (F-45). Enumerating the splits that RECEIVED a scene instead let a
+    # declared-but-empty split vanish from d0b_oracle.json entirely.
     declared_splits = list(config.splits)
     all_splits = declared_splits + sorted(set(splits.values()) - set(declared_splits))
     iso_eval_freqs = [float(f) for f in config.iso_eval_freqs]
@@ -257,8 +271,7 @@ def _run_d0b(
             continue
 
         scene_results: list[dict[str, float]] = []
-        # Same (scene, reason) accounting as D0a — D0b's silence was worse, because
-        # `all_clear` below stayed True over a split it never measured (F-72).
+        # Same (scene, reason) accounting as D0a (F-72).
         dropped: list[dict[str, str]] = []
 
         for sid in scene_ids:
@@ -351,9 +364,8 @@ def _run_d0b(
                  f"reasons in d0b_oracle.json (F-72).")
 
         if not scene_results:
-            # Carries no per-metric residuals, so the verdict loop below reads it as
-            # INDETERMINATE rather than letting `all_clear` stay True over a split
-            # nothing was measured on (F-72).
+            # Carries no per-metric residuals, which is the condition the verdict
+            # loop below reads as INDETERMINATE (F-72).
             per_split_residuals[split_name] = {
                 "n_scenes": 0,
                 "n_attempted": len(scene_ids),
@@ -396,16 +408,22 @@ def _run_d0b(
     any_indeterminate = False
 
     for split_name, summary in per_split_residuals.items():
-        # A declared split that received no scene carries only its unscored reason,
-        # not per-metric residuals (F-45). Treated as INDETERMINATE, never as a
-        # pass: a verdict cannot clear a split it never measured, which is exactly
-        # what the pre-fix enumeration allowed by omitting the split entirely.
-        if "T30" not in summary:
+        # THE `all_clear` RULE, stated once, here, at the loop that consumes it
+        # (F-45/F-72): a verdict may never clear a split it did not measure. A split
+        # with no scenes, or whose scenes all failed to load, carries only its
+        # unscored reason — so it is INDETERMINATE, never a pass. Omitting such a
+        # split (the pre-fix behaviour) left `all_clear` True over it silently.
+        #
+        # Branches on the DECLARED condition (`n_scenes == 0`), the same one D0a's
+        # print loop uses. Branching on `"T30" not in summary` agreed with it only
+        # because `channel_band_avg_metrics` happens to return all three keys — an
+        # assumption the schema does not state.
+        if summary["n_scenes"] == 0:
             any_indeterminate = True
             emit(
                 verbosity, "metrics",
                 f"  {split_name:<28} {'N/A':>12}  {'N/A':>12}  {'N/A':>12}  "
-                f"N/A — {summary.get('unscored_reason', 'no scenes')}",
+                f"N/A — {summary['unscored_reason']}",
             )
             continue
         t30_r = summary["T30"]["mean_residual"]
@@ -450,12 +468,24 @@ def _run_d0b(
         c50_s = f"{c50_r:.4f}dB" if not np.isnan(c50_r) else "   N/A"
 
         # A residual averaged over a subset of the split is only interpretable
-        # alongside how much of the split it covers (F-72).
-        n_dropped = len(summary.get("dropped", []))
-        coverage = (
-            f"  [{summary['n_scenes']}/{summary['n_attempted']} scored, "
-            f"{n_dropped} dropped]" if n_dropped else ""
-        )
+        # alongside how much of the split it covers (F-72). TWO axes of attrition,
+        # both annotated: scenes dropped before scoring, and scored scenes whose
+        # residual came back NaN for one metric — the latter thins a per-metric mean
+        # without touching `n_scenes`, so keying the annotation on drops alone
+        # printed a PASS over a subset with nothing said.
+        n_dropped = len(summary["dropped"])
+        thinned = {
+            key: summary[key]["n"] for key in ("T30", "EDT", "C50")
+            if summary[key]["n"] < summary["n_scenes"]
+        }
+        parts = []
+        if n_dropped:
+            parts.append(f"{summary['n_scenes']}/{summary['n_attempted']} scored, "
+                         f"{n_dropped} dropped")
+        if thinned:
+            parts.append("per-metric n: " + ", ".join(
+                f"{k} {v}/{summary['n_scenes']}" for k, v in thinned.items()))
+        coverage = f"  [{'; '.join(parts)}]" if parts else ""
         emit(
             verbosity, "metrics",
             f"  {split_name:<28} "
