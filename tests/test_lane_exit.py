@@ -1,33 +1,25 @@
 """A lane does not get to report while its own reviewers are unsatisfied.
 
-`docs/parallel_protocol.md` rule 5 says a lane-branch review never counts toward
-a clean pass. That is about AUTHORITY, and it is right. It says nothing about
-what a lane must DO, and for two cycles it was read as permission: "a lane MAY
-run reviewers on its branch as a cheap self-check."
+`docs/parallel_protocol.md` rule 5 bounds what a lane review can BUY: never a
+clean pass. The lane exit gate is the other half — what a lane OWES before it
+says it is finished — and this file asserts it.
 
-Cycle 5 is what that bought. All four lanes ran reviewers. All four fixed what
-those reviewers raised. **Not one re-ran a reviewer over the fixed tree**, so
-roughly sixty fixes arrived at the integrator as claims nobody had re-derived —
-against a definition of done whose whole point is that an unverified fix is a
-claim. Lane S never invoked `research-director` at all. Lane B's readability
-findings had no findings table: eighteen ids in prose, several with no file
-anchor, which the fold would have dropped silently.
+Six conditions, their reasoning, and the cycle-5 failure that produced them:
+`docs/parallel_protocol.md`, "The lane exit gate". That section owns the account;
+repeating it here would be the same finding this project has now raised for three
+cycles (cluster C12).
 
-None of that was a tooling failure — `.claude/agents/` is copied into every
-worktree and every lane reached the agents. It was structural. `LANE.md`, the
-file CLAUDE.md tells each session to read first, listed three steps under "Before
-you report": merge base, commit, write the inbox. Reviewers were not among them.
+Two properties of the check itself, which do NOT live in the protocol:
 
-So the exit gate is generated into `LANE.md` (where the session reads it) and
-recorded in a `## LANE EXIT` block in the inbox (where it can be checked), and
-this file checks it. Six conditions, in the protocol under "The lane exit gate".
-
-**Deliberately NOT retroactive.** The block is asserted only for partitions
-declaring `exit_gate: required`. Cycle 5's four inboxes predate the gate — the
-string does not appear in any of them — and backfilling would mean the integrator
-authoring reviewer evidence for passes that were never run. That is the exact
-thing this machine exists to forbid, so a partition without the declaration is
-asserted to be legally missing rather than quietly skipped.
+* **Not retroactive.** Asserted only for partitions declaring
+  `exit_gate: required`. Cycle 5's inboxes predate the gate, and backfilling them
+  would mean authoring reviewer evidence for passes nobody ran — the exact thing
+  the gate forbids. A partition that omits the declaration is an ERROR, so the
+  checks cannot lapse by omission.
+* **The predicates are exercised directly.** Every partition in the repo declares
+  `not_required`, so the parametrized check skips, and a guard that has only ever
+  skipped is indistinguishable from one that does not work. `TestTheRulesThemselves`
+  runs the rules against synthetic blocks, including each real cycle-5 failure shape.
 """
 import re
 from pathlib import Path
@@ -41,8 +33,8 @@ _PARTITIONS = sorted(
     if not p.name.startswith("._")
 )
 
-#: Field name -> whether an empty value is legal. `unfixed_in_lane` may be
-#: "none"; the rest must say something.
+#: The seven fields a `## LANE EXIT` block must carry, all filled in.
+#: `unfixed_in_lane` may be the literal "none"; the rest must say something.
 _REQUIRED_FIELDS = (
     "final_commit",
     "reviewers_last_run_on",

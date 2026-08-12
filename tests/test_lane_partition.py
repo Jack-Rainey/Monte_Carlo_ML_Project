@@ -609,11 +609,18 @@ def _fold_decisions() -> set[str]:
     """
     ledger = (_REPO_ROOT / "docs" / "review_ledger.md").read_text()
     heading = "### Fold decisions — ids raised in an inbox that deliberately became NO row"
-    if heading not in ledger:
-        return set()
-    tail = ledger[ledger.index(heading) + len(heading):]
-    end = tail.find("\n## ")
-    return set(_FOLD_DECISION_RE.findall(tail if end == -1 else tail[:end]))
+    # EVERY occurrence, not the first. Each cycle's fold sits under its own
+    # `## CYCLE-N FOLD` heading, so a later integrator appending a second
+    # decisions section is the natural thing to do — and reading only the first
+    # would silently drop it, making this guard demand rows for findings that
+    # were correctly recorded as non-findings. Verified: with a first-occurrence
+    # reader, an id under a second heading is invisible.
+    out: set[str] = set()
+    for m in re.finditer(re.escape(heading), ledger):
+        tail = ledger[m.end():]
+        end = tail.find("\n## ")
+        out |= set(_FOLD_DECISION_RE.findall(tail if end == -1 else tail[:end]))
+    return out
 
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))

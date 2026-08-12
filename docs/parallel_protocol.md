@@ -14,7 +14,7 @@ The main checkout runs no lane; it is the **integrator**.
 
 ---
 
-## The five rules
+## The six rules
 
 1. **Ownership is by file, not by finding, and it is exclusive.** A lane may edit
    only the files in its declared set. Textual merge conflicts are then
@@ -39,9 +39,10 @@ The main checkout runs no lane; it is the **integrator**.
    and **a row that moves without a pre-registered declaration is a finding.**
 
    **The lane that computes a number does not own the file that reports it.**
-   `ci_table.csv` is written by `stats/aggregate.py:324` and `summary.txt` by
-   `reporting/tables.py:144`. Those live wherever the cache/provenance lane
-   lives, because that is where their fingerprints are. So a finding whose fix
+   `ci_table.csv` is written by `stats/aggregate.py` and `summary.txt` by
+   `reporting/tables.py` — named by module, never by line, because RR-87 caught
+   the line numbers that used to be here already stale. Those live wherever the
+   cache/provenance lane lives, because that is where their fingerprints are. So a finding whose fix
    adds a new reported COLUMN spans two lanes by construction, however
    metric-shaped it looks — it goes to the integrator queue under rule 4. Cycle 4
    found three of these (F-70, AC-43, RD-65) only because the reachability check
@@ -62,6 +63,11 @@ The main checkout runs no lane; it is the **integrator**.
    This rule says what a lane review *cannot buy*. It said nothing about what a
    lane must *do*, and for two cycles that was read as permission rather than
    obligation — see the lane exit gate below, which is the other half.
+
+6. **Each lane allocates new row ids only from its own declared `id_block`.**
+   Rationale and the cycle-4 collision that forced it: "Row ids" under Setting
+   up a cycle. Stated here so the count under this heading matches the heading,
+   and so a reader cannot mistake rule 6 for a note (RR-196).
 
 ---
 
