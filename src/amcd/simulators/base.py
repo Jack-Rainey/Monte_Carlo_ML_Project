@@ -10,20 +10,50 @@ import numpy as np
 
 @dataclass
 class SceneSpec:
+    """One scene as SPECIFIED, not as rendered (RR-84).
+
+    A config-sampled description of a room and a source/receiver placement, passed
+    unchanged from gen-scenes through the render stage to whichever backend is
+    selected. It carries no acoustics: every derived quantity (Sabine T60, critical
+    distance, DRR) is computed elsewhere from these fields, and a backend may
+    realize different acoustics from the same spec — see the absorption note below.
+
+    COORDINATE FRAME: right-handed, metres, origin at one corner of the box, axes
+    along `dims`. Positions are absolute in that frame, never fractions of a
+    dimension.
+    """
+
     scene_id: str
+    #: Drawn from the named `scene_generation` seed aspect, never shared with the
+    #: split, model-init or shuffling aspects (per-aspect seeds).
     seed: int
+    #: Which room shape the generator sampled, from the `scenes.geometry_families`
+    #: config keys — "shoebox" is the only one today. Config names it, not code.
     geometry_family: str
+    #: (width, length, height) in METRES.
     dims: tuple[float, float, float]
+    #: Absorption coefficient in [0, 1]: ONE scalar applied to ALL SIX surfaces and
+    #: FREQUENCY-INDEPENDENT. It is the NOMINAL value — what a backend realizes from
+    #: it is that backend's own convention (AC-54/RD-144), so a closed form derived
+    #: from this number describes the declared room, not necessarily the rendered one.
     material_absorption: float
+    #: `source_pos` / `receiver_pos`: METRES, in the frame above.
     source_pos: tuple[float, float, float]
     receiver_pos: tuple[float, float, float]
+    #: Per-scene backend overrides. RESERVED AND UNUSED: `scenes/generator.py`
+    #: writes `{}` for every scene and no simulator reads it — it only round-trips
+    #: through `to_dict`/`from_dict`. The field exists so a future regime can vary a
+    #: backend parameter per scene without a second scene type; wiring it up means
+    #: giving it a consumer, not just a value.
     sim_params: dict = field(default_factory=dict)
-    # Which distribution-shift regime this scene was generated for.
-    # "id" → in-distribution (train/valid/test_id); shift names → locked to that test split.
+    #: Which distribution-shift regime this scene was generated for.
+    #: "id" → in-distribution (train/valid/test_id); shift names → locked to that
+    #: test split.
     split_regime: str = "id"
-    # Labels for each distribution-shift axis (geometry/placement/material). A shift
-    # scene differs from the id baseline in exactly one of these — the controlled-shift
-    # integrity check (invariant #10) asserts on these labels, not the split_regime tag.
+    #: Labels for each distribution-shift axis (geometry/placement/material). A shift
+    #: scene differs from the id baseline in exactly one of these — the
+    #: controlled-shift integrity check (invariant #10) asserts on these labels, not
+    #: on the `split_regime` tag.
     regime_axes: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -79,13 +109,21 @@ PATH_ARRAY_DTYPES: dict[str, str] = {
     "source_indices": "uint64",
 }
 
-#: Scalars upstream reports alongside the arrays, with their dtypes.
+#: Scalars upstream reports alongside the arrays, with their dtypes. Names here are
+#: RESERVED: `describe()` merges them into the descriptor block, so a descriptor key
+#: of the same name is stripped on read (RR-74).
 PATH_SCALARS: dict[str, type] = {
     "num_paths": int,
     "num_bands": int,
     "total_energy": float,
     "kept_energy_percentage": float,
 }
+
+#: Scalars that may legitimately be None because the quantity is UNDEFINED rather
+#: than zero — `kept_energy_percentage` when the leg carries no energy at all, where
+#: a 0.0 would read as "we retained almost nothing" for a subset that in fact
+#: retained everything (F-85). Coerced only when present.
+PATH_SCALARS_NULLABLE = ("kept_energy_percentage",)
 
 
 @dataclass
@@ -116,21 +154,37 @@ class PathData:
     #: (N, 3) unit vectors.
     listener_directions: np.ndarray
     source_directions: np.ndarray
-    #: (N,) upstream path-type bitmask.
+    #: (N,) upstream path-type bitmask. The bit→meaning mapping is upstream's
+    #: `gs::PathFlags` and is NOT captured by the descriptor: a reader can group
+    #: paths by identical masks but cannot name what a bit means without upstream
+    #: at `descriptor["commit_sha"]` (RR-75).
     path_types: np.ndarray
     #: (N,) m/s, per path. Cross-checked against the backend's DECLARED
     #: `speed_of_sound_m_s` at render time (RD-19): gsound's 344 m/s lives in C++
     #: and can only be declared, so this array is the only way that declaration is
     #: falsifiable.
     speeds_of_sound: np.ndarray
+    #: (N,) m/s Doppler RADIAL VELOCITY of the path — source/listener closing speed,
+    #: which upstream applies as `shift = 1 + relative_speed / speed_of_sound`. Zero
+    #: for these static scenes. NOT a propagation speed: `speeds_of_sound` above is
+    #: the one to divide a distance by (AC-62).
     relative_speeds: np.ndarray
     #: (N,) index of the source each path came from.
     source_indices: np.ndarray
 
+    #: Paths in THIS FILE, i.e. after retention. `descriptor["synthesis_num_paths"]`
+    #: is how many the IR was synthesized from, and the two differ by orders of
+    #: magnitude under `top_k` (RR-70).
     num_paths: int
+    #: Width of the `intensities` band axis; named by the descriptor's
+    #: `band_centres_hz` / `band_edges_hz`, which must agree with it (F-88).
     num_bands: int
+    #: Summed per-band intensity over ALL simulated paths, retained or not — the
+    #: denominator `kept_energy_percentage` is a share of.
     total_energy: float
-    kept_energy_percentage: float
+    #: Share of `total_energy` in the retained subset, in percent. None when
+    #: `total_energy` is zero, where the share is undefined (F-85).
+    kept_energy_percentage: float | None
 
     #: Everything needed to interpret the arrays without the producing config.
     #: Written verbatim into the parquet's key/value metadata; see `describe()`.
@@ -138,8 +192,12 @@ class PathData:
 
     def __post_init__(self) -> None:
         n = int(self.num_paths)
-        for name in PATH_ARRAY_DTYPES:
-            arr = np.asarray(getattr(self, name))
+        for name, dtype in PATH_ARRAY_DTYPES.items():
+            # The declared dtype is enforced at construction, not only on read
+            # (F-95), so written == declared == read-back. A backend needing more
+            # precision widens PATH_ARRAY_DTYPES rather than passing a wider array;
+            # a lossy cast here is currently silent (F-110/F-122).
+            arr = np.asarray(getattr(self, name), dtype=dtype)
             if arr.shape[0] != n:
                 raise ValueError(
                     f"PathData.{name} has {arr.shape[0]} rows but num_paths is {n}; "
@@ -212,7 +270,12 @@ class PathData:
             else:
                 arrays[name] = np.asarray(col, dtype=dtype)
 
-        scalars = {name: kind(record[name]) for name, kind in PATH_SCALARS.items()}
+        scalars = {
+            name: None
+            if record[name] is None and name in PATH_SCALARS_NULLABLE
+            else kind(record[name])
+            for name, kind in PATH_SCALARS.items()
+        }
         return cls(**arrays, **scalars, descriptor=descriptor)
 
     def describe(self) -> dict:
@@ -220,6 +283,9 @@ class PathData:
 
         Kept as one method so the written file and any in-memory reader see the same
         record, and so a missing key fails in one place rather than per call site.
+        `PATH_SCALARS` names win: a descriptor key of the same name is overwritten
+        here and stripped again by `from_parquet`, so those names are reserved
+        (RR-74).
         """
         return {**self.descriptor, **{name: getattr(self, name) for name in PATH_SCALARS}}
 
@@ -228,6 +294,9 @@ class PathData:
 #: `band_edges_hz` + `band_centres_hz` name the `intensities` columns; `simulator` +
 #: `commit_sha` say what produced them; `ray_budget` + `leg` + `realization_index`
 #: identify WHICH render this is without relying on the filename (RD-117/RD-23).
+#:
+#: A FLOOR, not the full set: a backend may add its own keys, and gsound_sir does
+#: (`synthesis_num_paths`). Only absence is an error (RR-70).
 REQUIRED_PATH_DESCRIPTOR_KEYS = (
     "simulator",
     "commit_sha",
@@ -256,6 +325,23 @@ def validate_path_descriptor(paths: "PathData", *, simulator_name: str, scene_id
             f"missing {missing} for scene {scene_id!r}. A path file must be readable "
             f"without the config that produced it "
             f"(amcd.simulators.base.REQUIRED_PATH_DESCRIPTOR_KEYS)."
+        )
+
+    # Presence is not interpretability (F-88). `__post_init__` only compares
+    # num_bands against `intensities`, both from the same producer and so
+    # self-consistent by construction; nothing checked that the descriptor NAMES the
+    # right number of bands. A file naming 8 centres for 9 intensity columns is
+    # exactly the uninterpretable path file RD-24 exists to prevent.
+    n_bands = int(paths.num_bands)
+    centres, edges = paths.descriptor["band_centres_hz"], paths.descriptor["band_edges_hz"]
+    if len(centres) != n_bands or len(edges) != n_bands - 1:
+        raise ValueError(
+            f"simulator {simulator_name!r} returned PathData for scene {scene_id!r} "
+            f"whose descriptor names {len(centres)} band centres and {len(edges)} "
+            f"band edges for {n_bands} intensity columns; a filterbank of {n_bands} "
+            f"bands has exactly {n_bands} centres and {n_bands - 1} crossovers. The "
+            f"band axis would be misnamed, which is the failure "
+            f"REQUIRED_PATH_DESCRIPTOR_KEYS exists to prevent (RD-24)."
         )
 
 
@@ -291,17 +377,15 @@ class IRResult:
 #:   ray_budget           the budget this leg was rendered at
 #:   speed_of_sound_m_s   the speed the backend actually used (RD-19: gsound's
 #:                        344 m/s lives in C++, so it is DECLARED, not configured)
-#:   ambisonic_convention channel ordering + normalization. For GSound-SIR this is
-#:                        **"acn_n3d"**, not SN3D — verified in the auralizer
-#:                        binding (binding.cpp:18 "normalization constant K(l,m)
-#:                        for N3D", :43 "N3D/ACN ordering"). Getting this wrong is
-#:                        a per-degree sqrt(2l+1) error; it is invisible today
-#:                        because every live scalar metric uses channel 0, where
-#:                        N3D and SN3D agree exactly, and becomes load-bearing the
-#:                        moment evaluation/spatial.py is filled in (AC-15/RD-25).
-#:   rng_seeded           whether the render is reproducible from a seed (RD-23:
-#:                        pygsound exposes none, so reproducibility rests on the
-#:                        cached artifacts, not on re-render bit-identity)
+#:   ambisonic_convention channel ordering + normalization, as a string the backend
+#:                        defines and documents at its own constant (gsound_sir's is
+#:                        `_AMBISONIC_CONVENTION`, measured rather than read off a
+#:                        source comment — AC-57). Named here, never valued: a
+#:                        second backend's convention is its own fact.
+#:   rng_seeded           whether the render is reproducible from a seed. A backend
+#:                        may refine it with its own keys where one boolean hides a
+#:                        distinction that matters (gsound_sir splits the ray tracer
+#:                        from the synthesis carrier — AC-59).
 REQUIRED_PROVENANCE_KEYS = (
     "simulator",
     "ray_budget",
@@ -334,6 +418,14 @@ class Simulator(Protocol):
     enforced at construction and at render time respectively, not by isinstance.
 
     A third required member, `min_source_receiver_distance_m`, is declared below.
+
+    A backend may ALSO declare `host_scoped_params() -> tuple[str, ...]`, naming
+    the params of its own that are host facts rather than dataset facts (F-86).
+    It is deliberately NOT a member of this Protocol: Protocol membership is
+    structural, so declaring it here would make every backend that legitimately
+    has nothing to redact — the scaffold included — fail `issubclass` (F-121).
+    `simulator_host_scoped_params` below is the accessor, and it treats absence as
+    "nothing to redact".
     Implementation constraint that goes with it: **no simulator `__init__` may
     require the render environment.** The floor is consulted at gen-scenes, which
     runs in the native pipeline env, while the render backend may live in a
@@ -415,6 +507,24 @@ def _validate_min_separation_declared(SimClass, name: str, validated: dict) -> f
             f"{floor!r}; expected a non-negative number of metres."
         )
     return float(floor)
+
+
+def simulator_host_scoped_params(config) -> tuple[str, ...]:
+    """The active backend's declared host-scoped param names (F-86).
+
+    Registry lookup only — no instantiation and no `Params` validation, because the
+    answer is a property of the CLASS and the caller (`render._canonical_meta`) may
+    run before or after validation. A backend that declares nothing returns `()`:
+    the safe direction, since the failure mode of a missing declaration is a full
+    provenance echo, not a silent redaction.
+    """
+    from ..registry import simulator_registry
+
+    SimClass = simulator_registry.get(config.simulator.name)
+    declared = getattr(SimClass, "host_scoped_params", None)
+    if not callable(declared):
+        return ()
+    return tuple(declared())
 
 
 def simulator_min_separation(config) -> float:

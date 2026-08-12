@@ -1,13 +1,36 @@
-"""The simulator config seam: `{name, params}` block, build_simulator, provenance,
-and fingerprinted stage caching (gsound_sir gate, Step 1A).
+"""The simulator seam, end to end: config block, `build_simulator`, provenance,
+the retained-path artifact, and the GSound-SIR render worker.
 
-Covers ledger rows RD-13 (simulator params reach the role grammar), RD-16 /
-RD-30 / RD-35 (canonical provenance + cache fingerprint + field-level diff),
-RD-31 (required provenance keys), RD-40 (ray budgets stay top-level).
+CONTENTS (RR-72)
+  1. Config seam       TestSimulatorBlock … TestRayBudgetsStayTopLevel
+                       the `{name, params}` grammar, sweeps, per-backend schemas
+  2. Stage cache       TestStageFingerprint
+  3. Scaffold physics  TestDryRunTailIsUnbiased, TestPlacementAxisIsAcousticallyLive
+                       — dry_run.py's RENDERED physics, read back through
+                       evaluation/room_acoustic; a different subject from the seam
+  4. Path artifact     TestPathDataIsSelfDescribing, TestIRResultCarriesPaths
+  5. Render stage      TestWrittenArtifactsCarryAnIntegrityRecord — digests, both-leg
+                       shape checks, batch refusal (the STAGE, not the backend)
+  6. gsound backend    TestTruncationDisclosure, TestGsoundProvenanceFill,
+                       TestHostScopedParamsStayOutOfProvenance
+  7. Render worker     stub pygsound / spherical_harmonics_rt, then
+                       TestRenderWorkerContract — compiles the worker, checks its
+                       imports, and RUNS it under a venv against those stubs
 
-None of these tests need GSound-SIR: they exercise the config contract and the
-dry_run path, which is what proves the real backend will be a drop-in.
+PRINCIPAL rows covered (not exhaustive — individual tests cite their own):
+RD-13, RD-16, RD-30, RD-35, RD-31, RD-40 (config seam and cache); RD-08, RD-24,
+RD-117 (PathData is self-describing and self-identifying); RD-21 (truncation
+disclosure); RD-67, RD-19, AC-57, F-93, F-115 (provenance fill, the ambisonic
+stamp, the band-identity anchor); RD-114, F-86 (host-scoped params); RD-116,
+RD-123, F-85, F-91, F-96, F-119, F-120 (the worker contract); F-84, F-88, F-90,
+F-92, F-95, F-98, F-111, F-125 (guards added for those defects).
+
+No section needs a GSound-SIR install: section 7 runs the real worker source
+against stubs, so the whole file is runnable off the render host. Two tests do
+need something extra and SKIP without it — the known-answer ambisonic measurement
+(the render env) and the band-identity anchor (the pinned upstream checkout).
 """
+import dataclasses
 import json
 import os
 import sys
@@ -546,10 +569,57 @@ class TestPathDataIsSelfDescribing:
             validate_path_descriptor(paths, simulator_name="gsound_sir", scene_id="s0")
 
     def test_intensities_must_match_the_declared_band_count(self) -> None:
+        # `replace` re-runs __post_init__, which is the validation under test (RR-78).
         with pytest.raises(ValueError, match="describe bands it does not contain"):
-            _fake_paths(n_bands=8).__class__(
-                **{**_fake_paths().__dict__, "num_bands": 4}
-            )
+            dataclasses.replace(_fake_paths(n_bands=8), num_bands=4)
+
+    def test_the_descriptor_must_name_as_many_bands_as_there_are_columns(self) -> None:
+        """F-88: presence of the band keys is not interpretability.
+
+        `__post_init__` compares `num_bands` against `intensities` — two numbers
+        from the SAME producer, self-consistent by construction. Nothing checked
+        that the descriptor NAMES that many bands, so a file could declare 8 centres
+        over 9 intensity columns and pass every existing guard.
+        """
+        paths = _fake_paths(n_bands=8)
+        paths.descriptor["band_centres_hz"] = [63.0, 125.0, 250.0]
+        with pytest.raises(ValueError, match="band centres .* for 8 intensity columns"):
+            validate_path_descriptor(paths, simulator_name="gsound_sir", scene_id="s0")
+
+        paths = _fake_paths(n_bands=8)
+        paths.descriptor["band_edges_hz"] = [88.7412, 176.7767]
+        with pytest.raises(ValueError, match="band edges"):
+            validate_path_descriptor(paths, simulator_name="gsound_sir", scene_id="s0")
+
+    def test_the_declared_dtype_is_the_dtype_that_gets_written(self, tmp_path: Path) -> None:
+        """F-95: the round trip cast on READ only, so float64 in gave float32 back
+        with no error and no logged reason. The declared dtype is the contract."""
+        wide = dataclasses.replace(
+            _fake_paths(),
+            distances=np.linspace(1.0, 9.0, 6).astype("float64"),
+            intensities=np.arange(48, dtype="float64").reshape(6, 8),
+        )
+        assert wide.distances.dtype == np.dtype(PATH_ARRAY_DTYPES["distances"])
+        assert wide.intensities.dtype == np.dtype(PATH_ARRAY_DTYPES["intensities"])
+
+        target = tmp_path / "p.parquet"
+        wide.to_parquet(target)
+        back = PathData.from_parquet(target)
+        for name, dtype in PATH_ARRAY_DTYPES.items():
+            assert getattr(back, name).dtype == np.dtype(dtype), name
+            np.testing.assert_array_equal(getattr(back, name), getattr(wide, name))
+
+    def test_an_undefined_kept_share_round_trips_as_none_not_zero(self, tmp_path: Path) -> None:
+        """F-85: 0.0 would read as 'we retained almost nothing' for a subset that in
+        fact holds every path. An unscored quantity is not rendered as a number."""
+        undefined = dataclasses.replace(
+            _fake_paths(), total_energy=0.0, kept_energy_percentage=None
+        )
+        target = tmp_path / "p.parquet"
+        undefined.to_parquet(target)
+        back = PathData.from_parquet(target)
+        assert back.kept_energy_percentage is None
+        assert back.total_energy == 0.0
 
     def test_the_file_identifies_its_render_without_the_filename(self, tmp_path: Path) -> None:
         """RD-117/RD-23: `paths_{low,high}.parquet` encodes two legs and one
@@ -635,8 +705,150 @@ class TestIRResultCarriesPaths:
             assert low.descriptor["ray_budget"] == cfg.low_ray_budget
             assert high.descriptor["ray_budget"] == cfg.high_ray_budget
             assert set(REQUIRED_PATH_DESCRIPTOR_KEYS) <= set(low.descriptor)
+
+            # F-90: every artifact this scene produced is digested into meta.json,
+            # including the path files.
+            meta = json.loads((tmp_path / "renders/scene_0000/meta.json").read_text())
+            assert set(meta["artifact_sha256"]) == {
+                "low.npy", "high.npy", "paths_low.parquet", "paths_high.parquet",
+            }
         finally:
             simulator_registry._entries.pop("pathy_dry_run", None)
+
+
+class TestWrittenArtifactsCarryAnIntegrityRecord:
+    """F-90: `rng_seeded: false` puts reproducibility on the cached artifacts.
+
+    Those artifacts carried no digest, so two physically different datasets had
+    byte-identical provenance and a truncated or half-written IR was undetectable.
+    """
+
+    def _render(self, tmp_path: Path):
+        from amcd.scenes.generator import run_gen_scenes
+        from amcd.simulators.render import run_render
+
+        cfg = tiny_config(scenes={"n_id": 1})
+        run_gen_scenes(cfg, tmp_path, QUIET)
+        run_render(cfg, tmp_path, QUIET)
+        return tmp_path / "renders/scene_0000"
+
+    def test_the_digest_matches_the_bytes_on_disk(self, tmp_path: Path) -> None:
+        import hashlib
+
+        out = self._render(tmp_path)
+        meta = json.loads((out / "meta.json").read_text())
+
+        assert set(meta["artifact_sha256"]) == {"low.npy", "high.npy"}
+        for name, digest in meta["artifact_sha256"].items():
+            assert hashlib.sha256((out / name).read_bytes()).hexdigest() == digest
+
+    def test_only_what_the_stage_wrote_is_digested(self, tmp_path: Path) -> None:
+        """A directory scan would digest whatever the HOST left in the run dir.
+
+        Found by the dry run itself: on macOS over a non-native filesystem the OS
+        writes AppleDouble `._low.npy` sidecars beside each artifact, which a scan
+        picked up — putting a host fact into canonical provenance and making the same
+        render's meta.json differ between the two supported hosts (F-90/RD-114).
+        """
+        from amcd.scenes.generator import run_gen_scenes
+        from amcd.simulators.render import run_render
+
+        cfg = tiny_config(scenes={"n_id": 1})
+        run_gen_scenes(cfg, tmp_path, QUIET)
+
+        renders = tmp_path / "renders" / "scene_0000"
+        renders.mkdir(parents=True, exist_ok=True)
+        (renders / "._low.npy").write_bytes(b"AppleDouble sidecar")
+        (renders / ".DS_Store").write_bytes(b"host clutter")
+
+        run_render(cfg, tmp_path, QUIET)
+
+        meta = json.loads((renders / "meta.json").read_text())
+        assert set(meta["artifact_sha256"]) == {"low.npy", "high.npy"}
+
+    def test_a_corrupted_artifact_no_longer_matches_its_provenance(
+        self, tmp_path: Path
+    ) -> None:
+        """The point of the digest: the failure it makes visible."""
+        import hashlib
+
+        out = self._render(tmp_path)
+        meta = json.loads((out / "meta.json").read_text())
+
+        ir = np.load(out / "low.npy")
+        ir[0, 0] += 1.0
+        np.save(out / "low.npy", ir)
+
+        recomputed = hashlib.sha256((out / "low.npy").read_bytes()).hexdigest()
+        assert recomputed != meta["artifact_sha256"]["low.npy"]
+
+    def test_a_refused_scene_does_not_abort_the_scenes_after_it(
+        self, tmp_path: Path
+    ) -> None:
+        """F-125: a backend refusal at scene 500 of 720 used to abort mid-loop.
+
+        `_preflight_separations` collects every offender for exactly this reason —
+        an emulated batch aborted hours in has to be redone from scratch. The
+        backend-side refusals F-84 and F-88 introduced reopened that pattern one
+        stage later. Every scene is now attempted, all refusals are reported
+        together, and the run still FAILS — an incomplete dataset is not a success.
+        """
+        from amcd.scenes.generator import run_gen_scenes
+        from amcd.simulators.render import run_render
+
+        cfg = tiny_config(scenes={"n_id": 3})
+        run_gen_scenes(cfg, tmp_path, QUIET)
+
+        class _RefusesOneScene(simulator_registry.get("dry_run")):
+            def render(self, scene, ray_budget):
+                if scene.scene_id == "scene_0001":
+                    raise ValueError("zero total energy in the window (simulated)")
+                return super().render(scene, ray_budget)
+
+        simulator_registry.register("refuses_one")(_RefusesOneScene)
+        try:
+            bad = tiny_config(
+                scenes={"n_id": 3},
+                simulator={"name": "refuses_one", "params": cfg.simulator.params},
+            )
+            with pytest.raises(ValueError, match=r"refused 1 of \d+ scenes") as excinfo:
+                run_render(bad, tmp_path, QUIET)
+
+            # The offender is named with its reason…
+            assert "scene_0001" in str(excinfo.value)
+            # …and the scenes after it were still rendered, so a re-run is cheap.
+            assert (tmp_path / "renders/scene_0002/low.npy").exists()
+            assert (tmp_path / "renders/scene_0000/low.npy").exists()
+        finally:
+            simulator_registry._entries.pop("refuses_one", None)
+
+    def test_both_legs_shapes_are_checked_and_it_raises(self, tmp_path: Path) -> None:
+        """F-98: the guard covered the LOW leg only and was a bare `assert`, which
+        `python -O` strips — leaving the canonical artifact's only shape check
+        conditionally absent."""
+        from amcd.scenes.generator import run_gen_scenes
+        from amcd.simulators.render import run_render
+
+        cfg = tiny_config(scenes={"n_id": 1})
+        run_gen_scenes(cfg, tmp_path, QUIET)
+
+        class _BadHighLeg(simulator_registry.get("dry_run")):
+            def render(self, scene, ray_budget):
+                result = super().render(scene, ray_budget)
+                if ray_budget == cfg.high_ray_budget:
+                    result.ir = result.ir[:, :-1]      # only the HIGH leg is wrong
+                return result
+
+        simulator_registry.register("bad_high_leg")(_BadHighLeg)
+        try:
+            bad = tiny_config(
+                scenes={"n_id": 1},
+                simulator={"name": "bad_high_leg", "params": cfg.simulator.params},
+            )
+            with pytest.raises(ValueError, match="leg 'high'.*returned an IR of shape"):
+                run_render(bad, tmp_path, QUIET)
+        finally:
+            simulator_registry._entries.pop("bad_high_leg", None)
 
 
 def _gsound_sim(**param_overrides):
@@ -704,33 +916,209 @@ class TestTruncationDisclosure:
         assert strict["truncation_qc_flag"] is True
         assert strict["max_discarded_tail_db"] == -90.0
 
+    def test_a_silent_leg_is_distinguishable_from_a_healthy_one(self) -> None:
+        """F-84: `total_energy == 0` used to be folded into 'nothing was discarded',
+        so a zero-energy render produced the SAME all-clear disclosure as a good one
+        and first surfaced as a NaN in a metric, hours downstream."""
+        sim = _gsound_sim()
+        healthy = np.zeros((16, 1000), dtype=np.float32)
+        healthy[0, 0] = 1.0
+
+        assert sim._fit_to_window(healthy)[1]["fitted_ir_total_energy"] > 0.0
+        assert sim._fit_to_window(np.zeros((16, 1000), dtype=np.float32))[1][
+            "fitted_ir_total_energy"
+        ] == 0.0
+
+    def test_the_two_energies_name_the_arrays_they_describe(self) -> None:
+        """F-111/AC-80: the guard must read the array that SHIPS.
+
+        A native IR whose energy lies entirely beyond the window is trimmed to
+        silence: native energy is non-zero, the stored array is all zeros. Guarding
+        the native energy would pass exactly the leg F-84 exists to refuse.
+        """
+        sim = _gsound_sim()
+        native = np.zeros((16, sim.n_samples + 1000), dtype=np.float32)
+        native[0, sim.n_samples + 500] = 1.0      # the only arrival is past the window
+
+        ir, disclosure = sim._fit_to_window(native)
+
+        assert disclosure["native_ir_total_energy"] == 1.0
+        assert disclosure["fitted_ir_total_energy"] == 0.0
+        assert not ir.any()
+        assert disclosure["fitted_ir_samples"] == sim.n_samples
+
+    def test_retention_values_are_range_checked_per_mode(self) -> None:
+        """F-92: untyped, an out-of-domain value was not rejected but silently
+        REINTERPRETED — `top_k: 0` and `top_k: -3` both meant 'keep everything',
+        `top_k: 5000.7` truncated, `top_percent: 150` meant 'all'."""
+        for bad in (0, -3, 5000.7):
+            with pytest.raises(Exception, match="whole number of paths"):
+                _gsound_sim(path_retention={"mode": "top_k", "value": bad})
+        for bad in (0.0, -1.0, 150.0):
+            with pytest.raises(Exception, match=r"share in \(0, 100\]"):
+                _gsound_sim(path_retention={"mode": "top_percent", "value": bad})
+
+        # …and the canonical values still build.
+        assert _gsound_sim(path_retention={"mode": "top_k", "value": 5000})
+        assert _gsound_sim(path_retention={"mode": "top_percent", "value": 100.0})
+        assert _gsound_sim(path_retention={"mode": "all", "value": None})
+
 
 class TestGsoundProvenanceFill:
     """RD-67: what the gsound leg must be able to state about itself."""
 
-    def test_the_ambisonic_convention_is_n3d_not_sn3d(self) -> None:
-        """AC-15, verified in the auralizer binding (binding.cpp:18 "normalization
-        constant K(l, m) for N3D", :43 "N3D/ACN ordering"). Getting this wrong is a
-        per-degree sqrt(2l+1) error — invisible while every live scalar metric reads
-        channel 0, load-bearing once evaluation/spatial.py is filled in."""
-        from amcd.simulators.gsound_sir import _AMBISONIC_CONVENTION
+    def test_the_ambisonic_stamp_is_measured_against_upstream_not_asserted(self) -> None:
+        """KNOWN-ANSWER test of the encoding this project stamps (F-93/AC-57).
 
+        The stamp used to be checked as `_AMBISONIC_CONVENTION == "acn_n3d"` — the
+        constant against itself, which cannot fail. It is the one upstream-compiled
+        fact here taken from a source COMMENT, while its sibling `speed_of_sound_m_s`
+        is cross-checked against the paths (RD-19); this closes that asymmetry by
+        pushing one synthetic path through the real synthesizer and reading the
+        encoding off the output.
+
+        Requires the render env (x86 + spherical_harmonics_rt) and SKIPS without it,
+        which is the honest state on an Apple-Silicon pipeline host. The measured
+        values it asserts are recorded at `_SH_CONDON_SHORTLEY_PHASE`.
+        """
+        sh = pytest.importorskip(
+            "spherical_harmonics_rt",
+            reason="render env absent — this asserts against the real synthesizer",
+        )
+        from amcd.simulators.gsound_sir import (
+            _AMBISONIC_CONVENTION,
+            _SH_CONDON_SHORTLEY_PHASE,
+        )
+
+        fs, n_bands = 48000.0, 8
+        edges = np.asarray(
+            Config.load(Path("configs/base.yaml")).simulator.params["frequency_points"],
+            dtype=np.float32,
+        )
+        axes = {
+            "+x": (1.0, 0.0, 0.0),
+            "+y": (0.0, 1.0, 0.0),
+            "+z": (0.0, 0.0, 1.0),
+        }
+        peaks = {}
+        for name, direction in axes.items():
+            ir = np.asarray(sh.generate_ambisonic_ir(
+                1,                                                    # order 1 -> 4 ch
+                np.asarray([direction], dtype=np.float32),
+                np.ones((1, n_bands), dtype=np.float32),
+                np.asarray([1.0], dtype=np.float32),
+                np.asarray([344.0], dtype=np.float32),
+                edges,
+                fs,
+                normalize=False,
+            ), dtype=np.float64)
+            # One path, one arrival: read the encoding at the peak of channel 0.
+            t = int(np.argmax(np.abs(ir[0])))
+            peaks[name] = ir[:, t]
+
+        w = peaks["+x"][0]
+        assert w != 0.0, "W is silent; the synthesizer produced no arrival to read"
+
+        # ACN ordering (W, Y, Z, X): each axis excites exactly one first-order channel.
+        for name, channel in (("+x", 3), ("+y", 1), ("+z", 2)):
+            ratios = peaks[name] / peaks[name][0]
+            live = [i for i in (1, 2, 3) if abs(ratios[i]) > 1e-6]
+            assert live == [channel], (
+                f"{name} should excite only ACN channel {channel}; got ratios {ratios}"
+            )
+            # N3D, not SN3D: the magnitude is sqrt(3), not 1.0.
+            assert abs(abs(ratios[channel]) - np.sqrt(3.0)) < 1e-4, (
+                f"{name}: |ratio| = {abs(ratios[channel]):.6f}; N3D predicts "
+                f"{np.sqrt(3.0):.6f} and SN3D predicts 1.0"
+            )
         assert _AMBISONIC_CONVENTION == "acn_n3d"
+
+        # Condon-Shortley (-1)^|m|: X and Y negated relative to W, Z not. Negating
+        # X and Y together is a 180-degree yaw, which is why it is stamped.
+        signs = {n: np.sign(peaks[n] / peaks[n][0]) for n in axes}
+        measured_phase = signs["+x"][3] < 0 and signs["+y"][1] < 0 and signs["+z"][2] > 0
+        assert bool(measured_phase) == _SH_CONDON_SHORTLEY_PHASE
+
+        # NO absolute-scale assertion here. The late field is
+        # `result[c, t] = normalized_sh[c] * carrier[t]`, so W is Y_00 TIMES the
+        # noise-carrier sample at the arrival bin — not Y_00 alone, and not a
+        # property of the encoding at all (AC-75). Every assertion above is a RATIO,
+        # in which that per-bin scalar cancels exactly; that is what makes them
+        # known answers. Pinning |W| would pin the carrier, which AC-77 tracks.
+
+    def test_the_ambisonic_stamp_reaches_provenance(self) -> None:
+        """The seam half of the row, which needs no render env: whatever the
+        measurement above establishes must actually be stamped per leg."""
+        from amcd.simulators.base import REQUIRED_PROVENANCE_KEYS
+
+        assert "ambisonic_convention" in REQUIRED_PROVENANCE_KEYS
+
+    def _worker_speed_check(self):
+        """The live cross-check, which runs inside the worker (F-94/F-119).
+
+        The parent used to keep a copy over the RETAINED subset; it could not fail
+        once the worker's had passed, so it was removed rather than described as
+        defence in depth. These tests follow the check to where it actually runs.
+        """
+        from amcd.simulators.gsound_sir import _WORKER_SRC
+
+        namespace: dict = {}
+        exec(compile(_WORKER_SRC, "<gsound worker>", "exec"), namespace)
+        return namespace["_check_declared_speed"]
 
     def test_declared_speed_of_sound_is_falsified_by_the_paths(self) -> None:
         """RD-19: gsound's 344 m/s is compiled into C++ and can only be DECLARED.
         The paths' own `speeds_of_sound` is the free empirical check that keeps the
         declaration honest instead of letting it go stale as a comment."""
-        sim = _gsound_sim()
-        sim._check_declared_speed(np.full(5, 344.0, dtype="float32"), "scene_00000")
+        check = self._worker_speed_check()
+        assert check(np.full(5, 344.0, dtype="float32"), 344.0) == 5
 
-        with pytest.raises(ValueError, match="compiled in and can only be declared"):
-            sim._check_declared_speed(np.full(5, 343.0, dtype="float32"), "scene_00000")
+        with pytest.raises(SystemExit, match="compiled in and can only be declared"):
+            check(np.full(5, 343.0, dtype="float32"), 344.0)
 
     def test_a_render_with_no_paths_is_an_error_not_an_empty_ir(self) -> None:
-        sim = _gsound_sim()
-        with pytest.raises(ValueError, match="returned no paths"):
-            sim._check_declared_speed(np.zeros(0, dtype="float32"), "scene_00000")
+        check = self._worker_speed_check()
+        with pytest.raises(SystemExit, match="returned no paths"):
+            check(np.zeros(0, dtype="float32"), 344.0)
+
+    def test_the_declared_centres_are_upstreams_compiled_set(self) -> None:
+        """F-115: counting bands is not identifying them.
+
+        `model_post_init` only requires the edges to be the geometric means of the
+        centres, so a whole filterbank shifted an octave is SELF-CONSISTENT and
+        passes every guard — while `frequency_points` is handed to
+        `generate_ambisonic_ir`, so it changes the IR rather than merely mislabelling
+        a column. Nothing anchored the declaration to the compiled set, and pygsound
+        exposes no accessor for it, so the anchor has to be the pinned source.
+
+        Skips when the upstream checkout is absent (the F-93 pattern).
+        """
+        source = Path(
+            "/Volumes/T7/Monte_Carlo_Research/v3/external/GSound-SIR"
+            "/ray_generator/src/pygsound/src/Context.cpp"
+        )
+        if not source.exists():
+            pytest.skip(f"pinned upstream checkout absent at {source}")
+
+        # `const gs::Float f[] = { 63.0f, 125.0f, … };` — the compiled octave set.
+        import re
+
+        match = re.search(r"const gs::Float f\[\]\s*=\s*\{([^}]*)\}", source.read_text())
+        assert match, f"could not find the band-centre array in {source}"
+        compiled = [float(v) for v in re.findall(r"([\d.]+)f", match.group(1))]
+
+        declared = Config.load(Path("configs/base.yaml")).simulator.params
+        assert declared["band_centres_hz"] == compiled, (
+            "configs/simulators/gsound_sir.yaml declares band centres that are not "
+            f"pygsound's compiled set {compiled}; frequency_points is passed to the "
+            "synthesizer, so this changes the IR, not just the column labels."
+        )
+        # …and the edges the synthesizer actually receives are their geometric means.
+        expected_edges = [
+            (a * b) ** 0.5 for a, b in zip(compiled, compiled[1:])
+        ]
+        for got, want in zip(declared["frequency_points"], expected_edges):
+            assert abs(got - want) < 1e-3 * want
 
     def test_band_edges_and_centres_must_describe_one_filterbank(self) -> None:
         """`band_centres_hz` is a DECLARATION of a compiled-in fact, not a second
@@ -741,9 +1129,10 @@ class TestGsoundProvenanceFill:
             _gsound_sim(band_centres_hz=[62.5, 125.0, 250.0, 500.0,
                                          1000.0, 2000.0, 4000.0, 8000.0])
 
-    def test_the_retention_policy_maps_onto_upstream_arguments(self) -> None:
-        """Retention is native upstream, so there is no custom trimming to get
-        wrong: `path_retention` maps directly onto (energy_percentage, max_rays)."""
+    def test_the_retention_policy_maps_onto_the_workers_own_arguments(self) -> None:
+        """`path_retention` maps onto the (energy_percentage, max_rays) pair the
+        WORKER's `_retain` applies after synthesis — not onto `getPathData`, which is
+        always called unfiltered so the IR sees every path (RD-123/F-87)."""
         assert _gsound_sim(path_retention={"mode": "all", "value": None}
                            )._retention_args() == (100.0, 0)
         assert _gsound_sim(path_retention={"mode": "top_percent", "value": 90.0}
@@ -795,29 +1184,51 @@ class TestHostScopedParamsStayOutOfProvenance:
         assert params["commit_sha"] and params["specular_count"] == 2000
         assert params["speed_of_sound_m_s"] == 344.0
 
-    def test_every_other_simulator_param_still_reaches_provenance(self) -> None:
-        """The redaction is a named list, not a filter that could quietly widen."""
-        from amcd.simulators.render import _HOST_SCOPED_PARAMS
+    def test_the_backend_declares_the_redaction_not_the_stage(self) -> None:
+        """The list is named by the BACKEND and asked for by the stage (F-86), so it
+        is still a declaration rather than a filter that could quietly widen — and a
+        backend that declares nothing gets the full echo, never a silent redaction."""
+        from amcd.simulators.base import simulator_host_scoped_params
+        from amcd.simulators.gsound_sir import GsoundSirSimulator
 
-        assert _HOST_SCOPED_PARAMS == ("render_python",)
+        assert GsoundSirSimulator.host_scoped_params() == ("render_python",)
+
+        cfg = tiny_config(scenes={"n_id": 2})
+        cfg.simulator.name = "gsound_sir"
+        assert simulator_host_scoped_params(cfg) == ("render_python",)
+
+        # The scaffold declares none, and gets everything echoed.
+        cfg.simulator.name = "dry_run"
+        assert simulator_host_scoped_params(cfg) == ()
 
 
-_STUB_PYGSOUND = '''
+#: The stub backends' fixed sizes. Declared HERE and injected into both stub
+#: sources, so an assertion in a test and the value the stub produces cannot drift
+#: apart — they used to appear as bare 5 / 8 / 777 / 16 literals in both (RR-78).
+_STUB_N_PATHS, _STUB_N_BANDS, _STUB_NATIVE_SAMPLES = 5, 8, 777
+
+#: Channels the worker returns for the ambisonics_order 3 the requests declare:
+#: (order + 1)**2, derived rather than written as a bare 16.
+_ORDER3_CHANNELS = (3 + 1) ** 2
+#: A SOURCE FRAGMENT, not a container: prepended to each stub below so the sizes
+#: above become module-level names inside it. Because it is PREPENDED, each stub's
+#: own leading `"""..."""` is a plain string expression rather than a module
+#: docstring, though it still reads as one (RR-101).
+_STUB_CONSTANTS_SRC = (
+    f"N_PATHS, N_BANDS = {_STUB_N_PATHS}, {_STUB_N_BANDS}\n"
+    f"NATIVE_SAMPLES = {_STUB_NATIVE_SAMPLES}\n"
+)
+
+_STUB_PYGSOUND = _STUB_CONSTANTS_SRC + '''
 """Stand-in for pygsound: records what the worker asked for, returns fixed paths."""
 import json
 import os
 
 import numpy as np
 
-N_PATHS, N_BANDS = 5, 8
-
 
 class Context:
     pass
-
-
-class ChannelLayoutType:
-    stereo = "stereo"
 
 
 class _Mesh:
@@ -882,14 +1293,12 @@ class Scene:
         }]}
 '''
 
-_STUB_AURALIZER = '''
+_STUB_AURALIZER = _STUB_CONSTANTS_SRC + '''
 """Stand-in for spherical_harmonics_rt. Records how many paths synthesis received."""
 import json
 import os
 
 import numpy as np
-
-NATIVE_SAMPLES = 777
 
 
 def generate_ambisonic_ir(order, listener_directions, intensities, distances, speeds,
@@ -899,7 +1308,18 @@ def generate_ambisonic_ir(order, listener_directions, intensities, distances, sp
     with open(os.environ["AMCD_STUB_SYNTHESIS"], "w") as f:
         json.dump({"synthesis_paths": int(intensities.shape[0]),
                    "normalize": bool(normalize)}, f)
-    return np.ones(((order + 1) ** 2, NATIVE_SAMPLES), dtype=np.float32)
+    # Two switches, both only reachable from the tests, for legs the stub could not
+    # otherwise produce: AMCD_STUB_SILENT returns a wholly zero-energy IR (F-84);
+    # AMCD_STUB_TAIL_ONLY puts all the energy in the LAST sample, so a window
+    # shorter than NATIVE_SAMPLES trims the leg to silence (F-111).
+    n_channels = (order + 1) ** 2
+    if os.environ.get("AMCD_STUB_SILENT"):
+        return np.zeros((n_channels, NATIVE_SAMPLES), dtype=np.float32)
+    ir = np.ones((n_channels, NATIVE_SAMPLES), dtype=np.float32)
+    if os.environ.get("AMCD_STUB_TAIL_ONLY"):
+        ir[:] = 0.0
+        ir[:, -1] = 1.0
+    return ir
 '''
 
 
@@ -948,12 +1368,16 @@ class TestRenderWorkerContract:
         the behaviour under test, and cannot be faked from the parent process.
         """
         import subprocess as sp
-        import sysconfig
 
         venv = tmp_path / "renderenv"
         sp.run([sys.executable, "-m", "venv", "--system-site-packages",
                 "--without-pip", str(venv)], check=True, capture_output=True)
+        # POSIX puts it in bin/, Windows in Scripts/ — and Windows is a declared
+        # supported host (docs/gsound_sir_setup.md), so hardcoding bin/ would make
+        # the whole worker-contract suite unrunnable there (F-96).
         python = venv / "bin" / "python"
+        if not python.exists():
+            python = venv / "Scripts" / "python.exe"
         purelib = Path(sp.run([str(python), "-c",
                                "import sysconfig;print(sysconfig.get_paths()['purelib'])"],
                               capture_output=True, text=True, check=True).stdout.strip())
@@ -967,7 +1391,6 @@ class TestRenderWorkerContract:
         stubs.mkdir()
         (stubs / "pygsound.py").write_text(_STUB_PYGSOUND)
         (stubs / "spherical_harmonics_rt.py").write_text(_STUB_AURALIZER)
-        assert sysconfig  # keep the import meaningful for readers of the fixture
         return python, stubs
 
     def _run(self, tmp_path: Path, python: Path, stubs: Path, request: dict):
@@ -988,6 +1411,9 @@ class TestRenderWorkerContract:
     def _request(self, out_dir: Path, **overrides) -> dict:
         request = {
             "commit_sha": self._SHA,
+            # Matches _STUB_PYGSOUND's speeds_of_sound; the worker cross-checks it
+            # over the unfiltered path set before synthesis (F-94).
+            "speed_of_sound_m_s": 344.0,
             "out_dir": str(out_dir),
             "dims": [6.0, 5.0, 3.0],
             "absorption": 0.2,
@@ -1021,14 +1447,14 @@ class TestRenderWorkerContract:
 
         result = json.loads((out_dir / "result.json").read_text())
         assert result["installed_commit_sha"] == self._SHA
-        assert (result["num_paths"], result["num_bands"]) == (5, 8)
-        assert result["native_ir_shape"] == [16, 777]
+        assert (result["num_paths"], result["num_bands"]) == (_STUB_N_PATHS, _STUB_N_BANDS)
+        assert result["native_ir_shape"] == [_ORDER3_CHANNELS, _STUB_NATIVE_SAMPLES]
 
         ir = np.load(out_dir / "ir.npy")
-        assert ir.shape == (16, 777) and ir.dtype == np.float32
+        assert ir.shape == (_ORDER3_CHANNELS, _STUB_NATIVE_SAMPLES) and ir.dtype == np.float32
         paths = np.load(out_dir / "paths.npz")
         assert set(paths) == set(PATH_ARRAY_DTYPES)
-        assert paths["intensities"].shape == (5, 8)
+        assert paths["intensities"].shape == (_STUB_N_PATHS, _STUB_N_BANDS)
 
     def test_every_config_value_reaches_upstreams_own_argument(self, tmp_path: Path) -> None:
         """The failure this catches is silent: a param declared in config, validated
@@ -1078,14 +1504,48 @@ class TestRenderWorkerContract:
         assert not (out_dir / "ir.npy").exists()
 
     def test_the_parent_surfaces_a_worker_failure_with_its_stderr(self, tmp_path: Path) -> None:
-        """A silent subprocess failure would look like a rendering bug."""
+        """The RuntimeError is the SOLE diagnostic for a failed emulated render, so
+        its stderr interpolation is what a debugger reads after hours of compute.
+
+        Driven by a REAL interpreter that exits non-zero (F-91): pointing
+        `render_python` at a nonexistent path raises FileNotFoundError out of
+        `subprocess.run` instead, never reaching this branch.
+
+        The interpreter is an ISOLATED stub env with a deliberately mismatched
+        install receipt, NOT `sys.executable` (F-120). On a native x86_64 host
+        `render_python: null` is the documented-correct setting because the render
+        env IS the pipeline env — so a test that relies on the pipeline interpreter
+        lacking a receipt would, on that host, run a real 4.25 s render inside the
+        unit suite and then fail with DID NOT RAISE.
+        """
+        python, stubs = self._stub_env(tmp_path, sha="0" * 40)
+        sim = _gsound_sim(render_python=str(python))
+        scene = SceneSpec(
+            scene_id="scene_smoke", seed=1, geometry_family="shoebox",
+            dims=(6.0, 5.0, 3.0), material_absorption=0.2,
+            source_pos=(1.0, 1.0, 1.5), receiver_pos=(4.0, 3.0, 1.5),
+        )
+        with pytest.raises(RuntimeError) as excinfo:
+            sim.render(scene, 5000)
+
+        message = str(excinfo.value)
+        assert "GSound-SIR render worker failed" in message
+        # The worker's OWN stderr — the SHA-mismatch refusal — must reach the parent.
+        assert self._SHA in message and "0" * 40 in message, (
+            "the worker's own stderr must reach the parent's error; got:\n" + message
+        )
+        assert str(python) in message
+
+    def test_a_nonexistent_render_interpreter_is_named(self, tmp_path: Path) -> None:
+        """The other half of the same failure: a bad `render_python` path. Kept
+        distinct from the test above so neither can absorb the other's failure."""
         sim = _gsound_sim(render_python=str(tmp_path / "no_such_python"))
         scene = SceneSpec(
             scene_id="scene_smoke", seed=1, geometry_family="shoebox",
             dims=(6.0, 5.0, 3.0), material_absorption=0.2,
             source_pos=(1.0, 1.0, 1.5), receiver_pos=(4.0, 3.0, 1.5),
         )
-        with pytest.raises(Exception, match="no_such_python|worker failed"):
+        with pytest.raises(FileNotFoundError, match="no_such_python"):
             sim.render(scene, 5000)
 
     def test_render_returns_a_full_irresult_through_the_seam(
@@ -1124,10 +1584,20 @@ class TestRenderWorkerContract:
         assert result.meta["specular_count"] == 2000       # held fixed across legs
         # RD-21: the native IR was 777 samples, far short of the window, so it was
         # padded and nothing was discarded.
-        assert result.meta["native_ir_samples"] == 777
+        assert result.meta["native_ir_samples"] == _STUB_NATIVE_SAMPLES
         assert result.meta["truncated"] is False
         assert result.meta["discarded_tail_db"] is None
         assert result.meta["truncation_qc_flag"] is False
+
+        # F-84: the leg's total energy is stamped, so a silent leg is visible.
+        assert result.meta["fitted_ir_total_energy"] > 0.0
+        assert result.meta["native_ir_total_energy"] > 0.0
+        # F-94: the declared speed was falsified against the FULL simulated set,
+        # not the retained subset — the stub simulates 5 paths and retains 5.
+        assert result.meta["speed_check_num_paths"] == _STUB_N_PATHS
+        # AC-59: the two RNGs are reported separately, not flattened into one bool.
+        assert result.meta["ray_rng_seeded"] is False
+        assert result.meta["synthesis_carrier_seed"] == 42
 
         # It must survive the canonical meta.json write — numpy scalars would not.
         json.dumps(result.meta)
@@ -1136,13 +1606,117 @@ class TestRenderWorkerContract:
         assert result.paths is not None
         validate_path_descriptor(result.paths, simulator_name="gsound_sir",
                                  scene_id=scene.scene_id)
-        assert result.paths.num_bands == 8
-        assert result.paths.intensities.shape == (5, 8)
+        assert result.paths.num_bands == _STUB_N_BANDS
+        assert result.paths.intensities.shape == (_STUB_N_PATHS, _STUB_N_BANDS)
         assert result.paths.descriptor["ray_budget"] == 5000
         assert result.paths.descriptor["band_centres_hz"][0] == 63.0
         round_tripped = tmp_path / "paths.parquet"
         result.paths.to_parquet(round_tripped)
         assert PathData.from_parquet(round_tripped).descriptor == result.paths.descriptor
+
+    def test_a_silent_leg_is_refused_rather_than_shipped(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """F-84: a zero-energy render used to be indistinguishable from a healthy one
+        — same all-clear disclosure — and first surfaced as a NaN in a metric."""
+        python, stubs = self._stub_env(tmp_path, sha=self._SHA)
+        monkeypatch.setenv("PYTHONPATH", str(stubs))
+        monkeypatch.setenv("AMCD_STUB_CALLS", str(tmp_path / "calls.json"))
+        monkeypatch.setenv("AMCD_STUB_SYNTHESIS", str(tmp_path / "synthesis.json"))
+        monkeypatch.setenv("AMCD_STUB_SILENT", "1")
+
+        sim = _gsound_sim(render_python=str(python))
+        scene = SceneSpec(
+            scene_id="scene_0000", seed=7, geometry_family="shoebox",
+            dims=(6.0, 5.0, 3.0), material_absorption=0.2,
+            source_pos=(1.0, 1.0, 1.5), receiver_pos=(4.0, 3.0, 1.5),
+        )
+        with pytest.raises(ValueError, match="zero total energy"):
+            sim.render(scene, 5000)
+
+    def test_a_leg_trimmed_to_silence_is_refused_too(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """F-111: the trim branch is the case the native-energy guard let through.
+
+        The stub's native IR is far SHORTER than the window, so it can only ever
+        exercise the pad branch. Here `n_samples` is cut below the stub's native
+        length with all the energy past the cut, so the stored array is all zeros
+        while the native array is not — and the leg must still be refused.
+        """
+        python, stubs = self._stub_env(tmp_path, sha=self._SHA)
+        monkeypatch.setenv("PYTHONPATH", str(stubs))
+        monkeypatch.setenv("AMCD_STUB_CALLS", str(tmp_path / "calls.json"))
+        monkeypatch.setenv("AMCD_STUB_SYNTHESIS", str(tmp_path / "synthesis.json"))
+        monkeypatch.setenv("AMCD_STUB_TAIL_ONLY", "1")
+
+        sim = _gsound_sim(render_python=str(python))
+        sim.n_samples = _STUB_NATIVE_SAMPLES // 2
+        scene = SceneSpec(
+            scene_id="scene_0000", seed=7, geometry_family="shoebox",
+            dims=(6.0, 5.0, 3.0), material_absorption=0.2,
+            source_pos=(1.0, 1.0, 1.5), receiver_pos=(4.0, 3.0, 1.5),
+        )
+        with pytest.raises(ValueError, match="zero total energy in the"):
+            sim.render(scene, 5000)
+
+    def test_the_declared_speed_is_falsified_before_retention_throws_paths_away(
+        self, tmp_path: Path
+    ) -> None:
+        """F-94: the check used to run in the PARENT, over the retained subset — 1%
+        of the simulated set under `top_k`. The claim is stated over the paths, so it
+        must be checked over the paths, which only the worker holds."""
+        python, stubs = self._stub_env(tmp_path, sha=self._SHA)
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        # Retain ONE path of the stub's five; the check must still see all five.
+        proc = self._run(tmp_path, python, stubs,
+                         self._request(out_dir, max_rays=1))
+        assert proc.returncode == 0, proc.stderr
+        result = json.loads((out_dir / "result.json").read_text())
+        assert result["num_paths"] == 1
+        assert result["speed_check_num_paths"] == _STUB_N_PATHS
+
+        # …and a declaration the paths contradict stops the render, in the worker,
+        # before anything is written.
+        out_dir2 = tmp_path / "out2"
+        out_dir2.mkdir()
+        proc = self._run(tmp_path, python, stubs,
+                         self._request(out_dir2, speed_of_sound_m_s=343.0))
+        assert proc.returncode != 0
+        assert "compiled in and can only be declared" in proc.stderr
+        assert not (out_dir2 / "ir.npy").exists()
+
+    def test_a_zero_energy_path_set_selects_the_way_upstream_does(self) -> None:
+        """F-85(b): the `total > 0.0` guard CHANGED THE SELECTION, it did not just
+        protect a division. On an all-zero-energy set the cumulative sum is all
+        zeros and the target is 0.0, so upstream's `accumulated >= target` is
+        satisfied at the first path and it keeps ONE; the guard skipped the branch
+        and kept every path. Exercised directly against the worker's own `_retain`,
+        because the branch is unreachable through `render()` — a zero-energy path
+        set implies a zero IR, and F-84's guard raises first.
+        """
+        from amcd.simulators.gsound_sir import _WORKER_SRC
+
+        namespace: dict = {}
+        exec(compile(_WORKER_SRC, "<gsound worker>", "exec"), namespace)
+        retain = namespace["_retain"]
+
+        n, n_bands = 4, 8
+        zero_paths = {
+            name: np.zeros((n, n_bands) if name == "intensities" else n)
+            for name in namespace["PATH_ARRAYS"]
+        }
+        kept, total, kept_pct = retain(zero_paths, 50.0, 0)
+
+        assert total == 0.0
+        assert kept["distances"].shape[0] == 1, (
+            "upstream keeps exactly one path on an all-zero set; keeping all of them "
+            "is what the removed `total > 0.0` guard did"
+        )
+        # …and the share of a zero total is undefined, not 0.0 (F-85(a)).
+        assert kept_pct is None
 
     def test_retention_trims_the_artifact_but_never_the_synthesis(
         self, tmp_path: Path
@@ -1151,7 +1725,7 @@ class TestRenderWorkerContract:
 
         CAUGHT BY THE CYCLE-4 SMOKE RENDER: the first worker passed the retention
         arguments straight to `getPathData` and then synthesized the IR from what
-        came back, so `top_k: 5000` built the IR from 43.2% of the path energy on a
+        came back, so `top_k: 5000` built the IR from 43.1% of the path energy on a
         real scene — deleting more than half the response and confounding the very
         ray-budget axis under study. The config has always said retention is for the
         artifact alone; nothing enforced it. This test does.
@@ -1169,7 +1743,7 @@ class TestRenderWorkerContract:
 
         # Synthesis saw all 5 paths…
         synthesis = json.loads((tmp_path / "synthesis.json").read_text())
-        assert synthesis["synthesis_paths"] == 5
+        assert synthesis["synthesis_paths"] == _STUB_N_PATHS
         assert synthesis["normalize"] is False
 
         # …while the saved artifact holds only the 2 highest-energy ones.
