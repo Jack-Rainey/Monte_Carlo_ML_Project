@@ -1822,3 +1822,80 @@ def test_the_stamped_carrier_seed_matches_pinned_upstream() -> None:
         "rendered IR is the path energies times that carrier, so the stamp is "
         "wrong about the signal it describes."
     )
+
+
+class TestTheAbsorptionConventionIsDeclaredAndApplied:
+    """ITEM 0 / AC-54 / RD-144: the rendered room must be the declared room.
+
+    This backend's per-bounce ENERGY factor is `sqrt(1-alpha)` where the declared
+    physics wants `(1-alpha)`, re-derived from pinned upstream and confirmed by
+    render. Left uncorrected it realizes `alpha_eff = 1 - sqrt(1-alpha)`, which is
+    1.45-1.98x on T60 across `base.yaml`'s declared support — so every closed form
+    in `scenes/generator.py` described a room that was never rendered.
+
+    The convention is declared on the BACKEND, never in the generator (RD-144):
+    the generator defines the dataset's acoustics for every simulator, so
+    re-deriving it from one raytracer's domain confusion would make a second
+    raytracer render a different room from the same spec.
+    """
+
+    def test_pre_compensation_makes_the_realized_alpha_the_declared_one(self) -> None:
+        from amcd.simulators.gsound_sir import _realized_absorption
+
+        for nominal in (0.02, 0.05, 0.10, 0.30, 0.50, 0.80, 0.98):
+            passed = _realized_absorption(nominal, "pre_compensate")
+            realized = 1.0 - np.sqrt(1.0 - passed)   # what upstream does to it
+            assert realized == pytest.approx(nominal, abs=1e-12), (
+                f"pre-compensated alpha {passed} realizes {realized}, not the "
+                f"declared {nominal}. The rendered room is not the scene's room."
+            )
+
+    def test_as_is_still_reproduces_the_uncorrected_room(self) -> None:
+        """`as_is` is not a fallback — it is what every prior measurement used.
+
+        AC-54's own render (5x4x3 m, alpha 0.30, T30 0.5441 s against 0.343 s
+        nominal) was taken under it, and those numbers must stay reproducible.
+        """
+        from amcd.simulators.gsound_sir import _realized_absorption
+
+        for nominal, expected_ratio in ((0.05, 1.975), (0.30, 1.837), (0.80, 1.447)):
+            realized = 1.0 - np.sqrt(1.0 - _realized_absorption(nominal, "as_is"))
+            assert nominal / realized == pytest.approx(expected_ratio, rel=1e-3), (
+                f"the uncorrected room at alpha {nominal} no longer realizes "
+                f"{expected_ratio}x on T60 — AC-54's evidence stops reproducing."
+            )
+
+    def test_an_undeclared_convention_raises(self) -> None:
+        """No default: it decides which room is rendered (CLAUDE.md)."""
+        from amcd.simulators.gsound_sir import _realized_absorption
+
+        with pytest.raises(ValueError, match="neither 'pre_compensate' nor 'as_is'"):
+            _realized_absorption(0.3, "")
+
+    def test_the_backend_config_declares_it(self) -> None:
+        params = yaml.safe_load(
+            (Path(__file__).resolve().parent.parent
+             / "configs" / "simulators" / "gsound_sir.yaml").read_text()
+        )
+        assert params.get("absorption_convention") in ("pre_compensate", "as_is"), (
+            "configs/simulators/gsound_sir.yaml must declare "
+            "`absorption_convention` — it is experiment-governing and this is the "
+            "backend's own config, which is where RD-144 puts it."
+        )
+
+    def test_the_scene_generator_stays_in_nominal_alpha(self) -> None:
+        """RD-144's load-bearing half: the generator must NOT learn about alpha_eff.
+
+        If it does, the dataset's declared acoustics become one raytracer's, and a
+        second backend renders a different room from the same scene spec with
+        nothing saying so.
+        """
+        src = (Path(__file__).resolve().parent.parent
+               / "src" / "amcd" / "scenes" / "generator.py").read_text()
+        for marker in ("1 - np.sqrt(1", "1.0 - np.sqrt(1.0", "alpha_eff =",
+                       "absorption_convention"):
+            assert marker not in src, (
+                f"scenes/generator.py contains {marker!r}: the backend's absorption "
+                "convention has leaked into the backend-agnostic scene population "
+                "(RD-144). It belongs in configs/simulators/<name>.yaml."
+            )

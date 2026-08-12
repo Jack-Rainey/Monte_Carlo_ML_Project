@@ -122,3 +122,25 @@ normalize_ir: false
 path_retention:
   mode: top_k
   value: 5000
+
+# HOW THIS BACKEND REALIZES A DECLARED ABSORPTION (AC-54, RD-144, ITEM 0).
+#
+# GSound sets reflectivity to sqrt(1-alpha) as an AMPLITUDE coefficient and
+# accumulates it into a quantity it calls energy, which the synthesizer then
+# takes sqrt() of. Re-derived independently from pinned upstream at
+# 608ea30 (SoundMesh.cpp:221 -> gsSoundPropagator.cpp:1364,1531 ->
+# binding.cpp:417,454), and confirmed by render: a 5x4x3 m room at alpha 0.30
+# measured T30 0.5441 s against 0.343 s Sabine-nominal and 0.629 s at alpha_eff.
+#
+#   alpha_eff = 1 - sqrt(1 - alpha)      T60 realizes 1.14-1.98x nominal
+#
+# `pre_compensate` passes 1-(1-alpha)^2 at the createbox call site, so the room
+# RENDERED is the room the scene DECLARES. That is the correct setting for any
+# dataset whose acoustics are computed from nominal alpha -- which is all of
+# them, since scenes/generator.py is backend-agnostic and stays in nominal alpha
+# by RD-144.
+#
+# `as_is` renders the uncorrected room. Kept reachable, not as a fallback but
+# because every measurement taken before this fix was taken under it, and those
+# numbers must stay reproducible.
+absorption_convention: pre_compensate

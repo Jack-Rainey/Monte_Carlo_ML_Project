@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel, field_validator
@@ -150,6 +151,35 @@ _SYNTHESIS_CARRIER_SEED = 42
 #: here surfaces as a subprocess exit code, not as an import error the suite catches.
 #: The literal is RAW (`r'''`) so a backslash in a path or a regex inside the worker
 #: survives being embedded in this module (RR-77).
+def _realized_absorption(alpha_nominal: float, convention: str) -> float:
+    """The alpha to hand `createbox` so the room realizes `alpha_nominal`.
+
+    This backend's per-bounce ENERGY factor is `sqrt(1-alpha)` where the declared
+    physics wants `(1-alpha)` (AC-54, re-derived from pinned upstream). So the
+    room it renders from a nominal alpha has
+
+        alpha_eff = 1 - sqrt(1 - alpha_nominal)
+
+    which is 1.14-1.98x on T60 across `base.yaml`'s declared support. Passing
+    `1-(1-alpha)^2` instead makes the realized absorption equal the nominal one:
+
+        1 - sqrt(1 - (1 - (1-a)^2)) = 1 - sqrt((1-a)^2) = a
+
+    `as_is` renders the uncorrected room. It is not a fallback — it is what every
+    measurement before this fix was taken under, and it must stay reachable so
+    those numbers remain reproducible.
+    """
+    if convention == "pre_compensate":
+        return 1.0 - (1.0 - alpha_nominal) ** 2
+    if convention == "as_is":
+        return alpha_nominal
+    raise ValueError(
+        f"absorption_convention {convention!r} is neither 'pre_compensate' nor "
+        "'as_is'. It decides which room is rendered from a scene's declared "
+        "alpha, so there is no default (AC-54, RD-144)."
+    )
+
+
 _WORKER_SRC = r'''
 """GSound-SIR render worker. Runs under the x86 render interpreter; imports no amcd."""
 import json
@@ -430,6 +460,28 @@ class GsoundSirSimulator:
         #: differ between hosts. Migrates to `RunContext.host` when RD-20 lands.
         render_python: str | None
 
+        #: HOW THIS BACKEND REALIZES A DECLARED ABSORPTION (AC-54, RD-144).
+        #:
+        #: GSound sets material reflectivity to `sqrt(1-alpha)` as an AMPLITUDE
+        #: coefficient (`SoundMesh.cpp:221`) and then accumulates it into a
+        #: quantity it calls `energy`, which the synthesizer takes `sqrt()` of
+        #: (`binding.cpp:417,454`). The `1/d` pressure law coming out correct is
+        #: what forces the reading: per-bounce ENERGY carries `sqrt(1-alpha)`, so
+        #: the realized absorption is `alpha_eff = 1 - sqrt(1 - alpha)`.
+        #:
+        #: DECLARED ON THE BACKEND, never in `scenes/generator.py` (RD-144): the
+        #: generator defines the dataset's acoustics for EVERY simulator, so
+        #: re-deriving its closed forms from one raytracer's domain confusion
+        #: would make a second raytracer render a different room from the same
+        #: scene spec, with nothing declaring it — and would foreclose the
+        #: roadmap's multiple-raytracers item.
+        #:
+        #: `pre_compensate` passes `1-(1-alpha)^2` at the `createbox` call site so
+        #: the room REALIZES the scene's declared alpha; `as_is` renders the
+        #: uncorrected room and is what every existing measurement was taken
+        #: under. No default — this is experiment-governing.
+        absorption_convention: Literal["pre_compensate", "as_is"]
+
         #: Must stay false: per-IR normalization destroys low↔high energy
         #: comparability, which the paired-improvement spine and the D0b carrier
         #: test both rest on.
@@ -687,7 +739,15 @@ class GsoundSirSimulator:
             # Cross-checked in the worker, over the unfiltered path set (F-94).
             "speed_of_sound_m_s": float(self.params["speed_of_sound_m_s"]),
             "dims": list(scene.dims),
-            "absorption": float(scene.material_absorption),
+            # AC-54/RD-144: the scene declares NOMINAL alpha; this backend
+            # realizes 1-sqrt(1-alpha), so pre-compensation is what makes the
+            # rendered room the room the scene describes.
+            "absorption": _realized_absorption(
+                float(scene.material_absorption),
+                str(self.params["absorption_convention"]),
+            ),
+            "absorption_nominal": float(scene.material_absorption),
+            "absorption_convention": str(self.params["absorption_convention"]),
             "scattering": float(self.params["scattering"]),
             "source_pos": list(scene.source_pos),
             "receiver_pos": list(scene.receiver_pos),
