@@ -116,16 +116,23 @@ to the cycle-4 pass condition. Byte-identity is asserted over it here.
 
 ```
 $ PYTHONPATH=.../src .../pytest -q
-528 passed, 1 skipped in 62.93s        (506 + 1 skipped before this lane; +22 new)
+530 passed, 1 skipped in 63.62s        (506 + 1 skipped before this lane; +24 new)
 
 $ PYTHONPATH=.../src .../amcd all -c configs/base.yaml \
     -c configs/overlays/simulator_dry_run.yaml -c configs/overlays/dry_run.yaml
 [done] gen-scenes / render / preprocess / diagnostics / train / infer / eval / stats / report
 ```
 
-Commits: `c799003` (the rows) and `5e2a09b` (the reviewer self-checks' findings,
-including two majors in `c799003`'s own prose). The A/B above was re-run on
-`5e2a09b`, not carried over from `c799003`.
+Commits: `c799003` (the rows), `5e2a09b` (the reviewer self-checks' findings,
+including two majors in `c799003`'s own prose) and `4dfe46c` (AC-153 + RR-166,
+the reviewer findings that were in this lane's files after all). The A/B above was
+re-run on `4dfe46c`, not carried over.
+
+**Every reviewer finding that lane S can reach is CLOSED.** Of the six new rows
+raised against this lane's own work, four are cross-lane or belong to ITEM 0
+(F-186, AC-150, plus RD-225/226/227 and F-185 on the partition), one was fixed in
+`4dfe46c` (AC-153) alongside RR-166, and exactly one remains OPEN and unreachable:
+RR-165 needs a NEW test file, which the ownership hook refuses.
 
 ---
 
@@ -370,13 +377,23 @@ statement.
 |---|---|---|---|---|---|---|
 | F-186 | falsifier + acoustics-reviewer | **major** | OPEN | `src/amcd/scenes/generator.py` `t60_exceeds_ir_duration` / `_disclose_and_gate_record_length`; `configs/base.yaml` `max_t60_over_ir_duration_frac` | **THE RECORD-LENGTH GATE PASSES THE EXACT CONFIG IT EXISTS TO REFUSE, IF AC-54 IS RIGHT.** The gate is the only pre-render check and can abort a run, and it is evaluated at NOMINAL α while ITEM 0 holds that the backend realizes α_eff = 1−sqrt(1−α). T60 then scales by α/α_eff = 1.975 at α 0.05, 1.837 at 0.30, 1.447 at 0.80. Largest declared shoebox at α 0.05: **4.200 s nominal → 8.294 s effective**, against a 4.25 s record. Monte-Carlo over base's declared shoebox × `mixed` support (2×10⁵ draws): **P(T60 > ir_duration) = 0.0000 nominal vs 0.0184 at α_eff**, against base's declared tolerance of **0.0**. Everything downstream that assumes an untruncated decay — T30, EDT, the Schroeder bound in `evaluation/room_acoustic.py` — inherits it. Distinct from F-60/F-185: that row is about the gate's instrument being an estimate; this is about the estimate being evaluated at the wrong α. | **Belongs with ITEM 0 (AC-54/AC-55/AC-56), not to a lane** — it is the same physical inconsistency and must not get a fourth partial fix. Falsification signal, one render, no ambiguity: render one 12×10×5 m box at nominal α = 0.05, source-receiver 3 m, fit T30 on channel 0 over −5 → −35 dB. Nominal predicts 4.20 s, α_eff predicts 8.29 s — 2× apart, far outside `d0b_t30_jnd_frac` 0.05. Backend-free precursor: synthesize a T60 = 8.29 s decay, truncate to 4.25 s, confirm the project's own T30 estimator reports the truncation rather than the room. |
 | AC-150 | acoustics-reviewer | minor | OPEN | `src/amcd/acoustics.py:17-19`; `configs/simulators/gsound_sir.yaml:78`; `configs/simulators/dry_run.yaml:16` | **Three speeds of sound coexist across stages and only one pair is disclosed.** `SABINE_K = 0.161` implies c = **343.2425 m/s**; `dry_run` renders at **343.0**; the shipped `gsound_sir` backend at **344.0**. `SABINE_K` is a hardcoded module constant with no derivation from the configured `speed_of_sound_m_s`, so every published T60/d_min describes a room at 343.24 m/s whatever the backend is set to. Magnitudes are small — against a c = 344-consistent constant, T60 runs +0.22 % and d_min −0.11 % — so this is a declaration defect, not a numeric one; it would grow silently if c were set for a non-20 °C medium. **Not lane S's files.** | Derive `SABINE_K` from the active `speed_of_sound_m_s` (`24·ln10/c`), or declare in `acoustics.py` the tolerance within which the two may differ and guard it at config load. Integrator queue. |
-| AC-153 | acoustics-reviewer + falsifier | minor | OPEN | `src/amcd/scenes/generator.py` (the per-scene `uncharacterized_reason`); `src/amcd/simulators/base.py` `SceneSpec` | **The per-scene `(unit, reason)` pair AC-53 is about never reaches disk.** `room_stats` reaches `placement_report.json` only through `_summarize` (numeric keys) and `_flag_counts` (booleans), and `SceneSpec.to_dict` has no such field, so the string dies in memory. Verified: `'uncharacterized_reason' in placement_report.json → False`; `in any scene spec → False` over 16 specs. The DISCLOSURE is not lost — it reaches the artifact per split via `uncharacterized_note` plus `n_uncharacterized` — but the project's per-unit drop-logging rule is satisfied only at split granularity, and `test_the_scene_reason_names_record_length` pins a string no artifact carries. The misleading comment claiming the reason "travels with the scene" is fixed in `5e2a09b`; the substantive half is this row. | Serialize the reason into the scene spec or the per-split record, making the AC-53 test observable end to end. Lane S can do this next cycle; it was left rather than widening a row mid-pass. |
-| RR-165 | readability-reviewer | minor | OPEN | `tests/test_scene_placement.py` (whole file, now ~1180 lines) | The file is past 1000 lines and its own docstring concedes two subjects: Research-I config fidelity / placement sampling above the topical banner, and the record-length gate + ISO d_min disclosure below it. The banner keeps it navigable for a human, but an LLM asked to find the gate tests must read a config-validation file to get there. | Split at the banner into `tests/test_record_length_gate.py` (the gate/d_min classes plus `_openfield_config`), leaving placement and config fidelity behind. **Not done in-lane deliberately: it changes `docs/lanes/*.yaml` ownership lists, so it is an integrator-cycle move.** |
-| RR-166 | readability-reviewer | minor | OPEN | `src/amcd/scenes/generator.py` `_disclose_and_gate_record_length` | Even after `5e2a09b`'s docstring trim the function carries four responsibilities — corner disclosure, per-regime accounting, per-split warning, overall gate — in one body. | Extract the corner disclosure and the warning loop as `_disclose_declared_support_corner(...)` and `_warn_regimes_over_limit(...)`, so each keeps its own short contract and the remaining function's name matches what it does. Left as a structural change rather than folded into a prose pass. |
+| AC-153 | acoustics-reviewer + falsifier | minor | **CLOSED in `4dfe46c`** | `src/amcd/scenes/generator.py` | **The per-scene `(unit, reason)` pair AC-53 is about never reached disk.** `room_stats` reaches `placement_report.json` only through `_summarize` (numeric keys) and `_flag_counts` (booleans), and `SceneSpec.to_dict` has no such field, so the string died in memory: `'uncharacterized_reason' in placement_report.json → False`, `in any scene spec → False` over 16 specs. The disclosure was not lost — it reached the artifact per split — but the project's per-unit drop rule was satisfied at SPLIT granularity only, and `test_the_scene_reason_names_record_length` pinned a string no artifact carried. | **Fixed.** Each split record now carries `uncharacterized: [{scene, reason}]` — the same shape as the eval stage's `drops.csv` and `probe.py`'s `dropped` — emitted only when non-empty, so an empty list never reads as "checked and found nothing" and the canonical report is byte-unchanged. `SceneSpec` was the other candidate home; it is lane B's file, and the split record is the better one anyway because the aggregate already lives there. Verified on the openfield config: 3 entries, ids `scene_0026..28`, each reason carrying UNCHECKED, count agreeing with `n_uncharacterized`; the enclosed `id` split carries no key at all. |
+| RR-165 | readability-reviewer | minor | OPEN | `tests/test_scene_placement.py` (whole file, now ~1240 lines) | The file is past 1000 lines and its own docstring concedes two subjects: Research-I config fidelity / placement sampling above the topical banner, and the record-length gate + ISO d_min disclosure below it. The banner keeps it navigable for a human, but an LLM asked to find the gate tests must read a config-validation file to get there. | Split at the banner into `tests/test_record_length_gate.py` (the gate/d_min classes plus `_openfield_config` / `_scored_entry`), leaving placement and config fidelity behind. **The ONLY row here lane S genuinely cannot finish**: a new test file is outside this lane's owned set and the ownership hook refuses it. Integrator-cycle move; it also changes `docs/lanes/*.yaml` ownership lists. |
+| RR-166 | readability-reviewer | minor | **CLOSED in `4dfe46c`** | `src/amcd/scenes/generator.py` `_disclose_and_gate_record_length` | Even after `5e2a09b`'s docstring trim the function carried four responsibilities — corner disclosure, per-regime accounting, per-split warning, overall gate — in one body. | **Fixed.** `_disclose_declared_support_corner` and `_warn_regimes_over_limit` extracted, each with its own contract; the remaining function's name now matches what it does. The warning helper documents why three states are distinguished rather than collapsed (generated nothing / all uncharacterized / genuinely over limit). |
 
-## Not started, deliberately
+## Not started — and why each is genuinely out of reach
+
+
 
 - **S-F1** — needs a config-declared minimum coverage in `configs/base.yaml`
   (lane M). No hidden defaults, so it cannot be fixed inside lane S. Unchanged
   from cycle 4; it is on the cycle-5 serial queue (ITEM 5).
 - **S-1, S-2** — cross-lane consolidations, on the integrator/serial queues.
+- **RR-165** — needs a new file in `tests/`, outside the owned set; the ownership
+  hook refuses it. Integrator-cycle move.
+- **F-186, AC-150, RD-225/226/227, F-185** — ITEM 0, `acoustics.py` (lane M), and
+  the partition itself. See the rows for each.
+
+Everything else the reviewers raised is closed in `5e2a09b` / `4dfe46c`. Nothing
+on this list is deferred for convenience: each is refused by file ownership or
+belongs to a decision (ITEM 0) that must not receive a fourth partial fix.
