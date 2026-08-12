@@ -6,6 +6,23 @@ Metric source of truth (design_spec §3): reported metrics are computed from the
 Lundeby noise-floor truncation, Schroeder backward integration. Never from the
 STFT energy grid directly.
 
+Implements the objective room-acoustic metrics of `docs/research_I_paper.md`
+§4.6 (background §3.1.7).
+
+TWO DECLARED DEPARTURES FROM THE STANDARD, so "the standard ISO-3382 path" is read
+as the procedure and not as a conformance claim:
+
+* the octave filter is **not IEC 61260 class 1** — realized out-of-band rejection
+  is ~-37 to -41 dB one octave out, against the 60 dB+ class 1 asks. Measured
+  figures and why the order is not simply raised: `_butter_octave_filter` (AC-68);
+* the band-resolvability floor is a **project-defined** criterion (the filter's own
+  measured decay times a declared margin), NOT ISO 3382-2's BT > 16, and is more
+  permissive than it at 500 Hz. See `configs/base.yaml`
+  `metric_band_resolvability_margin` (AC-26-R6).
+
+Both are disclosures, not defects to fix silently; each names the ledger row that
+decided it.
+
 Public API
 ----------
 compute_room_acoustic_metrics(pred_ir, high_ref_ir, low_ref_ir, *, sample_rate,
@@ -24,6 +41,9 @@ channel_per_band_metrics(ir_w, *, sample_rate, iso_eval_freqs, onset_rel_db,
                          band_resolvability_margin, trunc_idx_per_band=None)
     Per-band (values, reasons) — the shared unit under both of the above
     (identical alignment + truncation).
+
+Internal, but load-bearing to the paired path (private — do not import)
+----------------------------------------------------------------------
 _shared_truncation_per_band(reference_legs, *, sample_rate, iso_eval_freqs,
                             onset_rel_db)
     Per band, the one Schroeder integration limit every leg of a paired
@@ -50,6 +70,18 @@ from .metric_row import MetricTriple
 # 4-section SOS has padlen=27, so it needs > 27 samples; 32 gives headroom. Numerical
 # guard, not an experiment parameter.
 _MIN_FILTER_SAMPLES = 32
+
+
+def _filter_guard_samples(fc: float, sample_rate: int) -> int:
+    """Zero-pad width for the `fc` octave band, in samples.
+
+    ~4x the filter's own T30 in this band, so it exceeds the ringing rather than
+    matching it; scales as 1/fc because the ringing does. ONE definition, shared by
+    `_butter_octave_filter` (which applies it) and `_iso3382_band_metrics` (which
+    refuses records shorter than it) — two expressions of one constant is the AC-24
+    shape, and this is exactly the kind of value that drifts.
+    """
+    return int(np.ceil(48.0 / fc * sample_rate))
 
 
 # ---------------------------------------------------------------------------
@@ -96,34 +128,62 @@ def _butter_octave_filter(
     response (no group-delay offset in EDT). Returns (filtered, guard), the guard
     still attached — `_band_energy` owns what happens to it.
 
+    Implements the octave-band decomposition of `docs/research_I_paper.md` §4.6
+    (background §3.1.7).
+
     THE PAD IS EXPLICIT ZEROS AT BOTH ENDS, NOT scipy's DEFAULT (AC-36). An impulse
-    response is silent before its direct arrival and its surroundings are 0.0 at
-    both ends, so that is what the filter must see. Neither scipy default supplies
-    it: `padtype="odd"` reflects about the first sample, turning an onset-aligned
-    direct arrival into a step of twice the peak that never existed (420x the
-    500 Hz band's in-band energy, ~23 dB on C50), and `padtype="constant"`
-    replicates the EDGE sample, giving a record ending at full scale a DC tail
-    (-25.5 % band energy). Padding with explicit zeros first makes "constant"
-    replicate 0.0, which is correct at both ends.
+    response is silent before its direct arrival and its surroundings are 0.0 at both
+    ends, so that is what the filter must see. `padtype="odd"` reflects about the
+    first sample (420x the 500 Hz band's in-band energy, ~23 dB on C50) and
+    `padtype="constant"` replicates the EDGE sample (-25.5 % band energy on a record
+    ending at full scale); padding with explicit zeros makes "constant" replicate 0.0.
 
     The guard scales as 1/fc because the filter's ringing does;
-    `_band_resolvable_decay_s` measures that ringing and is the ONE place its values
-    are written down (RR-39).
+    `_band_resolvable_decay_s` measures that ringing and, with
+    `_DECLARED_FLOORS_48K` in tests/test_metrics.py, is one of the only two sites
+    those values are written down (RR-39) — change both together.
 
-    KNOWN RESIDUAL — restated from measurement, not inherited (F-68). `filtfilt` is
-    non-causal, so a sample at index i produces a response SYMMETRIC about i, and
-    the half lying outside the record is real in-band energy. `_band_energy` folds
-    it back onto its mirrored support rather than discarding it, so the ISO integral
-    is energy-conserving and integration still starts at the direct arrival.
+    REALIZED SELECTIVITY — DECLARED, AND IT MEETS NO IEC 61260 CLASS (AC-68/AC-107).
+    ISO 3382-1 specifies IEC 61260 class 1. MEASURED through `_band_energy` with a
+    pure tone, dB re the tone's total energy:
 
-    What that fold is worth, MEASURED on the canonical dry run over 24 (scene, band)
-    cells per leg: it restores 22.17 pp of low's in-band energy, 22.16 pp of high's
-    and 20.37 pp of pred's, up to 46.09 pp in a single cell. Those are the figures
-    the pre-fold code threw away — and they are NOT common-mode across legs: pred
-    ran 1.8 pp below high, which is why the earlier claim here that "paired
-    improvements are unaffected" was false. The residual that remains is placement,
-    not magnitude: mirroring is exact for an isolated arrival, approximate where
-    arrivals overlap within a guard-width of either boundary.
+        fc        -2 oct   -1 oct   lo edge   centre   hi edge   +1 oct   +2 oct
+        500 Hz    -46.59   -37.43    -6.00     -0.00    -6.01    -38.49   -47.33
+        1000 Hz   -49.59   -40.29    -6.01     -0.00    -6.01    -41.36   -50.48
+
+    Class 1 wants ~70 dB in the far stopband and class 2 ~60 dB, so at one octave out
+    this filter meets NEITHER. The order is not raised because it also sets the
+    ringing `_band_resolvable_decay_s` measures — steeper skirts buy selectivity with
+    a longer unresolvable floor, a research trade rather than a cleanup (F-143).
+
+    Two further realized properties, neither what a reader would assume: the -6 dB
+    band EDGES are correct (`sosfiltfilt` squares |H|², so -3 dB presents as -6 dB),
+    but that squaring BREAKS power-complementarity rather than preserving it — at
+    every crossover the single-pass bank sums |H|² = 1.00000 while this one sums
+    |H|⁴ = 0.50000, i.e. -3.010 dB (AC-104). The realized band is ~0.9 octave: ENBW
+    317.46 Hz against a nominal 353.55 (AC-108). Nil consequence today (bands are
+    AVERAGED, never summed, and one scalar absorption means leakage carries no wrong
+    decay); live under AC-63's per-band absorption, where a loud band's decay could
+    leak into a quiet band's T30 at ~38 dB down. All pinned by
+    `test_the_octave_filter_meets_its_declared_stopband_rejection`.
+
+    THE FOLD IS ACCURATE — THERE IS NO CONVENTION BIAS ON ABSOLUTE C50 (AC-103,
+    correcting F-68/F-68-R2). `filtfilt` is non-causal, so a sample at index i
+    produces a response SYMMETRIC about i; the half outside the record is real
+    in-band energy and `_band_energy` folds it back. Onset alignment puts the direct
+    sound ON the boundary, so its FULL band energy lands post-onset — what causality
+    requires. Measured against a KNOWN ANSWER (direct impulse + white exponential
+    tail, for which the ideal band C50 equals the broadband C50; n=200, 500 Hz,
+    DRR 20 dB):
+
+        true T60        0.300    0.100   0.0758    0.050    0.030   s
+        folded - true   +0.066   +0.214   +0.276   +0.311   -0.363  dB
+        causal - true   -0.506   -1.531   -2.056   -3.310   -6.855  dB
+
+    A previously declared "+0.0122 to +2.2294 dB magnitude bias" is RETRACTED: it was
+    measured against a causal `sosfilt` comparator whose own group delay (1.85 ms at
+    500 Hz) pushes energy past the 50 ms split, so it reported the comparator's bias.
+    The residual is placement within a guard width, not magnitude.
     """
     nyq = sample_rate / 2.0
     f_lo = fc / 2.0 ** 0.5
@@ -133,7 +193,7 @@ def _butter_octave_filter(
     sos = butter(4, [f_lo, f_hi], btype="bandpass", fs=sample_rate, output="sos")
     # ~4x the filter's own T30 in this band; zeros are cheap and the bound only has
     # to exceed the ringing, not match it. Both ends, for the reason in the docstring.
-    guard = int(np.ceil(48.0 / fc * sample_rate))
+    guard = _filter_guard_samples(fc, sample_rate)
     zeros = np.zeros(guard, dtype=np.float64)
     padded = np.concatenate([zeros, np.asarray(ir_w, dtype=np.float64), zeros])
     return sosfiltfilt(sos, padded, padtype="constant").astype(np.float32), guard
@@ -181,13 +241,10 @@ def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.ndarray:
     # integral. The deficit is a monotone function of DRR (-3.71 dB at d = 0.5 m,
     # -0.00 at 8 m), i.e. common-mode across LEGS but NOT across SCENES.
     #
-    # WHERE the energy goes matters as much as that it is kept (F-67). Lumping it
-    # all into the first sample put it on the EDR's normalization anchor, which
-    # manufactured an instantaneous step at t=0 of up to -2.95 dB — inside the
-    # 0-to-(-10) dB window EDT is fitted over. Measured consequence of the lump:
-    # paired EDT improvement moved 77 %, `test_material_shift` EDT fell from n=3 to
-    # n=2 and its MDES became N/A, and the dropped scene was attributed to filter
-    # ringing when the cause was the fold's own step.
+    # WHERE the energy goes matters as much as that it is kept (F-67): it must land
+    # on its mirrored support, not on sample 0. Lumping it there put it on the EDR's
+    # normalization anchor and manufactured a step at t=0 of up to -2.95 dB, inside
+    # the 0-to-(-10) dB window EDT is fitted over.
     #
     # Reflecting each guard sample onto its mirror image about the boundary is where
     # the energy actually came from, so it conserves energy AND leaves the EDR
@@ -195,20 +252,32 @@ def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.ndarray:
     # sake — a record truncated mid-decay (AC-22's subject) has real signal at its
     # last sample whose response extends past the end, and that energy lands in the
     # C50 late window and the Lundeby estimate.
-    if guard > 0:
-        head = min(guard, n_record - 1)
-        if head > 0:
-            # energy[guard - k] reflects onto energy[guard + k], k = 1..head
-            energy[guard + 1:guard + 1 + head] += energy[guard - 1::-1][:head]
-            energy[guard] += energy[0]
-        tail_start = guard + n_record
-        tail = min(guard, n_record - 1)
-        if tail > 0:
-            # energy[tail_start - 1 + k] reflects onto energy[tail_start - 1 - k]
-            energy[tail_start - 1 - tail:tail_start - 1] += (
-                energy[tail_start:tail_start + tail][::-1]
-            )
-            energy[tail_start - 1] += energy[-1] if len(energy) > tail_start else 0.0
+    #
+    # EVERY pad sample is folded, and the mirror index is CLAMPED into the record
+    # (F-68-R3). The earlier `min(guard, n_record - 1)` form discarded every pad
+    # sample beyond one record length — up to 29.7 % of band energy at n_record = 32
+    # (500 Hz), with nothing logged — and re-added the outermost sample twice.
+    # Conservation is now exact end to end in float64 (folded/full =
+    # 1.000000000000000); the ~1e-08 through the float32 return is cast noise.
+    # Pinned by `test_the_energy_fold_conserves_energy_at_every_record_length`.
+    #
+    # Clamping trades an energy LOSS for a PLACEMENT error rather than eliminating
+    # both: below one guard width the mirror falls outside the record and the energy
+    # lands on the record edge — the far end from the arrival it belongs to, since
+    # leading-pad energy clamps to the LAST sample and trailing to the FIRST. At
+    # n_record = 32 that puts 30.24 % of band energy on one sample. Which is why
+    # `_iso3382_band_metrics` REFUSES to report a metric below one guard width
+    # (AC-100/AC-106) rather than letting the approximation reach a number.
+    #
+    # In the normal case (n_record > guard) no clamping occurs and this is the plain
+    # mirror.
+    if guard > 0 and n_record > 0:
+        k = np.arange(1, guard + 1)
+        last = guard + n_record - 1
+        # Leading pad: padded index `guard - k` is the mirror of `guard + k`.
+        np.add.at(energy, np.minimum(guard + k, last), energy[guard - k])
+        # Trailing pad: padded index `last + k` is the mirror of `last - k`.
+        np.add.at(energy, np.maximum(last - k, guard), energy[last + k])
     return energy[guard:guard + n_record].astype(np.float32)
 
 
@@ -250,10 +319,18 @@ def _band_resolvable_decay_s(fc: float, sample_rate: int) -> dict[str, float]:
     this is not being measured — the filter is.
 
     MEASURED here rather than asserted, and the numbers scale exactly as 1/f
-    (48 kHz): 500 Hz → T30 17.881 ms, EDT 11.765 ms; 1000 Hz → 8.924 / 5.771 ms.
+    (48 kHz): **500 Hz → T30 20.360 ms, EDT 9.556 ms; 1000 Hz → T30 10.162 ms,
+    EDT 4.802 ms**.
     THIS DOCSTRING IS THE ONE PLACE THOSE VALUES ARE WRITTEN DOWN (RR-39) — they
     have moved twice as the filter path was corrected (AC-36's energy fold last),
     and every restatement elsewhere became a contradiction. Cite this function.
+
+    WRITTEN DOWN IN EXACTLY TWO PLACES — here and `_DECLARED_FLOORS_48K` in
+    tests/test_metrics.py, which pins them (AC-65/RR-119). Change both together.
+    The values drifted once already through the AC-36/F-67 energy fold (T30 +13.9 %,
+    EDT -18.8 % / -16.8 %) precisely because nothing asserted them; the ledger
+    noticed before the code did, since AC-27's resolution quoted f·T30 = 9.85-10.18,
+    which reproduces here (measured 9.88-10.18 across 125-4000 Hz).
     `sosfiltfilt` runs the 4th-order section forwards and backwards, which doubles
     the effective order — the reason an earlier estimate of "~3 ms of ringing" from
     the nominal 353 Hz bandwidth understated it by 3-7x (AC-27).
@@ -363,11 +440,41 @@ def _iso3382_band_metrics(
     always has.
     """
     all_metrics = ("T30", "EDT", "C50")
-    # Guard: the zero-phase 4th-order octave filter (sosfiltfilt, padlen=27) rejects
-    # records shorter than ~28 samples. A very-late onset trim (AC-07) can leave too
-    # few samples; a sub-millisecond record has no valid room metric anyway → nan.
-    if ir_w.shape[0] < _MIN_FILTER_SAMPLES:
-        reason = f"record shorter than the {_MIN_FILTER_SAMPLES}-sample octave-filter minimum"
+    # ── The record must be at least one GUARD WIDTH long (AC-100/AC-106) ─────────
+    #
+    # Two admission bounds, both numerical guards rather than experiment parameters.
+    # `_MIN_FILTER_SAMPLES` is what `sosfiltfilt` needs at all (padlen=27). The
+    # band-dependent one is what the ENERGY FOLD needs to be meaningful, and it was
+    # missing.
+    #
+    # `_band_energy` folds the filter's acausal ringing back onto its mirrored
+    # support. Below one guard width the mirror lands outside the record and the
+    # energy is CLAMPED to the nearest in-record index — which conserves energy but
+    # deposits it at the far end from the arrival it belongs to: measured at
+    # n_record = 32, the last sample ends up holding 30.24 % of the band's energy,
+    # 24x its neighbour, and T30 reads 0.00706 s against 0.00336 s for the same
+    # signal in a long record. The alternative (discarding it, which is what this
+    # code did before F-68-R3) silently lost up to 29.7 %.
+    #
+    # Neither belongs in a reported number, and this project does not let a result
+    # leave silently. So a record too short for its own band is NaN WITH A REASON —
+    # the honest third option, and the one the AC-38 machinery is built to carry.
+    #
+    # INERT on both declared configs: the shortest post-onset W record over the
+    # canonical dry run's 58 scene-legs is 10981 samples against guards of 4608
+    # (500 Hz) and 2304 (1000 Hz), and base.yaml's ir_duration 4.25 s is 17x larger
+    # again. It bounds a path that was reachable in principle, not one that fires.
+    guard_samples = _filter_guard_samples(fc, sample_rate)
+    if ir_w.shape[0] < max(_MIN_FILTER_SAMPLES, guard_samples):
+        reason = (
+            f"record is {ir_w.shape[0]} samples, shorter than the {guard_samples}-sample "
+            f"zero-pad guard the {fc:g} Hz octave filter needs "
+            f"({1000.0 * guard_samples / sample_rate:.0f} ms). Below one guard width the "
+            f"acausal ringing folds to a mirror outside the record and is clamped to the "
+            f"record edge, which conserves energy but deposits it at the far end from its "
+            f"arrival — measured 30.2 % of band energy on the final sample at 32 samples. "
+            f"Unmeasurable rather than approximated (AC-100/AC-106)"
+        )
         return (
             {m: float("nan") for m in all_metrics},
             {m: reason for m in all_metrics},
@@ -410,12 +517,16 @@ def _iso3382_band_metrics(
     # AC-38 is what the threshold's independence did NOT buy: the DECISION was still
     # `fitted_value < floor`, and suppressing a value because of its own magnitude
     # censors the low tail of a noisy estimator, biasing the surviving mean upward.
-    # MEASURED, 200 realizations x 2 bands, at true T60:
+    # MEASURED, 200 realizations x 2 bands (500 Hz shown; re-derived this cycle,
+    # margin 2.0, seed 20260811 — see configs/base.yaml for the full table and both
+    # bands). Columns: what suppression discards, and what it does to what survives.
     #
-    #     0.05 s →  1.2 % of T30 suppressed, +4.6 % survivor bias
-    #     0.04 s → 18.8 %,                   +7.5 %
-    #     0.03 s → 46.0 %
-    #     0.02 s → 72.8 %,                  +13.9 %
+    #     true T60   T30 suppressed   error of the SUPPRESSED mean   of the DISCLOSED
+    #      0.02 s       200/200          no value at all                  +13.4 %
+    #      0.03 s       192/200             +38.9 %                        +6.4 %
+    #      0.04 s        79/200             +14.8 %                        +5.7 %
+    #      0.05 s        12/200              +5.4 %                        +3.7 %
+    #      0.06 s         0/200              +3.7 %                        +3.7 %
     #
     # and base.yaml's declared support admits Eyring T60 = 0.0179 s, below the 500 Hz
     # T30 floor. So the verdict is RETURNED here and applied by whoever knows the
@@ -503,16 +614,11 @@ def _iso3382_band_metrics(
     #   * EDT — at the corner AC-39 names (alpha 0.98, d 1-2 m) EDT is below its
     #     floor while C50 measures +48.8 to +55.3 dB and T30 measures fine. That
     #     C50 is the DIRECT ARRIVAL, ISO-3382-real, and AC-39 exists to affirm it.
-    #   * a float32 residue bound — SHIPPED BRIEFLY AND WRONG. `late` is a sum over
-    #     the late window, so bounding it with the EARLY peak bounds nothing: the
-    #     rule reduced to a C50 ceiling set by the direct arrival's crest factor
-    #     (measured 57.6-62.2 dB varying with arrival SHAPE at a fixed tail level,
-    #     moving the wrong way — a sharper arrival lowered the ceiling). Worse, it
-    #     applied to the PHYSICAL legs, firing at true T60 <= 0.04 s with a
-    #     probability monotone in absorption, i.e. confounded with the
-    #     `test_material_shift` axis — the exact censoring-on-the-datum defect
-    #     AC-38 removes three blocks above. Caught by the acoustics-reviewer and
-    #     the falsifier independently; recorded rather than quietly dropped.
+    #   * a float32 residue bound on `late` was tried and rejected — it reduces to a
+    #     C50 ceiling set by the direct arrival's crest factor (57.6-62.2 dB, moving
+    #     the WRONG way with arrival shape), and it fired on the PHYSICAL legs with a
+    #     probability monotone in absorption, i.e. confounded with
+    #     `test_material_shift`'s own axis (AC-42).
     #
     # Physical legs are never censored by this: `compute_room_acoustic_metrics`
     # suppresses only `pred`, and only in bands the physical legs themselves
@@ -574,7 +680,8 @@ def channel_band_avg_metrics(
     own value distorts a reported split mean) does not apply. `signature and
     behaviour both frozen` is deliberate rather than inherited: the reported path is
     `compute_room_acoustic_metrics`, which discloses instead, and the divergence
-    between the two is written up in the lane-M inbox against `probe.py:256,262`
+    between the two is written up in the lane-M inbox as RD-190, against
+    `probe.py:256,262`
     so the D0b half is assigned to someone rather than silently left behind.
     """
     per_band = channel_per_band_metrics(
@@ -663,9 +770,31 @@ def compute_room_acoustic_metrics(
     Standard ISO-3382 room-acoustic metrics (T30, C50, EDT) from decoded waveforms.
 
     Uses W-channel (ch 0), onset-aligned per IR (AC-02) so metrics are invariant to
-    leading propagation-delay silence. Returns (triples, nan_reasons): one triple
-    per metric, kind = match_reference (pred should match the high reference's
-    value), plus (metric, leg) → reason for everything dropped (F-21).
+    leading propagation-delay silence.
+
+    Returns a 4-TUPLE (RR-85 — this said "(triples, nan_reasons)" while returning
+    four values, and never named `band_accounting` at all, which is the structure
+    carrying the caveat columns into `ci_table.csv`):
+
+    1. `triples` — {metric: MetricTriple}, one per metric in (T30, EDT, C50), with
+       `kind="match_reference"` (pred should match the HIGH reference's value).
+       T30/EDT in SECONDS, C50 in dB. NaN where unscored, with a reason in (2).
+    2. `nan_reasons` — {(metric, leg): reason}. Covers two cases, not one: a leg
+       that is UNSCORED, and a leg that is SCORED but carries the AC-38
+       resolvability caveat. `evaluator.py`'s drop sweep handles both (a reason on
+       a finite leg is logged as a partial intra-leg drop). Legs are
+       "pred"/"high"/"low".
+    3. `window` — {band: (sample_index, source_leg)}, the shared Schroeder
+       integration limit per band (AC-17). Keyed by `f"{fc:g}"` — a STRING, e.g.
+       "500" — and valued by the truncation index in SAMPLES from that leg's own
+       onset, plus the name of the physical leg that set it (the minimum). Returned
+       so every scored row can record its window, not only the dropped ones (RD-44).
+    4. `band_accounting` — {metric: {...}}: `n_bands`, `n_bands_kept`, `kept_hz`,
+       `pred_unresolved_hz`, `resolvability_limited_hz` and
+       `pred_unresolved_in_floor_limited_hz` (RD-93's pred-side selection detector).
+       Frequencies in Hz as floats. These are what reach `metrics.parquet` and, via
+       lane P, `ci_table.csv`'s caveat columns — so this is the load-bearing return,
+       not an extra.
 
     Every leg is band-averaged over the SAME band set, because ISO-3382
     band-averaged metrics are only comparable over a common one (AC-08: averaging
@@ -850,12 +979,25 @@ def compute_room_acoustic_metrics(
                     f"{iso_eval_freqs[b]:g} Hz: {per_leg[leg][b][2][metric]}"
                     for b in bands
                 )
-                nan_reasons[(metric, leg)] = (
+                disclosure = (
                     f"resolvability-limited but REPORTED, not suppressed (AC-38): "
                     f"{len(bands)}/{len(kept)} kept bands sit below what the band "
                     f"resolves. Suppressing them censored the estimator on its own "
                     f"value and biased this split's mean upward, so the value is "
                     f"reported with this caveat instead ({detail})"
+                )
+                # APPEND, never overwrite (F-M9). The same (metric, leg) key may
+                # already carry a band-EXCLUSION reason written above, and
+                # `evaluator.py`'s drop sweep forwards exactly one reason per
+                # (metric, leg) to `drops.csv` — so assigning here would silently
+                # delete the exclusion, which is the harder fact of the two. No
+                # instance is constructible inside base.yaml's declared support
+                # (a Schroeder EDR is monotone, and Lundeby's floor makes the
+                # "<2 samples" branch unreachable), so this is a guard against a
+                # path that exists rather than a fix for one that fires.
+                prior = nan_reasons.get((metric, leg))
+                nan_reasons[(metric, leg)] = (
+                    disclosure if prior is None else f"{prior} | ALSO: {disclosure}"
                 )
 
         if not kept:
@@ -953,10 +1095,12 @@ def _c50(energy_linear_1d: np.ndarray, frame_duration: float) -> float:
     # STFT frame (~53 ms at hop 512 / 48 kHz), a ~3 ms offset from the exact 50 ms
     # used by the reported waveform path. Acceptable for this training proxy; the
     # proxy-vs-standard validation (§3) accounts for the offset. See ledger AC-05.
-    # RD-06: this proxy assumes t=0 = the direct arrival (no onset alignment here,
-    # unlike the reported path's channel_band_avg_metrics). Valid for the energy grid,
-    # whose frames already start at the IR's t=0; revisit if the proxy ever consumes
-    # real renders carrying propagation delay.
+    # RD-06: this proxy assumes t=0 is the direct arrival — no onset alignment, unlike
+    # the reported waveform path `compute_room_acoustic_metrics`, which `evaluator.py`
+    # calls. (`channel_band_avg_metrics` is the single-IR D0b probe unit, not the
+    # reported path — AC-70.) Valid for the energy grid, whose frames already start at
+    # the IR's t=0; revisit if the proxy ever consumes renders carrying propagation
+    # delay.
     split_frame = int(np.ceil(0.050 / frame_duration))
     if split_frame >= len(energy_linear_1d):
         return float("nan")
