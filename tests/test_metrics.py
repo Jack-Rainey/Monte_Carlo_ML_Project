@@ -1577,3 +1577,176 @@ def test_a_physical_leg_is_never_censored_for_its_own_c50(true_t60: float) -> No
             f"guard that fires more often as absorption rises is confounded with "
             f"the test_material_shift axis."
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cluster C5 / C6 — the truncation window and the record-length gate.
+# Added at the cycle-5 integration for AC-58, AC-64 and F-186, each of which
+# asks for exactly one of these as its acceptance test. All three are
+# RENDER-FREE by construction: they are the half of ITEM 0 / ITEM 0b that a
+# known answer can settle, so the emulated renders are spent only on what a
+# known answer cannot.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_IR_DURATION_S = 4.25       # configs/base.yaml
+_T30_JND_FRAC = 0.05        # configs/base.yaml d0b_t30_jnd_frac
+
+
+def _padded_decay(rt60: float, seed: int, floor_rms: float = 0.0) -> np.ndarray:
+    """A decay written into a full `ir_duration` record, zero-padded like the backend.
+
+    `_fit_to_window` ALWAYS pads to the configured record length, so the last 10 %
+    of every real record is exactly zero unless the synthesis leaves a numerical
+    floor. That padding is what AC-58 and AC-64 are both about, so these probes
+    reproduce it rather than testing a bare decay.
+    """
+    n_record = int(_IR_DURATION_S * _SR)
+    n_native = min(int(2.0 * rt60 * _SR), n_record)
+    ir = np.zeros(n_record)
+    ir[:n_native] = _decaying_noise_ir(rt60, n_native / _SR, seed)[:n_native]
+    if floor_rms:
+        ir = ir + np.random.default_rng(seed + 1).standard_normal(n_record) * floor_rms
+    return ir
+
+
+class TestTheTruncationIndexUnderAZeroPad:
+    """AC-58: is the Schroeder integration limit invariant to a pure gain?
+
+    ISO 3382's T30/EDT/C50 are RATIOS, so a pure gain must not move them. The
+    limit is chosen by `_lundeby_truncate`, which estimates a noise floor from the
+    last 10 % of the record and clamps it to 1e-30 — and on a zero-padded record
+    that region is EXACTLY zero, so the clamp turns a relative "10 dB above the
+    floor" test into an ABSOLUTE 1e-29.
+
+    Measured at the cycle-5 integration, this is inert at any realistic level and
+    catastrophic far below one: over gains 1e-16..1e-6 the index runs 480 -> 57840
+    samples, a 1195 ms swing, then pins at the native/pad boundary. The two tests
+    below pin BOTH halves, because a fix that made the low-gain half invariant by
+    breaking the boundary behaviour would be worse than the defect.
+    """
+
+    def test_the_index_is_gain_invariant_at_realistic_levels(self) -> None:
+        from amcd.evaluation.room_acoustic import _lundeby_truncate
+
+        ir = _padded_decay(0.6, seed=0)
+        idxs = {
+            _lundeby_truncate((ir * 10.0**e) ** 2, _SR) for e in (-6, -3, 0, 3)
+        }
+        assert len(idxs) == 1, (
+            f"the truncation index moved across 1e-6..1e+3 of pure gain: {idxs}. "
+            "T30/EDT/C50 are ratios; a level change must not move the window "
+            "they are integrated over (AC-58)."
+        )
+
+    def test_the_index_lands_at_the_end_of_the_native_decay(self) -> None:
+        """The boundary behaviour the invariance above must not be bought with.
+
+        A zero pad carries no information, so the right limit is where the signal
+        stops — not an absolute level, and not the end of the record.
+        """
+        from amcd.evaluation.room_acoustic import _lundeby_truncate
+
+        rt60 = 0.6
+        ir = _padded_decay(rt60, seed=0)
+        n_native = int(2.0 * rt60 * _SR)
+        idx = _lundeby_truncate(ir**2, _SR)
+        smoothing = int(0.010 * _SR)
+        assert n_native <= idx <= n_native + smoothing, (
+            f"index {idx} is not at the native/pad boundary {n_native} "
+            f"(+ up to {smoothing} samples of smoothing). Landing short discards "
+            "real decay; landing long integrates digital silence."
+        )
+
+
+class TestT30RecoversAKnownDecayInAPaddedRecord:
+    """AC-64's own no-render acceptance test, run as the row specifies.
+
+    The row predicts a ~600 ms window that would under-read T30 by -43 % at
+    T60 = 2.0 s. Measured here: it does not happen on well-formed input — the
+    index lands at the native/pad boundary and all eight (T60, band) cells come
+    back inside the JND. That does NOT discharge AC-64: its 600 ms index was
+    measured on a real gsound IR whose artifact was destroyed by an in-memory
+    probe, and only a retained-artifact render can say whether that IR's tail is
+    genuinely ~280 dB down from there. This test pins the estimator so the render
+    measures the BACKEND rather than both at once.
+    """
+
+    def test_every_declared_decay_is_recovered_within_the_jnd(self) -> None:
+        from amcd.evaluation.room_acoustic import _iso3382_band_metrics
+
+        breaches = []
+        for rt60 in (0.5, 1.0, 2.0, 3.0):
+            ir = _padded_decay(rt60, seed=0)
+            for fc in _ISO:
+                values, nan_reasons, _ = _iso3382_band_metrics(
+                    ir, fc, _SR, band_resolvability_margin=_NO_FLOOR
+                )
+                t30 = values["T30"]
+                assert np.isfinite(t30), (
+                    f"T30 is NaN at T60={rt60}s, {fc} Hz: {nan_reasons.get('T30')}"
+                )
+                err = abs(t30 - rt60) / rt60
+                if err > _T30_JND_FRAC:
+                    breaches.append((rt60, fc, t30, err))
+        assert not breaches, (
+            f"T30 breaches d0b_t30_jnd_frac={_T30_JND_FRAC} at {breaches}. The "
+            "estimator must recover a known decay through the shipped ISO path "
+            "before a render can be read as measuring the backend (AC-64)."
+        )
+
+
+class TestARoomTooReverberantForItsRecord:
+    """F-186: a decay longer than the record must not yield a quiet, wrong number.
+
+    This is F-186's backend-free precursor. base.yaml's largest declared shoebox
+    at nominal alpha 0.05 is T60 = 4.200 s and fits the 4.25 s record; under the
+    alpha_eff convention ITEM 0 is deciding (alpha_eff = 1 - sqrt(1 - alpha)) the
+    same room is T60 = 8.294 s and does NOT.
+
+    MEASURED at the cycle-5 integration: the estimator returns 6.3868 s at 500 Hz
+    (+22.99 %) and 5.5690 s at 1000 Hz (+32.86 %) with `nan_reason` AND
+    `resolvability` both None — a plausible number for a room whose decay is twice
+    its record. The record-length gate in `scenes/generator.py` is the ONLY thing
+    standing between an alpha_eff population and that number, and F-186 is that
+    the gate is evaluated at nominal alpha.
+
+    The assertion below is deliberately the WEAK one: it pins the error's
+    existence and size, so this test documents the live behaviour rather than
+    asserting the behaviour is acceptable. It must be REPLACED by an
+    unscored-with-a-reason assertion when ITEM 0 lands (cluster C6).
+    """
+
+    def test_a_decay_twice_its_record_is_mis_estimated_and_not_flagged(self) -> None:
+        from amcd.evaluation.room_acoustic import _iso3382_band_metrics
+
+        fits = _padded_decay(4.200, seed=0)
+        overruns = _padded_decay(8.294, seed=0)
+
+        for fc in _ISO:
+            values, _, _ = _iso3382_band_metrics(
+                fits, fc, _SR, band_resolvability_margin=_NO_FLOOR
+            )
+            err = abs(values["T30"] - 4.200) / 4.200
+            assert err <= _T30_JND_FRAC, (
+                f"the CONTROL is wrong at {fc} Hz: T30={values['T30']:.4f}s, "
+                f"err={err:.2%}. A decay that fits its record must be recovered, "
+                "or the overrun case below measures the estimator, not truncation."
+            )
+
+        for fc in _ISO:
+            values, nan_reasons, resolvability = _iso3382_band_metrics(
+                overruns, fc, _SR, band_resolvability_margin=_NO_FLOOR
+            )
+            t30 = values["T30"]
+            err = abs(t30 - 8.294) / 8.294
+            assert np.isfinite(t30) and err > 0.20, (
+                f"F-186's premise has changed at {fc} Hz: T30={t30}, err={err}. "
+                "This test documents that a room twice as reverberant as its "
+                "record is silently mis-estimated by >20 %. If that is no longer "
+                "true, ITEM 0 has landed and this test must be replaced by the "
+                "unscored-with-a-reason assertion (cluster C6)."
+            )
+            assert nan_reasons.get("T30") is None, (
+                f"T30 now carries a reason at {fc} Hz: {nan_reasons['T30']}. That "
+                "is the FIX for F-186 — replace this test rather than relaxing it."
+            )
