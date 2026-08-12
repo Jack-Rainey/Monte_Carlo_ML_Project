@@ -500,6 +500,25 @@ class TestGenerationPlan:
 # healthy run has no uncharacterized scenes at all, so none of these fire on one.
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _scored_entry(n: int, over: int, n_none: int = 0) -> dict:
+    """One split record for the gate, built THROUGH `_flag_counts`.
+
+    Hand-shaping a `t60_over_ir_duration` block produces a schema the generator
+    never emits — most obviously one with no `n_scenes` key — so a fixture carrying
+    it pins the gate against a state that cannot occur, and blocks the gate from
+    ever reading its own published denominator.
+    """
+    rooms: list[dict] = [{"t60_exceeds_ir_duration": i < over} for i in range(n)]
+    rooms += [{"characterization": "none"} for _ in range(n_none)]
+    return {
+        "n_scenes": n + n_none,
+        "t60_over_ir_duration": _flag_counts(
+            rooms, ("t60_exceeds_ir_duration",),
+            uncharacterized_consequence="unchecked.",
+        ),
+    }
+
+
 def _openfield_config(**scene_overrides) -> Config:
     """tiny_config plus a 3-scene split whose geometry declares no enclosure.
 
@@ -600,23 +619,8 @@ class TestPerSplitOverLimitWarning:
 
     @staticmethod
     def _report(train_over: int, shift_over: int) -> dict:
-        """Built through `_flag_counts`, not hand-shaped.
-
-        A hand-built block with no `n_scenes` key is a shape the producer never
-        emits, so a fixture carrying one pins the gate against a schema that cannot
-        occur — and blocks the gate from reading the published denominator at all.
-        """
-        def entry(n: int, over: int) -> dict:
-            rooms = [{"t60_exceeds_ir_duration": i < over} for i in range(n)]
-            return {
-                "n_scenes": n,
-                "t60_over_ir_duration": _flag_counts(
-                    rooms, ("t60_exceeds_ir_duration",),
-                    uncharacterized_consequence="unchecked.",
-                ),
-            }
-        return {"train": entry(500, train_over),
-                "test_placement_shift": entry(30, shift_over)}
+        return {"train": _scored_entry(500, train_over),
+                "test_placement_shift": _scored_entry(30, shift_over)}
 
     def test_a_split_over_its_own_limit_is_named_while_the_gate_passes(
         self, ri_config: Config, capsys
@@ -669,12 +673,7 @@ class TestPerSplitOverLimitWarning:
         """RD-112: with every scene uncharacterized the gate has nothing to measure.
         Falling through would be F-71's own defect one level up — a silent pass at
         exactly the outdoor/partially-open configuration the RD-64 seam enables."""
-        rooms = [{"characterization": "none"} for _ in range(3)]
-        report = {
-            "test_openfield": {"n_scenes": 3, "t60_over_ir_duration": _flag_counts(
-                rooms, ("t60_exceeds_ir_duration",),
-                uncharacterized_consequence="unchecked.")},
-        }
+        report = {"test_openfield": _scored_entry(0, 0, n_none=3)}
         _disclose_and_gate_record_length(tiny_config(), report, QUIET)
         warnings = capsys.readouterr().err
 
@@ -909,8 +908,7 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
 
     def test_an_undeclared_non_split_key_names_itself(self) -> None:
         report = {
-            "id": {"n_scenes": 4, "t60_over_ir_duration": {
-                "t60_exceeds_ir_duration": {"count": 0}}},
+            "id": _scored_entry(4, 0),
             "absorption_convention": {"effective_alpha": "1-sqrt(1-alpha)"},
         }
         with pytest.raises(ValueError, match="absorption_convention") as exc:
@@ -930,8 +928,7 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
             gen, "_NON_SPLIT_REPORT_KEYS", frozenset({"absorption_convention"})
         )
         report = {
-            "id": {"n_scenes": 4, "t60_over_ir_duration": {
-                "t60_exceeds_ir_duration": {"count": 3}}},
+            "id": _scored_entry(4, 3),
             "absorption_convention": {"effective_alpha": "1-sqrt(1-alpha)"},
         }
         with pytest.raises(ValueError, match="3 of 4 scenes"):
@@ -964,10 +961,7 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
         monkeypatch.setattr(
             gen, "_NON_SPLIT_REPORT_KEYS", frozenset({"test_geometry_shift"})
         )
-        rooms = [{"t60_exceeds_ir_duration": True} for _ in range(2)]
-        block = _flag_counts(rooms, ("t60_exceeds_ir_duration",),
-                             uncharacterized_consequence="unchecked.")
-        report = {"test_geometry_shift": {"n_scenes": 2, "t60_over_ir_duration": block}}
+        report = {"test_geometry_shift": _scored_entry(2, 2)}
 
         with pytest.raises(ValueError, match="test_geometry_shift") as exc:
             gen._disclose_and_gate_record_length(tiny_config(), report, QUIET)
@@ -1022,11 +1016,7 @@ class TestTheGateNamesWhatItActuallyScored:
         message, so a passing run over a partly-uncharacterized population reported
         a verdict with no coverage. Needs a MIXED split, which no shipped config can
         reach — which is exactly why it would go unnoticed."""
-        rooms = [{"t60_exceeds_ir_duration": False} for _ in range(4)]
-        rooms += [{"characterization": "none"} for _ in range(6)]
-        block = _flag_counts(rooms, ("t60_exceeds_ir_duration",),
-                             uncharacterized_consequence="unchecked.")
-        report = {"test_mixed": {"n_scenes": 10, "t60_over_ir_duration": block}}
+        report = {"test_mixed": _scored_entry(4, 0, n_none=6)}
 
         _disclose_and_gate_record_length(tiny_config(), report, QUIET)  # passes
         warnings = capsys.readouterr().err
@@ -1143,6 +1133,41 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
             "the reason enumerated T60/R/r_c/DRR as undefined but never named "
             "record length, the one thing the scene is still subject to (AC-53)"
         )
+
+    def test_the_per_scene_reason_reaches_the_artifact(self, tmp_path: Path) -> None:
+        """AC-153. The test above pins a string that lived only in memory:
+        `room_stats` reaches `placement_report.json` through `_summarize` (numeric
+        keys) and `_flag_counts` (booleans), and `SceneSpec` has no such field, so
+        the (unit, reason) pair the project requires existed at split granularity
+        only. It is now recorded per scene."""
+        run_gen_scenes(_openfield_config(), tmp_path, QUIET)
+        report = json.loads(
+            (tmp_path / "scenes" / "placement_report.json").read_text()
+        )
+
+        entries = report["test_openfield"]["uncharacterized"]
+        assert len(entries) == 3
+        assert [e["scene"] for e in entries] == sorted(e["scene"] for e in entries)
+        for e in entries:
+            assert e["scene"].startswith("scene_")
+            assert "UNCHECKED" in e["reason"]
+        # The count in the flag block and the per-unit list must agree — one is the
+        # aggregate OF the other, not a second independent tally (AC-24 shape).
+        block = report["test_openfield"]["t60_over_ir_duration"]
+        assert block["n_uncharacterized"] == len(entries)
+
+    def test_a_fully_characterized_split_carries_no_empty_list(
+        self, tmp_path: Path
+    ) -> None:
+        """Emit-iff-non-empty, the same discipline as `n_uncharacterized` — so the
+        canonical report is byte-unchanged by AC-153 and an empty list never reads
+        as 'checked and found nothing'."""
+        run_gen_scenes(_openfield_config(), tmp_path, QUIET)
+        report = json.loads(
+            (tmp_path / "scenes" / "placement_report.json").read_text()
+        )
+        assert "uncharacterized" not in report["id"]
+        assert "uncharacterized" in report["test_openfield"]
 
     def test_the_record_length_block_says_unchecked(self, tmp_path: Path) -> None:
         """The known-answer test AC-53 asks for: a mixed enclosure/non-enclosure

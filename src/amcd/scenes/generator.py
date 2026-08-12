@@ -487,6 +487,77 @@ def _regime_label(config: Config, name: str) -> str:
     return f"split {name!r}"
 
 
+def _disclose_declared_support_corner(config: Config, verbosity) -> dict:
+    """Print the declared-support T60 corner; return it for the gate's error text.
+
+    Disclosure only — never a threshold. The corner is the product of two
+    independent extremes (largest room, lowest absorption) and has near-zero
+    probability of being drawn, so gating on it would reject configs whose realized
+    scenes are all fine (RD-56).
+
+    `Config.worst_case_t60` returns a reasoned `None` when no family declares
+    `characterization: sabine`; that is the config RD-112's gate warning is about,
+    and formatting it unconditionally is what once made that warning unreachable.
+    """
+    corner = config.worst_case_t60()
+    if corner["t60_sabine_s"] is None:
+        emit(
+            verbosity, "progress",
+            f"  Declared-support corner: UNSCORED — {corner['uncharacterized_reason']} "
+            f"(families skipped: {', '.join(corner['skipped_families'])})",
+        )
+    else:
+        emit(
+            verbosity, "progress",
+            f"  Declared-support corner: Sabine T60 {corner['t60_sabine_s']:.2f} s "
+            f"({corner['geometry_family']} {corner['dims_m']} m at alpha "
+            f"{corner['absorption']}) vs ir_duration {corner['ir_duration_s']:.2f} s"
+            + ("" if corner["covered_by_record"] else "  — NOT covered by the record"),
+        )
+    return corner
+
+
+def _warn_regimes_over_limit(
+    config: Config,
+    per_split: dict[str, tuple[int, int, int]],
+    limit: float,
+    verbosity,
+) -> None:
+    """Name every regime whose OWN over-limit fraction exceeds the declared limit.
+
+    `per_split` maps regime -> (over-limit count, scored, attempted). Three states
+    are distinguished rather than collapsed, because they are different facts:
+    a regime that generated nothing (S-F6), one whose scenes are all
+    uncharacterized so its fraction is UNDEFINED (RD-64/F-71), and one genuinely
+    over its limit (RD-65).
+
+    Warnings, not gates — the gate is the overall fraction (RD-56) — and emitted
+    BEFORE it can raise, so a failing run still names the regimes responsible.
+    """
+    for name, (count, scored, attempted) in per_split.items():
+        label = _regime_label(config, name)
+        if not attempted:
+            emit(verbosity, "warning",
+                 f"  WARNING: {label} generated 0 scenes, so the record-length gate "
+                 f"has nothing to score for it. A declared split with no scenes is a "
+                 f"fact about this run — reported, not skipped (S-F6).")
+            continue
+        if not scored:
+            emit(verbosity, "warning",
+                 f"  WARNING: {label}: 0 of {attempted} scenes are "
+                 f"characterized, so its over-limit fraction is UNDEFINED — "
+                 f"reported as null, never as 0.0 (RD-64/F-71).")
+            continue
+        frac = count / scored
+        if frac > limit:
+            emit(verbosity, "warning",
+                 f"  WARNING: {label}: {count}/{scored} scenes ({frac:.3%}) "
+                 f"exceed ir_duration {config.ir_duration} s — above this config's "
+                 f"own scenes.max_t60_over_ir_duration_frac ({limit}). The gate is "
+                 f"the OVERALL fraction and may still pass; a shift split far over on "
+                 f"its own is a fact about that split's decay distribution (RD-65).")
+
+
 def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) -> None:
     """Disclose the declared-support corner; gate on the over-limit rate of the
     closed-form ESTIMATE.
@@ -518,25 +589,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     Scores only CHARACTERIZED scenes (rule at `_scene_is_characterized`); a gate
     that scored none is UNSCORED, never passed (F-71/RD-112).
     """
-    corner = config.worst_case_t60()
-    if corner["t60_sabine_s"] is None:
-        # No family declares `characterization: sabine`, so there is no closed-form
-        # decay corner to disclose — the same config RD-112's gate warning is about,
-        # and the one path that reached this line with nothing to format.
-        emit(
-            verbosity, "progress",
-            f"  Declared-support corner: UNSCORED — {corner['uncharacterized_reason']} "
-            f"(families skipped: {', '.join(corner['skipped_families'])})",
-        )
-    else:
-        emit(
-            verbosity, "progress",
-            f"  Declared-support corner: Sabine T60 {corner['t60_sabine_s']:.2f} s "
-            f"({corner['geometry_family']} {corner['dims_m']} m at alpha "
-            f"{corner['absorption']}) vs ir_duration {corner['ir_duration_s']:.2f} s"
-            + ("" if corner["covered_by_record"] else "  — NOT covered by the record"),
-        )
-
+    corner = _disclose_declared_support_corner(config, verbosity)
     limit = config.scenes.max_t60_over_ir_duration_frac
 
     # S-F4, the OVER-declared direction. Skipping is silent by construction, so a
@@ -587,35 +640,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
             )
         per_split[name] = (block["t60_exceeds_ir_duration"]["count"], scored, attempted)
 
-    # RD-65. Emitted before the overall gate can raise, so a failing run still names
-    # the splits responsible.
-    for name, (count, scored, attempted) in per_split.items():
-        label = _regime_label(config, name)
-        if not attempted:
-            # A DECLARED split that generated no scene at all. Reachable —
-            # `scenes.n_id: 0` is accepted and yields `id: n_scenes 0` — and
-            # previously silent here, while `probe.py` warns for the analogous
-            # case. An empty split is a fact about this run, not an absence of
-            # one (S-F6).
-            emit(verbosity, "warning",
-                 f"  WARNING: {label} generated 0 scenes, so the record-length gate "
-                 f"has nothing to score for it. A declared split with no scenes is a "
-                 f"fact about this run — reported, not skipped (S-F6).")
-            continue
-        if not scored:
-            emit(verbosity, "warning",
-                 f"  WARNING: {label}: 0 of {attempted} scenes are "
-                 f"characterized, so its over-limit fraction is UNDEFINED — "
-                 f"reported as null, never as 0.0 (RD-64/F-71).")
-            continue
-        frac = count / scored
-        if frac > limit:
-            emit(verbosity, "warning",
-                 f"  WARNING: {label}: {count}/{scored} scenes ({frac:.3%}) "
-                 f"exceed ir_duration {config.ir_duration} s — above this config's "
-                 f"own scenes.max_t60_over_ir_duration_frac ({limit}). The gate is "
-                 f"the OVERALL fraction and may still pass; a shift split far over on "
-                 f"its own is a fact about that split's decay distribution (RD-65).")
+    _warn_regimes_over_limit(config, per_split, limit, verbosity)
 
     over = sum(count for count, _, _ in per_split.values())
     total = sum(scored for _, scored, _ in per_split.values())
@@ -794,6 +819,13 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         rejected = {"below_min": 0, "above_max": 0}
         unreachable_max = 0
         room_stats: list[dict] = []
+        # (scene, reason) for every scene this stage could not characterize — the
+        # per-unit pair the project requires, mirroring the eval stage's drops.csv
+        # and probe.py's `dropped`. Before AC-153 the reason existed only in memory:
+        # `room_stats` reaches the report through `_summarize` (numeric keys) and
+        # `_flag_counts` (booleans), so the string died there and the disclosure
+        # survived only as an aggregate count.
+        uncharacterized: list[dict[str, str]] = []
 
         for _ in range(count):
             scene_seed = int(rng.integers(0, 2**31))
@@ -817,17 +849,23 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             distances.append(distance)
             src_heights.append(src[2])
             rcv_heights.append(rcv[2])
-            room_stats.append(_room_acoustics(
+            scene_id = f"scene_{scene_idx:04d}"
+            room = _room_acoustics(
                 dims, absorption, distance,
                 alpha_limit=scenes_cfg.diffuse_field_alpha_limit,
                 ir_duration_s=config.ir_duration,
                 characterization=(
                     scenes_cfg.geometry_families[axes["geometry"]].characterization
                 ),
-            ))
+            )
+            room_stats.append(room)
+            if "uncharacterized_reason" in room:
+                uncharacterized.append(
+                    {"scene": scene_id, "reason": room["uncharacterized_reason"]}
+                )
 
             spec = SceneSpec(
-                scene_id=f"scene_{scene_idx:04d}",
+                scene_id=scene_id,
                 seed=scene_seed,
                 geometry_family=axes["geometry"],
                 dims=dims,
@@ -847,6 +885,12 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         report[split_regime] = {
             "n_scenes": count,
             "seed": split_seed,
+            # AC-153: the per-scene (unit, reason) pairs, emitted ONLY when
+            # non-empty — same emit-iff discipline as `n_uncharacterized`, so a
+            # fully characterized split carries no empty list and the canonical
+            # report is unchanged. The aggregate lives in each flag block's
+            # `n_uncharacterized`; this is the per-unit record underneath it.
+            **({"uncharacterized": uncharacterized} if uncharacterized else {}),
             "placement_regime": axes["placement"],
             "height_range_declared": regime.height_range,
             "distance_range_declared": regime.distance_range,
