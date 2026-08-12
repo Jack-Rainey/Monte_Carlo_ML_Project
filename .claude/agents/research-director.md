@@ -123,3 +123,31 @@ description alone: those paths are what assign the concern to a lane next cycle.
 When reviewing a PLAN that partitions work into lanes, judge the partition too:
 a lane that can move `ci_table.csv` while another lane also can is a methodology
 defect, not a scheduling detail.
+
+## What a row contains — and what it must not
+
+A row is written for ONE reader: the implementer who will fix it, possibly three
+cycles from now, with none of your context.
+
+It carries:
+
+- **an anchor** — repo-relative `path` or `path:line`;
+- **the defect** — what is wrong, and the measurement or reasoning that shows it;
+- **a resolution** — enough for an implementer to act without re-deriving your
+  work. **There is no length cap.** A one-sentence resolution on a multi-part
+  defect is not concision, it is a row someone has to redo. Where you measured
+  numbers, put the numbers in: they are the part a later pass cannot cheaply
+  recover.
+
+It carries NONE of:
+
+- how you arrived at the finding, what you tried first, or what you ruled out;
+- what a previous pass concluded, or a correction to an earlier row's claim;
+- narration of the review itself ("re-derived at pass 4", "confirmed, awaiting
+  re-review"). Status is OPEN or DEFERRED. A fixed row is DELETED, and `git log
+  -S '<id>'` is the audit trail.
+
+**Do not file a row that changes neither what the code does nor what a reported
+number means.** One cycle accumulated 108 such rows — comment length, docstring
+phrasing, bookkeeping about the ledger itself — and they buried the real work.
+Reviewing is not free: every row you file is read by every later cycle.

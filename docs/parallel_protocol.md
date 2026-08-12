@@ -202,8 +202,8 @@ Each row declares the `fix:` and `test:` paths it will actually touch.
 - **every row's `fix` and `test` paths fall inside its own lane's owned set** —
   so a row that cannot be finished in its lane fails at declaration time rather
   than halfway through a session;
-- every row id appears in exactly one of the four lists (lane rows,
-  `integrator_queue:`, `awaiting_re_review:`, rows raised against the partition);
+- every row id appears in exactly one list (lane rows, `pre_lane:`,
+  `post_merge:`, rows raised against the partition, `unassigned:`);
 - every declared brief exists.
 
 The reachability check is the one that earns its keep. Non-overlap alone does not
@@ -327,7 +327,7 @@ stderr: a guard that crashes should not also stop real work.
 Serial, in the main checkout, after the lanes report:
 
 1. Merge lane branches into `v3-rebuild`, one at a time.
-2. Apply the integrator queue (rule 4).
+2. Apply `post_merge:` (rule 4). `pre_lane:` landed before the lanes existed.
 3. Full suite on the merged tree — one run, not three.
 4. Canonical dry run, and a fixed-seed `ci_table.csv` A/B against the baseline
    captured before the lanes started.
@@ -341,6 +341,11 @@ Serial, in the main checkout, after the lanes report:
      And not `anchor: see inbox`: ownership is by file, the gate's own lift
      condition is "zero OPEN rows *anchored in* this path list", and 116 anchorless
      rows made that condition literally uncomputable (RD-INT2-2 / RR-INT-3).
+   - **The FINDING column holds the finding, not a pointer to it.** "Raised on
+     lane R's branch — substance in the inbox" is not a row; 35 of them reached
+     the ledger and then blocked live work a cycle later, because the archive dig
+     costs more than the fix. Copy the substance across, including the measured
+     numbers — those are the part a later pass cannot cheaply recover.
    - **DEDUPLICATE, and write the clusters down.** N lanes × 4 reviewers is 4N
      review passes, and the same defect gets found repeatedly from different
      angles — in cycle 4 one blocker was raised independently by three agents. Keep
@@ -350,22 +355,22 @@ Serial, in the main checkout, after the lanes report:
 6. Run the four reviewers on the merged tree. **This is the pass that counts.**
    They do two jobs, not one:
    - find new defects in the merged state; and
-   - **VERIFY THE "FIX APPLIED, AWAITING RE-REVIEW" BACKLOG.** Each reviewer
-     re-derives its own rows and returns CONFIRMED FIXED / NOT FIXED / REFUTED.
-     This is the step that makes step 7 possible, and skipping it is how the
-     backlog reaches 34 rows carried across three cycles.
-7. **Now** delete the rows step 6 confirmed clean — and only those.
+   - **RE-DERIVE THE DEFECTS THEIR OWN CLASS OWNS, FROM THE CODE.** A pass that
+     only looks for new things guarantees the ledger grows monotonically.
 
-**A cycle does not end with an unverified backlog.** "Awaiting re-review" is a
-state that lasts one gate, not one epoch. If step 6 could not reach some rows, say
-which and why in the resume note; do not let them accumulate silently, because a
-row nobody re-checks is indistinguishable from a row nobody fixed.
+   This is what makes step 5's deletion safe, and the two are not the same
+   mechanism. A reviewer confirms nothing by reading a row — by step 6 the row is
+   gone. It re-derives the defect from the source; if the fix is absent, the
+   defect is still there and gets raised fresh. That is strictly stronger than
+   grading a claim, and it is a live path: cycle 5 measured several lane fix-claims
+   that were false.
+7. Re-check every DEFERRED row for whether its blocker has arrived, and promote
+   what has (see planning step 2).
 
-Steps 5 and 7 are separate on purpose. CLAUDE.md deletes a row only when it is
-fixed AND re-review-confirmed; deleting at step 5 would authorize deletion on the
-lane's own say-so — self-grading, and irreversible in working memory (RD-84).
-Folding must still happen *before* step 6, because the reviewers need to see the
-new rows.
+**There is no "awaiting re-review" state, and no bucket for one.** A row is OPEN
+or DEFERRED; a fixed row is DELETED at the fold. The holding bucket that used to
+sit here is what let 22 rows accumulate across three cycles, each one
+indistinguishable from a row nobody fixed.
 
 **Steps 3-4 are mandatory whenever the merge is not a fast-forward.** Lane
 *count* is the wrong test for whether a combination was checked: a single lane
@@ -434,10 +439,15 @@ part that changes; the machinery, the guard and the tests are cycle-agnostic.
    render itself had no row at all, so R's pass condition was satisfiable while
    `render()` still raised (RD-89). If a deliverable has no ledger row, it will
    not get a lane: give it one first.
-2. **Bucket the OPEN rows into four lists** and write all four down: lane rows,
-   `integrator_queue:`, `awaiting_re_review:`, and anything raised against the
-   partition itself. Print the arithmetic in the yaml header. A row in no list is
-   the silent omission RD-73 exists to prevent; a row in two is two plans.
+2. **Bucket every OPEN row and write the buckets down**: lane rows, `pre_lane:`,
+   `post_merge:`, and anything raised against the partition itself. Print the
+   arithmetic in the yaml header. A row in no list is the silent omission RD-73
+   exists to prevent; a row in two is two plans.
+
+   **Re-check every DEFERRED row in the same pass.** DEFERRED means "cannot be
+   implemented at this stage", and stages arrive: RD-17 sat DEFERRED for three
+   cycles after the gate it was waiting on had already been built. A DEFERRED row
+   whose blocker is gone is promoted to OPEN and bucketed like any other.
 3. **A row a previous cycle already fixed is not work — it should not be in the
    ledger at all.** If one survives, it does not go to a lane: assigning it
    invites a second fix stacked on a first.

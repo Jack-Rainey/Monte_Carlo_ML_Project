@@ -393,6 +393,20 @@ def main() -> None:
     if not wanted:
         parser.error(f"no lane in {args.partition} matched {args.lanes}")
 
+    # `pre_lane:` is work that must land on the base branch BEFORE lanes exist,
+    # because it changes the tree they would be built on (protocol rule 4). Creating
+    # worktrees first means every lane measures its evidence against a tree that is
+    # about to change underneath it — and it puts the unparallelizable work last,
+    # which is where it gets cut. ITEM 0 was deferred by two cycles that way.
+    pending = [row["id"] for row in spec.get("pre_lane", [])]
+    if pending and not args.remove:
+        parser.error(
+            f"{args.partition} declares pre_lane work that has not landed: "
+            f"{', '.join(pending)}. Land it on {base_branch}, empty `pre_lane:`, "
+            f"then create worktrees. Lanes drawn over unlanded pre_lane work "
+            f"measure a tree that is about to change."
+        )
+
     if args.remove:
         print(f"Removing {cycle} worktrees:")
         for lane in wanted:

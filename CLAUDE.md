@@ -66,8 +66,21 @@ status and no ADDRESSED/RESOLVED status; a row is OPEN or it is gone.
 Status is exactly one of two values:
 
 - **OPEN** — not yet fixed.
-- **DEFERRED** — deliberately out of scope for the current gate, with a one-line
-  reason and the gate it belongs to. This is the live backlog.
+- **DEFERRED** — **cannot be implemented at this stage of the research**, with the
+  reason and the gate it belongs to. Not "we chose not to": a reviewer found it
+  worth noting and the work it needs does not exist yet. **Every cycle re-checks
+  every DEFERRED row for whether it has become implementable**, and promotes it
+  when it has. Without that sweep DEFERRED is where rows go to die — RD-17 sat
+  there for three cycles after the gate it was waiting on had already arrived.
+
+Severity (`blocker|major|minor`) is a skim aid for the user, never a gate
+criterion. A gate that lifts at "zero blocker/major" lifts with known-open work on
+its own path list; the gates in `docs/design_spec.md` lift at **zero OPEN**.
+
+**`readability-reviewer` must review this file whenever it changes.** Enforced by
+a `Stop` hook (`scripts/ledger_review_guard.py`), not by discipline — it fires
+once per session rather than per edit, so a session can write many rows and be
+checked once. Its ledger-specific brief is in that agent's own definition.
 
 **A row must be worth a reader's time.** If it changes neither what the code does
 nor what a reported number means, do not file it. Cycle 5 accumulated 108 such
@@ -113,7 +126,17 @@ name → write findings to the ledger → address OPEN findings → repeat.
 Several sessions may work this repo at once, one per git worktree. **Full protocol
 and all six rules: `docs/parallel_protocol.md`** — that file owns them, and a
 second copy here is what drifts (it already has, three times, in this exact
-machinery). What a session must know before reading anything else:
+machinery).
+
+**The integrator has three jobs, not one.** (1) Integrate what the lanes produced.
+(2) **Do the work that cannot be parallelized, in the position its dependency
+requires — usually FIRST**, via the partition's `pre_lane:` list. (3) Author the
+partition: what each lane does and which files it owns, derived from this cycle's
+actual work. There are no standing lanes; a lane is named per cycle after what it
+does. Job 2 exists because spanning work used to run only after the merge, and
+last is what gets cut — ITEM 0 was deferred by two cycles that way.
+
+What a session must know before reading anything else:
 
 1. **Ownership is by file and exclusive**, so textual merge conflicts are
    impossible; `scripts/lane_guard.py` enforces it, not discipline.
@@ -130,12 +153,15 @@ machinery). What a session must know before reading anything else:
    named blocking file outside `owns`, or a named cluster — there is no third
    reason. The six conditions and their evidence are the exit gate in the
    protocol; `LANE.md` carries them and `tests/test_lane_exit.py` checks them.
-6. **A cycle must be able to move the gate.** The partition declares `gate:` with
-   `lifts:` / `unblocks:`, or an explicit `exception:`. Cycle 5 ran four lanes to
-   completion and every one reported, unprompted, that it moved neither RD-33a
-   condition — while the on-path blocker/major count rose 20 → 29. Local lane
-   progress is not project progress, and discovering that afterwards is the
-   failure; choosing a backlog-discharge cycle deliberately is not.
+6. **A cycle must name a gate deliverable and be judged on it.** The partition
+   declares `gate:` with `lifts:` / `unblocks:` / `deliverable:`, or an explicit
+   `exception:`. The `deliverable:` is one concrete measurable thing plus the
+   evidence that will show it landed; at cycle exit the integrator shows that
+   evidence or reports the cycle FAILED. Cycle 5 ran four lanes to completion and
+   every one reported, unprompted, that it moved neither RD-33a condition — while
+   the on-path blocker/major count rose 20 → 29. Local lane progress is not
+   project progress, and discovering that afterwards is the failure; choosing a
+   backlog-discharge cycle deliberately is not.
 
 The rest — rule 2's metric-path file list and the reported-column span (RD-82),
 rule 4's spanning rows, and the seven-step integration gate — is in the protocol.
@@ -146,13 +172,37 @@ tree. `tests/test_source_tree_isolation.py` fails if you forget.
 
 ## Reporting and stopping
 
+**Report the RESULT and its EVIDENCE. Nothing else.**
+
+What the user gets: what now works that did not, the measured evidence, and what
+is genuinely blocked. What they do not get, unless they ask: the order you did
+things in, how many passes each reviewer took, what you tried first, corrections
+to your own earlier statements, or any narration of the cycle.
+
+The standard is a bookshelf with bookends on it. The reader should be able to see
+what the code does and infer why it is built that way **by reading the code** —
+not from a report explaining that some books once fell over. That is what
+`readability-reviewer` exists to guarantee, and it matters because this source is
+published alongside the paper: a reader who wants to know how something was done
+reads the source, and the source has to answer them.
+
+This is a rule about the REPORT, not about rigour. Everything else stands:
+
 - Report findings quantitatively: "resolved X of Y falsifier findings; Z OPEN."
   Never claim a reviewer's concerns are handled while any of its findings are
   OPEN, and never present a partial fix as complete.
-- If you stop before a clean pass (token limit, time, or user pause): write every
-  OPEN finding plus a short "resume here" note to `docs/review_ledger.md`, then
-  state plainly "NOT complete — N open findings remain" and list them. Do not say
-  "done" or "wrapped up."
+- Never report a cycle by its finding count. **A cycle is measured by whether it
+  moved the gate it declared** (`gate.deliverable:` in the partition file). If the
+  deliverable did not land, the cycle is reported as FAILED, with what blocked it
+  — not as "N findings resolved". Two consecutive cycles reported large finding
+  counts and moved the gate by zero, and that is what the rule is for.
+- If you stop before a clean pass (token limit, time, or user pause): state
+  plainly "NOT complete — N open findings remain" and list them. Do not say "done"
+  or "wrapped up." **The resume state is the partition file's ordered `pre_lane:` /
+  `serial_queue:`** — it is already the authority on what happens next, so nothing
+  is written to the ledger and no separate "resume here" note is created. A third
+  declaration of the same thing is how `docs/next_session.md` drifted from both
+  the files it duplicated.
 
 ## Resuming work
 
@@ -195,6 +245,11 @@ to run something if it needs a privilege the allow-list deliberately withholds.
   results, inter-stage data, and stage sentinels are written at every level, and
   no verbosity level may alter what a run produces (ladder + per-stage wiring:
   `docs/verbosity.md`).
+- **Renders: 30 scenes without asking, more only with the user's say-so.** The
+  standing threshold and its rationale are `docs/design_spec.md` §11.1. Every
+  render records measured per-scene wall-clock, so the estimate accompanying a
+  request above 30 is measured rather than guessed. There is no per-cycle grant,
+  no allocation table, and no permission clause on any ledger row.
 - **Per-aspect seeds.** Each stochastic stage (scene generation, per-split
   sampling, model init, shuffling, augmentation) draws from its own named seed.
   Splits in particular must not share a seed.

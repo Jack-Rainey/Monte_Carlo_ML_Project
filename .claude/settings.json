@@ -5,7 +5,20 @@
       "Bash(/Users/nortonrainey/miniconda3/envs/amcd/bin/pytest *)",
       "Bash(/Users/nortonrainey/miniconda3/envs/amcd/bin/amcd *)",
       "Bash(otool *)",
-      "Bash(conda env list)"
+      "Bash(conda env list)",
+      "Bash(python scripts/ledger_review_guard.py *)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/ledger_review_guard.py\""
+          }
+        ]
+      }
     ]
   }
 }

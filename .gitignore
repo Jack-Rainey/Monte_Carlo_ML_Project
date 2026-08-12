@@ -24,3 +24,8 @@ __pycache__/
 # would follow a merge into the main tree and tell the integrator it is a lane.
 LANE.md
 .claude/lane.json
+
+# Which readability-reviewer passes have happened in THIS checkout
+# (scripts/ledger_review_guard.py). Session state, not a property of the repo —
+# committing it would make one session's pass satisfy another session's obligation.
+.claude/ledger_review_state.json

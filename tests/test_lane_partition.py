@@ -136,19 +136,24 @@ def test_every_row_is_fixable_inside_its_own_lane(path: Path, spec: dict) -> Non
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
 def test_no_row_id_appears_in_two_places(path: Path, spec: dict) -> None:
-    """Every row is assigned exactly once, across all four lists.
+    """Every row is assigned exactly once, across every list.
 
-    The four lists (lane rows, integrator_queue, awaiting_re_review, and any
-    raised against the partition itself) are the partition's coverage claim. A
-    row in two of them means two different plans for it; a row in none is the
-    silent omission RD-73 exists to prevent.
+    The lists together are the partition's coverage claim. A row in two of them
+    means two different plans for it; a row in none is the silent omission RD-73
+    exists to prevent.
+
+    `pre_lane:` and `post_merge:` are the two integrator queues: work that must
+    land BEFORE the partition is drawn, and work applied after the merge. There is
+    no `awaiting_re_review:` bucket — a fixed row is deleted, and confirmation
+    comes from a reviewer re-deriving the defect from code, never from a row.
     """
     seen: dict[str, str] = {}
     buckets = [
         *((lane["id"], [row["id"] for row in lane["rows"]]) for lane in spec["lanes"]),
         ("serial_queue", [row["id"] for row in spec.get("serial_queue", [])]),
+        ("pre_lane", [row["id"] for row in spec.get("pre_lane", [])]),
+        ("post_merge", [row["id"] for row in spec.get("post_merge", [])]),
         ("integrator_queue", [row["id"] for row in spec.get("integrator_queue", [])]),
-        ("awaiting_re_review", spec.get("awaiting_re_review", [])),
         ("raised_against_this_partition", spec.get("raised_against_this_partition", [])),
         ("unassigned", spec.get("unassigned", [])),
     ]
@@ -377,8 +382,9 @@ def test_the_partition_covers_exactly_the_ledgers_open_rows(path: Path, spec: di
     for lane in spec["lanes"]:
         planned |= {row["id"] for row in lane["rows"]}
     planned |= {row["id"] for row in spec.get("serial_queue", [])}
+    planned |= {row["id"] for row in spec.get("pre_lane", [])}
+    planned |= {row["id"] for row in spec.get("post_merge", [])}
     planned |= {row["id"] for row in spec.get("integrator_queue", [])}
-    planned |= set(spec.get("awaiting_re_review", []))
     planned |= set(spec.get("raised_against_this_partition", []))
     planned |= set(spec.get("unassigned", []))
 
@@ -386,7 +392,7 @@ def test_the_partition_covers_exactly_the_ledgers_open_rows(path: Path, spec: di
     unplanned = open_ids - planned
     assert not unplanned, (
         f"{path.name}: these rows are OPEN in the ledger but appear in NO list — "
-        f"neither a lane, the integrator queue, awaiting_re_review, nor raised "
+        f"neither a lane, an integrator queue (pre_lane/post_merge), nor raised "
         f"against the partition: {sorted(unplanned)}. A row with no plan is the "
         "silent omission RD-73 exists to prevent."
     )
@@ -478,17 +484,33 @@ def test_the_partition_declares_what_it_moves_on_the_gate(path: Path, spec: dict
     So the partition must SAY, machine-readably, what it moves. A cycle that moves
     nothing is still allowed — some cycles are backlog discharge — but it has to
     be a declared, reasoned choice rather than something discovered afterwards.
+
+    It must also name a `deliverable:`: ONE concrete measurable thing, plus the
+    evidence that will show it landed. At cycle exit the integrator shows that
+    evidence or reports the cycle FAILED. A cycle is judged on its deliverable,
+    never on a finding count — two consecutive cycles reported large counts and
+    moved the gate by zero.
     """
     if path.stem != _CURRENT_CYCLE:
         pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
 
     gate = spec.get("gate")
     assert isinstance(gate, dict), (
-        f"{path.name}: no `gate:` block. Declare `lifts:`, `unblocks:` and, when "
-        "both are empty, `exception:` with a reason (planning steps 1 and 1b)."
+        f"{path.name}: no `gate:` block. Declare `lifts:`, `unblocks:`, "
+        "`deliverable:` and, when the first two are empty, `exception:` with a "
+        "reason (planning steps 1 and 1b)."
     )
     for key in ("lifts", "unblocks"):
         assert key in gate, f"{path.name}: `gate:` declares no `{key}:` list."
+
+    deliverable = gate.get("deliverable")
+    assert isinstance(deliverable, dict) and deliverable.get("what") and deliverable.get("evidence"), (
+        f"{path.name}: `gate:` declares no usable `deliverable:`. It needs "
+        "`what:` (one concrete measurable outcome) and `evidence:` (what will show "
+        "it landed). Without both, the cycle has nothing to be judged against and "
+        "gets reported by finding count instead — which is how two cycles in a row "
+        "reported success while moving the gate by zero."
+    )
 
     if not gate["lifts"] and not gate["unblocks"]:
         assert gate.get("exception"), (
@@ -499,9 +521,15 @@ def test_the_partition_declares_what_it_moves_on_the_gate(path: Path, spec: dict
         )
 
 
-#: RD-33a condition (i)'s EXPLICIT path list, as operationalized by RD-76 and
-#: scoped by severity in RD-128. Kept here so the check below counts the same
-#: paths the gate does; the free text "the metric path" is what RD-76 replaced.
+#: RD-33a condition (i)'s EXPLICIT path list, as operationalized by RD-76. Kept
+#: here so the check below counts the same paths the gate does; the free text "the
+#: metric path" is what RD-76 replaced.
+#:
+#: The GATE itself lifts at zero OPEN rows on these paths, not zero blocker/major
+#: (user decision 2026-08-12, superseding RD-128's severity scoping): severity is a
+#: skim aid, and a gate that ignores minors ships with known-open work on its own
+#: path list. The blocker/major filter below is a different question — which rows a
+#: partition should be judged on SCHEDULING — and it stays.
 _GATE_PATH_LIST = (
     "src/amcd/scenes/**",
     "src/amcd/evaluation/**",
@@ -828,9 +856,7 @@ def test_unassigned_holds_only_rows_this_cycles_fold_created(path: Path, spec: d
     if not any((_REPO_ROOT / lane["inbox"]).exists() for lane in spec["lanes"]):
         return
 
-    # `awaiting_re_review:` is a STATUS bucket and may legitimately hold rows the
-    # integrator's own reviewers raised, plus carry-ins from an earlier cycle.
-    # `unassigned:` is the fold's unworked output and is the one with a
+    # `unassigned:` is the fold's unworked output, and it is the bucket with a
     # provenance claim to keep honest.
     strays = sorted(unassigned - _ids_lanes_raised_from_their_own_blocks(spec))
     assert not strays, (
@@ -892,8 +918,11 @@ def test_no_lane_is_assigned_a_row_whose_fix_is_already_claimed(path: Path, spec
     P and 9 to lane S, roughly 40 % of two lanes' apparent workload, and lane P's
     entire deliverable turned out to be verification rather than work.
 
-    Such a row needs a reviewer VERDICT, which only the integration pass produces.
-    It belongs in `awaiting_re_review:`, never in a lane's `rows:`.
+    Such a row is not work, and it does not go to a lane. Either the fix is real,
+    in which case the row should already have been DELETED, or it is not, in which
+    case a reviewer re-deriving the defect from CODE raises it fresh. There is no
+    third state and no holding bucket — that bucket is what let 22 rows accumulate
+    across three cycles.
 
     Derived from the resolution text rather than a hand-maintained list, because a
     hand-maintained one is what drifted: the ledger says "fix applied … awaiting
@@ -914,7 +943,7 @@ def test_no_lane_is_assigned_a_row_whose_fix_is_already_claimed(path: Path, spec
         assert not offending, (
             f"{path.name}: lane {lane['id']} is assigned {offending}, whose "
             "resolutions already claim a fix nobody has re-derived. A second fix "
-            "stacked on an unchecked first is what planning step 3 forbids — move "
-            "them to `awaiting_re_review:`, where the integration reviewer pass "
-            "gives them a verdict (RD-264)."
+            "stacked on an unchecked first is what planning step 3 forbids. Either "
+            "DELETE the row (the fix is real) or strip the claim from its "
+            "resolution so it reads as the open work it is (RD-264)."
         )

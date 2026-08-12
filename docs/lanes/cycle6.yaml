@@ -1,11 +1,14 @@
-# Cycle 6 — ONE INTEGRATOR SESSION, NO LANES.
+# Cycle 6 — serial. The work that matters cannot be partitioned.
 #
-# Not a parallel cycle. Cycle 5 ran four lanes and moved the gate by zero while
-# the ledger grew; the constraint now is not throughput, it is that the
-# highest-value work spans every lane boundary and so cannot be parallelised at
-# all. ITEM 0's remainder touches simulators/, scenes/ and configs/ together.
+# ITEM 0 spans simulators/, scenes/, evaluation/ and configs/ at once, so no
+# partition can host it (protocol rule 4). Two cycles deferred it for that reason
+# and both moved the gate by zero. It is `pre_lane:` here, which is the queue that
+# now exists so spanning work runs FIRST instead of last.
 #
-# 227 OPEN rows: 8 blocker, 113 major.
+# THIS FILE IS THE RESUME STATE. `pre_lane:` and `serial_queue:` are ordered;
+# whatever is still listed is what happens next. No separate resume note exists —
+# docs/next_session.md was a third declaration of this and drifted from both the
+# files it duplicated.
 
 cycle: cycle6
 base_branch: v3-rebuild
@@ -13,38 +16,64 @@ exit_gate: not_required   # no lanes, so no lane can report
 
 gate:
   lifts: []
-  unblocks: [RD-33a-i]
+  unblocks: [RD-33a-i, RD-33a-ii]
+  deliverable:
+    what: >-
+      RD-33a condition (ii) LIFTED — the 200,000-ray high leg validated as a
+      converged reference against a config-declared tolerance, through the ISO
+      path, driven via build_simulator. Every paired-improvement number in the
+      project already treats that leg as ground truth and nothing has ever
+      checked it.
+    evidence: >-
+      A 3-scene tolerance check at alpha_eff extremes, recorded as a tolerance
+      check and NOT as a CI-backed convergence claim (RD-263), reporting per-band
+      energy / T30 / C50 against the new config-declared convergence key. Plus
+      per-scene render wall-clock, which nothing in the repo has ever recorded.
   exception: >-
-    Closes the two on-path blockers (AC-54 done, AC-64 via C5) and the C6
-    remainder, which is what condition (i) is actually held by. Does not LIFT (i):
-    the on-path major set is larger than one session. Condition (ii) needs the
-    RD-17 probe and a fresh render grant, neither of which this session has.
+    Condition (i) does not lift this cycle and is not claimed to. Under the
+    2026-08-12 decision it lifts at ZERO OPEN rows on its path list, not zero
+    blocker/major, and that set is larger than one session. Cycle 6 unblocks it by
+    closing the C6/C5 blockers that hold its most expensive rows.
 
 lanes: []
 
-# In order. Each item is one decision or one edit site — not one row.
+# ── LANDED THIS CYCLE ─────────────────────────────────────────────────────────
+# AC-176  the ISO 3382-1 SNR admissibility bound at the estimator. Was recorded
+#         OPEN and was in fact already implemented and fully wired — config key,
+#         fingerprint, every call site, regression tests. Row deleted, not fixed.
+# AC-54   absorption convention declared on the backend and confirmed by render.
+# AC-184  realized record support declared as a power law fitted to the retained
+#         renders (a constant T60-multiple was refuted by that same data: the
+#         measured multiples span 21x), and FALSIFIED per render against
+#         native_ir_samples. AC-56 and AC-66 declared at the same site.
+
+# ── pre_lane: must land on v3-rebuild before any partition is drawn ───────────
+# scripts/new_lane.py refuses to create worktrees while this list is non-empty.
+pre_lane:
+  - {id: AC-175, reason: "gen-scenes gate must consume the declared support via a simulator-interface seam; generator.py stays backend-agnostic per RD-144"}
+  - {id: F-186, reason: "gate is evaluated at nominal alpha; falls out of AC-175's wiring"}
+  - {id: AC-55, reason: "diffuse_depth is physically a time bound; declare it as one and gate on coverage"}
+  - {id: AC-64, reason: "C5 blocker — Lundeby is not finding a real crossing"}
+  - {id: AC-58, reason: "C5 — Schroeder integration limit is not gain-invariant on gsound IRs"}
+  - {id: F-89, reason: "C5 — shared truncation index tracks the ray budget"}
+  - {id: RD-55, reason: "C5 — extrapolated-tail compensation, the candidate fix for all four"}
+  - {id: AC-185, reason: "C5 — trim length moves with the ray budget, the axis E4 sweeps"}
+  - {id: RD-17, reason: "the convergence probe itself — the ONLY row that can lift condition (ii). Promoted DEFERRED -> OPEN: its declared gate (Steps 2/3 exist) arrived three cycles ago"}
+  - {id: RD-263, reason: "the config-declared convergence tolerance RD-17 measures against does not exist yet"}
+
 serial_queue:
-  - {id: AC-184, reason: ITEM-0 remainder / on-path blocker}
-  - {id: AC-185, reason: ITEM-0 remainder / on-path blocker}
-  - {id: AC-55, reason: ITEM-0 remainder / on-path blocker}
-  - {id: AC-56, reason: ITEM-0 remainder / on-path blocker}
-  - {id: AC-66, reason: ITEM-0 remainder / on-path blocker}
-  - {id: F-186, reason: ITEM-0 remainder / on-path blocker}
-  - {id: AC-64, reason: ITEM-0 remainder / on-path blocker}
-  - {id: AC-58, reason: ITEM-0 remainder / on-path blocker}
-  - {id: F-89, reason: ITEM-0 remainder / on-path blocker}
-  - {id: RD-55, reason: ITEM-0 remainder / on-path blocker}
-  - {id: F-75, reason: ITEM-0 remainder / on-path blocker}
-  - {id: F-81, reason: ITEM-0 remainder / on-path blocker}
-  - {id: F-218, reason: ITEM-0 remainder / on-path blocker}
-  - {id: AC-54, reason: ITEM-0 remainder / on-path blocker}
-  - {id: AC-175, reason: ITEM-0 remainder / on-path blocker}
-  - {id: AC-176, reason: ITEM-0 remainder / on-path blocker}
+  - {id: F-75, reason: "render/gen-scenes not cache-protected; off condition (i)'s path list"}
+  - {id: F-81, reason: "render fingerprint is host-dependent — a cross-platform violation"}
+  - {id: F-218, reason: "gate step 4's detector has measured-zero power over the gsound surface"}
+
+# Renders: the standing threshold is 30 scenes (design_spec.md 11.1). RD-17 needs
+# ~3, C5 closure ~2. No grant, no allocation table, no permission clause.
 
 unassigned: [
   AC-26, AC-28, AC-30, AC-36, AC-37, AC-38, AC-39, AC-41, AC-42, AC-43,
   AC-44, AC-45, AC-46, AC-47, AC-48, AC-49, AC-50, AC-51, AC-52, AC-53,
-  AC-57, AC-59, AC-60, AC-61, AC-62, AC-63, AC-65, AC-67, AC-68, AC-69,
+  AC-56, AC-57, AC-59, AC-60, AC-61, AC-62, AC-63, AC-65, AC-66, AC-67,
+  AC-68, AC-69,
   AC-70, AC-75, AC-78, AC-81, AC-83, AC-85, AC-101, AC-104, AC-105, AC-108,
   AC-109, AC-127, AC-128, AC-129, AC-131, AC-132, AC-150, AC-178, AC-180,
   AC-181, AC-182, AC-183, AC-19-R7, AC-26-R6, AC-37-R4, F-M2, F-M3, F-M4,
@@ -61,6 +90,6 @@ unassigned: [
   RD-124, RD-125, RD-126, RD-127, RD-128, RD-129, RD-130, RD-131, RD-132,
   RD-133, RD-142, RD-148, RD-151, RD-152, RD-153, RD-158, RD-186, RD-187,
   RD-188, RD-189, RD-190, RD-200, RD-201, RD-207, RD-227, RD-250, RD-251,
-  RD-252, RD-253, RD-254, RD-255, RD-257, RD-263, RD-265, RD-267, RR-80,
-  RR-81, RR-82, RR-83, RR-84, RR-85, S-F1, S-1, S-2, S-F4, S-F5, S-F6, S-F7
+  RD-252, RD-253, RD-254, RD-255, RD-257, RD-265, RD-267, RR-81,
+  RR-88, RR-89, RR-90, RR-91, RR-92, RR-93, RR-94, RR-95, RR-96, S-F1, S-1, S-2, S-F4, S-F5, S-F6, S-F7
 ]
