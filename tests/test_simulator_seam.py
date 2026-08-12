@@ -33,6 +33,7 @@ need something extra and SKIP without it — the known-answer ambisonic measurem
 import dataclasses
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -1598,7 +1599,10 @@ class TestRenderWorkerContract:
         assert result.meta["speed_check_num_paths"] == _STUB_N_PATHS
         # AC-59: the two RNGs are reported separately, not flattened into one bool.
         assert result.meta["ray_rng_seeded"] is False
-        assert result.meta["synthesis_carrier_seed"] == 42
+        # AC-77: the VALUE is asserted against pinned upstream, not against itself
+        # — see test_the_stamped_carrier_seed_matches_pinned_upstream below. Here
+        # only the stamp's presence and type are the stub's business.
+        assert isinstance(result.meta["synthesis_carrier_seed"], int)
 
         # It must survive the canonical meta.json write — numpy scalars would not.
         json.dumps(result.meta)
@@ -1776,3 +1780,45 @@ class TestRenderWorkerContract:
         result = json.loads((out_dir / "result.json").read_text())
         assert result["num_paths"] == 2
         assert result["kept_energy_percentage"] == pytest.approx(60.0)
+
+
+def test_the_stamped_carrier_seed_matches_pinned_upstream() -> None:
+    """AC-77: the stamp must be falsifiable by something other than itself.
+
+    `_SYNTHESIS_CARRIER_SEED` records the seed upstream uses for the noise carrier
+    every path's energy is multiplied by. It was only ever asserted against a stub
+    that reads the same constant — a literal compared to itself, which would keep
+    passing if upstream changed the seed and every rendered IR changed with it.
+
+    Upstream is pinned by commit sha in `configs/simulators/gsound_sir.yaml` and
+    vendored under `external/`, so the declaration IS checkable: read the pinned
+    source and compare. Same discipline as the `speed_of_sound_m_s` cross-check —
+    a value that lives in C++ can only be DECLARED here, so the declaration has to
+    be falsified against the thing it describes.
+
+    Path derived from the repo root, never hardcoded (F-215): a `/Volumes/...`
+    literal would skip on the project's declared second host and in every lane
+    worktree, i.e. exactly where band identity could silently differ.
+    """
+    from amcd.simulators.gsound_sir import _SYNTHESIS_CARRIER_SEED
+
+    binding = (
+        Path(__file__).resolve().parent.parent
+        / "external" / "GSound-SIR" / "auralizer" / "src" / "cpp" / "binding.cpp"
+    )
+    if not binding.exists():
+        pytest.skip(f"pinned upstream checkout absent at {binding}")
+
+    m = re.search(r"NoiseGenerator\s*\(\s*unsigned\s+int\s+seed\s*=\s*(\d+)\s*\)",
+                  binding.read_text())
+    assert m, (
+        f"could not find NoiseGenerator's default seed in {binding}. If upstream "
+        "restructured it, re-derive the seed and update this test — do not delete "
+        "it, or the stamp goes back to asserting itself (AC-77)."
+    )
+    assert int(m.group(1)) == _SYNTHESIS_CARRIER_SEED, (
+        f"pinned upstream seeds its synthesis carrier with {m.group(1)}, but "
+        f"`_SYNTHESIS_CARRIER_SEED` declares {_SYNTHESIS_CARRIER_SEED}. Every "
+        "rendered IR is the path energies times that carrier, so the stamp is "
+        "wrong about the signal it describes."
+    )

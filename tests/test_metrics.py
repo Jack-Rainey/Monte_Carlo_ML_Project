@@ -1897,3 +1897,75 @@ class TestARoomTooReverberantForItsRecord:
                 band_resolvability_margin=_NO_FLOOR,
                 min_decay_range_db={"EDT": 20.0},   # T30 missing
             )
+
+
+class TestTheHeadroomFloorIsPinnedAgainstBandLeakage:
+    """AC-105's outstanding residual: the leakage sweep, as a regression test.
+
+    The AC-37-R4 guard's operand is the REPORTED ISO span, which is right. But the
+    ladder bands it EXCLUDES are not out of band for the octave filter that
+    computes the metric — 315.0 Hz carries -17.40 dB of the 500 Hz octave's weight
+    and 1587.4 Hz carries -17.38 dB of the 1000 Hz octave's — so an excluded band
+    pinned at `min_db` leaks into a reported T30.
+
+    That is what makes a declared threshold of 35 dB unsafe even though T30's own
+    regression window is 35 dB wide: 35 is necessary and NOT sufficient, and the
+    floor for any declared value is ~52 dB = 35 + 17.4.
+
+    Nothing pinned this. AC-105's docstring correction landed and its regression
+    test did not, so the next person to tune `min_db_headroom_db` downward would
+    meet no resistance until a reported T30 moved.
+    """
+
+    #: From the config's own derivation: 35 dB of T30 regression window plus the
+    #: 17.4 dB an adjacent excluded ladder band leaks into the octave metric.
+    _DERIVED_FLOOR_DB = 52.0
+
+    def test_the_shipped_threshold_is_at_or_above_the_leakage_derived_floor(self) -> None:
+        from pathlib import Path
+
+        import yaml
+
+        params = yaml.safe_load(
+            (Path(__file__).resolve().parent.parent
+             / "configs" / "representations" / "spectrogram.yaml").read_text()
+        )
+        shipped = float(params["min_db_headroom_db"])
+        assert shipped >= self._DERIVED_FLOOR_DB, (
+            f"min_db_headroom_db is {shipped} dB, below the {self._DERIVED_FLOOR_DB} dB "
+            "floor derived as 35 (T30's regression window) + 17.4 (the weight an "
+            "EXCLUDED ladder band still carries in the reported octave metric). "
+            "Below this an excluded band on the floor moves a reported T30: "
+            "measured +1.1 % at 40 dB, +4.4 % at 35, +91.7 % at 30 against a 5 % "
+            "JND. If the operand or the ladder changed, re-derive the floor and "
+            "move the constant — do not lower the threshold to meet it (AC-105)."
+        )
+
+    def test_the_excluded_neighbour_really_does_leak_into_the_metric(self) -> None:
+        """The measurement the floor rests on, so the constant is not folklore.
+
+        If this stops holding, the 17.4 dB term is wrong and the floor above is
+        wrong with it — which is exactly the drift AC-24's duplicate-declaration
+        shape produces when a derived constant outlives its derivation.
+        """
+        from amcd.evaluation.room_acoustic import _band_energy
+
+        sr = _SR
+        n = int(0.5 * sr)
+        t = np.arange(n) / sr
+        # A pure tone at the excluded ladder band adjacent to the 1000 Hz octave.
+        excluded_hz = 1587.4
+        tone = np.sin(2 * np.pi * excluded_hz * t).astype(np.float64)
+        in_band = np.sin(2 * np.pi * 1000.0 * t).astype(np.float64)
+
+        def band_power(x):
+            e = _band_energy(x, 1000.0, sr)
+            e = e[0] if isinstance(e, tuple) else e
+            return float(np.sum(e))
+
+        leak_db = 10.0 * np.log10(band_power(tone) / band_power(in_band))
+        assert -25.0 < leak_db < -10.0, (
+            f"the excluded {excluded_hz} Hz band leaks {leak_db:.2f} dB into the "
+            "1000 Hz octave metric, against the ~-17.4 dB the headroom floor is "
+            "derived from. Re-derive _DERIVED_FLOOR_DB before trusting it (AC-105)."
+        )

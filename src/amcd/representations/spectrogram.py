@@ -305,7 +305,8 @@ class ThirdOctaveSpectrogram:
         #: An excluded band pinned at `min_db` therefore leaks into a reported
         #: metric: measured end to end, a 1587 Hz band on the floor moves the
         #: 1000 Hz T30 by +0.1 % at 52 dB of headroom, +1.1 % at 40, +4.4 % at 35
-        #: and +91.7 % at 30 — so 35 breaches `d0b_t30_jnd_frac` on leakage alone.
+        #: and +91.7 % at 30 — so 35 dB leaves NO MARGIN (4.4 % against a 5 % JND,
+        #: 88 % of it) and 30 dB breaches it outright (AC-183).
         #: The floor for any declared value is ~52 dB, derived as 35 + 17.4.
         #: The shipped 52.0 satisfies it; that it also matches the calibration above
         #: is a coincidence worth not relying on.
