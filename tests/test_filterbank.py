@@ -89,16 +89,23 @@ class TestLadderIsDeclaredNotHardcoded:
         """AC-32: three SCHEMA-VALID settings made the construction loop run
         forever — verified with a 3 s alarm. Not a wrong result: a hang or an OOM
         at preprocess, i.e. AFTER the render it would waste. The bound must be in
-        `Params`, so the failure is a config-load error, not a stalled run."""
+        `Params`, so the failure is a config-load error, not a stalled run.
+
+        The baseline params come from `tiny_config()` rather than from literals
+        here (F-M10). A hand-written dict drifts from the schema — when
+        `min_db_headroom_octave_centres_hz` was added, the literal version still
+        raised ValidationError but for the MISSING key rather than the field under
+        test, so every case passed for the wrong reason. The guard below pins that:
+        the baseline must itself be valid before a field is corrupted."""
         from pydantic import ValidationError
 
         from amcd.representations.spectrogram import ThirdOctaveSpectrogram
 
-        params = dict(
-            n_fft=256, hop_length=64, min_db=-80.0, reference_freq_hz=1000.0,
-            bands_per_octave=3, min_center_freq_hz=10.0, min_bins_per_band=1,
-            min_db_headroom_db=55.0,
-        )
+        params = dict(tiny_config().representation.params)
+        # If this raises, the baseline has drifted from the schema and every
+        # parametrized case below would pass without exercising `field` at all.
+        ThirdOctaveSpectrogram.Params(**params)
+
         params[field] = value
         with pytest.raises(ValidationError):
             ThirdOctaveSpectrogram.Params(**params)

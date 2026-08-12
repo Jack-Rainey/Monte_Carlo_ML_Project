@@ -182,6 +182,17 @@ scenes:
     # separation is only ~3.7 m, so the 10 m ceiling is inert and the constraint
     # acts purely as a 1.0 m minimum; in a 24 m corridor the 10 m ceiling is what
     # does the rejecting. See deviation 3 above.
+    #
+    # THE 1.0 m MINIMUM CARRIES base.yaml's AC-30/AC-50 CAVEAT, and the 10.0 m
+    # ceiling adds one of its own. ISO 3382-1 5.3's d_min = 2*sqrt(alpha*S/(c*K))
+    # over the declared geometry x material corners is [0.412, 5.712] m by Sabine
+    # and [0.417, 11.413] m by Eyring — so the EYRING CORNER EXCEEDS THIS ENTIRE
+    # RANGE, and no separation this config can draw satisfies the standard's
+    # criterion at that corner. Nominal alpha as configured; pending AC-54, which
+    # has shown the rendered effective absorption is 1-sqrt(1-alpha) and therefore
+    # moves both corners. Stated here as well as in base.yaml because this is the
+    # config that claims Research-I faithfulness, and correcting only base.yaml
+    # would leave the two disagreeing (AC-30 / AC-50, RD-182).
     interior_random:
       type: interior
       corner_frac: null

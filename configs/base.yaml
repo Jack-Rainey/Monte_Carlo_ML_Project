@@ -116,12 +116,46 @@ scenes:
     #      the diffuse tail this study is about buried 10 dB down. That is a
     #      near-field sub-population where the denoising task is trivially easy.
     #      1.0 m sits near DRR ~ 0 dB.
+    #
+    #      CAVEAT ON THAT ARITHMETIC (AC-60). 20*log10(r_c/d) is the textbook
+    #      INVERSE-SQUARE DRR, and the pinned upstream backend does not implement
+    #      inverse-square: gsSoundPropagator.cpp computes geometric spreading as
+    #      1/(4*pi*(1 + d^2)), not 1/(4*pi*d^2). Direct-path energy error against
+    #      the form assumed here: -3.01 dB at d = 1.0 m, -1.60 at 1.5, -0.97 at 2,
+    #      -0.17 at 5, -0.04 at 10. THE FLOOR DECLARED HERE SITS EXACTLY AT THE
+    #      WORST POINT. The bias is common-mode across legs but NOT across scenes or
+    #      placement regimes, so it perturbs the near_corner vs interior_random
+    #      comparison specifically. The floor is not moved on this account — that is
+    #      a research decision, and raising it to ~3 m (where the deviation falls
+    #      below 0.5 dB) would change the declared population — but the reasoning
+    #      above must not be read as describing what the backend renders.
     #   2. It is inside the ISO 3382-1 5.3 minimum-distance band d_min =
-    #      2*sqrt(V/(c*T)) evaluated over the support declared above: 0.41 m at the
-    #      smallest room's alpha = 0.05 corner, 1.65 m at its alpha = 0.80 corner,
-    #      ~2.6 m at the largest. A single global constant cannot satisfy a
-    #      per-scene criterion; 1.0 m sits inside the band (per-scene form is a
-    #      DEFERRED ledger row — the per-regime schema cannot express it today).
+    #      2*sqrt(V/(c*T)). NOTE the algebra: substituting Sabine's T reduces this
+    #      to 2*sqrt(alpha*S/(c*K)), which is VOLUME-INDEPENDENT — so "the largest
+    #      room" is not a corner of it at all, and the figure "~2.6 m at the
+    #      largest" that stood here was not a corner but the largest shoebox at
+    #      alpha = 0.2 (AC-30).
+    #
+    #      THE REAL RANGE, over every geometry x material corner the config
+    #      declares — and note that `ceiling_absorptive` puts alpha in [0.85, 0.98]
+    #      on the SAME shoebox family, which is what `test_material_shift` selects:
+    #
+    #          Sabine  d_min in [0.412, 5.712] m
+    #          Eyring  d_min in [0.417, 11.413] m     (max at 12x10x5 m, alpha 0.98)
+    #
+    #      NOMINAL ALPHA AS CONFIGURED; PENDING AC-54. These are computed from the
+    #      declared alpha, and AC-54 has shown the backend's effective absorption is
+    #      1-sqrt(1-alpha), so the ROOM ACTUALLY RENDERED has different corners
+    #      (~5.35 m Sabine / ~8.07 m Eyring at that same corner). This range is
+    #      therefore provisional until AC-54 resolves.
+    #
+    #      1.0 m sits near the BOTTOM of that range, not "inside the band" as this
+    #      comment previously claimed. A single global constant cannot satisfy a
+    #      per-scene criterion (per-scene form is a DEFERRED ledger row — the
+    #      per-regime schema cannot express it today), and the realized per-split
+    #      shortfall is a DISCLOSURE owed by `placement_report.json`, which
+    #      `scenes/generator.py` writes — outside this lane, recorded in the lane-M
+    #      inbox. AC-30 does NOT close on this edit (RD-111).
     #   3. It matches Research I's minimum, so base and research_i.yaml share a
     #      separation floor and stay comparable on this axis.
     # This is a RESEARCH choice. The backend's own floor (dry_run 0.3 m;
@@ -200,18 +234,64 @@ metric_onset_rel_db: -20.0
 # `_band_resolvable_decay_s` in evaluation/room_acoustic.py (RR-39). This declares
 # only the safety margin (AC-26/AC-27).
 #
-# 2.0 is calibrated, not chosen: with the floor disabled, the 500 Hz T30
+# THIS IS A PROJECT-DEFINED CRITERION, NOT ISO 3382-2's (AC-26-R6). The floor is
+# the FILTER'S OWN measured decay times this margin — defensible, and measured
+# through the very path it governs — but a reader will take "what the band can
+# resolve" for the standard's rule, and it is not. ISO 3382-2:2008 expresses the
+# same concern as a bandwidth-time product, BT > 16, which at the 500 Hz octave
+# (B = 354 Hz) requires T > 45 ms. The shipped floor at margin 2.0 is 40.7 ms, so
+# it is MORE PERMISSIVE than the standard's guidance by ~4 ms at 500 Hz. Stated so
+# the two are not conflated; the standard's form is not adopted because it takes no
+# account of this filter's realized ringing, which is what actually limits us.
+#
+# THE MARGIN'S CALIBRATION DID NOT REPRODUCE, AND HAS BEEN RESTATED (AC-101).
+# This comment previously read: "with the floor disabled, the 500 Hz T30
 # estimator's bias is +12.8 % at margin 1.0, +4.9 % at margin 2.0 and +2.8 % at
-# 3.0, so 2.0 lands where the bias crosses this project's own d0b_t30_jnd_frac of
-# 0.05 (measured by acoustics-reviewer, 300 realizations/point).
+# 3.0, so 2.0 lands where the bias crosses d0b_t30_jnd_frac of 0.05". Re-measured
+# on the current tree — 300 realizations/point, true T60 log-spaced 0.015-0.30 s,
+# T30 through the real `_band_energy` path, seed 20260811 — the bias of the
+# population that stays UNFLAGGED at each margin is:
+#
+#     margin      1.0    1.5    2.0    2.5    3.0    4.0
+#     500 Hz    +5.91  +4.15  +3.63  +3.26  +2.97  +2.62   %
+#     1000 Hz   +2.22  +2.64  +2.62  +2.49  +2.33  +2.09   %
+#
+# So the 500 Hz bias crosses the 5 % JND between margin 1.0 and 1.5, NOT at 2.0,
+# and at 1000 Hz it is below the JND at every margin including 0 — there the floor
+# buys nothing on this criterion. The old figures were measured against the OLD
+# resolvability floors, which the AC-36/F-67 energy fold moved by +13.9 % (T30) and
+# -18.8 % (EDT) without the declaration following: exactly AC-65's drift.
+#
+# 2.0 IS KEPT ANYWAY, and the reason is AC-38 rather than this calibration. Since
+# the floor now DISCLOSES rather than suppresses, a margin that is too wide costs
+# extra caveats and biases nothing; only a margin that is too NARROW would let an
+# unresolvable band be reported without one. The calibration is therefore no longer
+# load-bearing in the way it was when it governed suppression, and 2.0 sits on the
+# conservative side of the crossing. This is a weaker justification than the one it
+# replaces, and is written as such rather than restated with fresh numbers as
+# though nothing had changed.
 #
 # WHAT THIS MARGIN NOW GOVERNS — a DISCLOSURE, not a suppression (AC-38).
 # The threshold's independence from the datum was only half the fix; the DECISION
 # was still `fitted_value < floor`, which censors the estimator's own low tail and
-# biases the surviving split mean upward. MEASURED, 200 realizations/point, at
-# true T60 = 0.02 / 0.03 / 0.04 s: suppressing reads +13.4 / +7.0 / +7.1 % from
-# truth against +8.3 / +5.4 / +3.1 % when the value is reported and flagged, and
-# the two are IDENTICAL wherever the floor does not bite.
+# biases the surviving split mean upward. RE-DERIVED on the current tree (200
+# realizations/point, T30 through the real path, margin 2.0, seed 20260811) — the
+# error of the reported mean against truth, disclosing vs suppressing:
+#
+#     true T60   band   suppressed   disclose err   suppress err
+#      0.020 s   500     200/200        +13.4 %      NO VALUE AT ALL
+#      0.020 s  1000      96/200         +3.3 %          +14.6 %
+#      0.030 s   500     192/200         +6.4 %          +38.9 %
+#      0.040 s   500      79/200         +5.7 %          +14.8 %
+#      0.050 s   500      12/200         +3.7 %           +5.4 %
+#      0.060 s   500       0/200         +3.7 %           +3.7 %
+#      0.080 s   500       0/200         +3.4 %           +3.4 %
+#
+# Disclosing is strictly closer to truth wherever the floor bites and IDENTICAL
+# where it does not — and at true T60 = 0.02 s the 500 Hz band suppressed every
+# one of 200 realizations, so suppression does not merely bias the split mean, it
+# DELETES it. That corner is inside base.yaml's own declared support (Eyring admits
+# T60 = 0.0179 s).
 #
 # So a physical leg (low/high) is never suppressed: its value is reported and
 # counted in `n_bands_resolvability_limited`. Only `pred` is suppressed, and only

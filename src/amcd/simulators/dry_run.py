@@ -133,10 +133,28 @@ class DryRunSimulator:
         # NOT MODELLED: a distinct early-reflection cluster between the direct
         # arrival and the diffuse onset. The tail begins at the direct arrival, so
         # this scaffold has no early-reflection structure — one more reason its D0b
-        # verdicts are plumbing evidence, not acoustic results (RD-07). AC-43
-        # measures the consequence: EDT is nearly inert on the placement axis
-        # (non-monotone, 5.5 % spread over a 16x distance range) even though C50 is
-        # live, so `test_placement_shift`'s EDT column is a plumbing result.
+        # verdicts are plumbing evidence, not acoustic results (RD-07).
+        #
+        # AC-43 measures the consequence, and it is a SPLIT verdict on the placement
+        # axis: AC-28 made C50 live there and left EDT essentially dead. RE-MEASURED
+        # on the current tree (10x8x3.5 m, alpha 0.2, r_c 1.193 m, seed 7,
+        # high_ray_budget), band-averaged over iso_eval_freqs:
+        #
+        #     d        0.5      1.0      2.0      4.0      8.0  m
+        #     C50   +11.602  +6.721  +3.495  +2.114  +1.708  dB   <- monotone, 9.9 dB
+        #     EDT    0.5514  0.7882  0.7989  0.7843  0.7849  s    <- NON-monotone
+        #
+        # EDT rises then falls and varies by ~1.5 % across the top four distances,
+        # while C50 swings 9.9 dB over the same 16x range. In a real room EDT moves
+        # systematically with distance, because the first 10 dB is shaped by the
+        # early-reflection pattern this scaffold does not have. So
+        # `test_placement_shift`'s EDT column is a PLUMBING result, not an acoustic
+        # one, and must be read as such in the D0a/D0b artifacts and the E1 report.
+        #
+        # DO NOT add an early-reflection model here — that is the real simulator's
+        # job, and AC-43 says so explicitly. The artifact-side disclosure is not in
+        # this lane's files (`diagnostics/probe.py`, `reporting/tables.py`) and is
+        # recorded in docs/ledger_inbox/M.md against those anchors.
         direct = np.zeros(n_active, dtype=np.float32)
         if n_active > 0:
             direct[0] = direct_gain
