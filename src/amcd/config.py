@@ -1271,19 +1271,17 @@ class Config(BaseModel):
         # run_dir — see amcd.provenance (F-56).
         versions["git_sha"] = provenance.git_sha()
         versions["git_dirty"] = provenance.git_is_dirty()
-        # Whole-package, unlike the per-stage scopes: this one is for a HUMAN
-        # asking "which code was this run made with", not a cache key.
+        # Whole-package and human-facing, never a cache key — see amcd.provenance,
+        # which owns that distinction (ALL_SOURCES).
         #
-        # It describes THIS INVOCATION, and stamp() runs before any stage does, so
-        # it is NOT a claim that this code produced the artifacts in the run_dir.
-        # It read as one: re-running on a run_dir whose stages are all cached
-        # re-stamps this file with the current hash, so a run_dir whose renders
-        # predate a change to the render backend carried a stamp asserting the new
-        # code made them (F-75). Which code produced a given stage's artifacts is
-        # recorded per stage in `stages/<stage>.done` (`code_version_unscoped`),
-        # and `Pipeline` warns when a stage with no scoped `code_version` is served
-        # from cache under changed source. Said in the file itself, because a
-        # comment here does not reach whoever reads versions.json.
+        # What is NOT said there, because it is about this stamp: it describes THIS
+        # INVOCATION, and stamp() runs before any stage does, so it is not a claim
+        # that this code produced the run_dir's artifacts. It read as one — an
+        # all-cached re-run re-stamps the current hash, so a run_dir whose renders
+        # predate a backend change carried a stamp asserting the new code made them
+        # (F-75). Per-stage truth lives in `stages/<stage>.done`
+        # (`code_version_unscoped`). Said in the FILE below, not only here, because
+        # a comment does not reach whoever reads versions.json.
         versions["code_version"] = provenance.code_version(provenance.ALL_SOURCES)
         versions["code_version_describes"] = (
             "this invocation, not necessarily the artifacts in this run_dir; "

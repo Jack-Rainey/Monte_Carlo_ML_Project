@@ -313,12 +313,25 @@ class TestCodeVersionSeesTheWorkingTree:
 
     def test_git_is_resolved_from_the_package_not_the_run_dir(self) -> None:
         """F-56: `cwd=run_dir.parent` stamped "unavailable" into versions.json for
-        any run_dir outside the checkout — the normal case for a data volume."""
+        any run_dir outside the checkout — the normal case for a data volume.
+
+        Asserts the CONTRACT, not this machine: a 40-hex sha or the literal
+        "unavailable". An earlier version asserted `!= "unavailable"` with the
+        reason "this checkout is a git repo" — a property of one host, not of the
+        code, contradicting both `provenance.git_sha`'s stated contract and the
+        sibling test below. The project must run the same code from a wheel and
+        from a source export on a second host, neither of which has a `.git`
+        (F-168).
+        """
+        import re
+
         import amcd.provenance as prov
 
-        assert prov.git_sha() != "unavailable", (
-            "this checkout is a git repo, so the package-resolved sha must exist"
-        )
+        sha = prov.git_sha()
+        assert sha == "unavailable" or re.fullmatch(r"[0-9a-f]{40}", sha), sha
+        # Resolved from the PACKAGE: asking about a run_dir on a data volume is
+        # what stamped "unavailable" beside a real sha in the same run (F-56).
+        assert prov._PACKAGE_ROOT == Path(prov.__file__).resolve().parent
 
 
 class TestTheRecordLengthGateIsNotBypassableThroughTheCache:

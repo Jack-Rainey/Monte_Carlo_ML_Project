@@ -15,6 +15,12 @@ from ..config import Config
 from ..representations import build_representation
 from ..runtime import Verbosity, emit
 from ..simulators.base import SceneSpec
+
+#: The `compute_stats` keys actually applied to the saved tensors, as (mean, std).
+#: ONE declaration, read both by the `normalize()` calls and by what `meta.json`
+#: reports as applied, so the artifact cannot assert a normalization the tensors
+#: did not get (F-165). Both legs take the HIGH stats — see `normalization.py`.
+_APPLIED_STAT_KEYS = ("high_mean", "high_std")
 from .normalization import compute_stats, normalize
 from .splits import assign_split
 
@@ -129,8 +135,12 @@ def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
 
         # Both inputs and targets normalized with high stats so the residual skip
         # connection (pred = low + model(low)) lives in the same space as the target.
-        norm_low = normalize(low_energy, norm_stats["high_mean"], norm_stats["high_std"])
-        norm_high = normalize(high_energy, norm_stats["high_mean"], norm_stats["high_std"])
+        # The stat KEYS come from _APPLIED_STAT_KEYS, which is also what meta.json
+        # reports as applied — so the artifact cannot claim one thing while the
+        # tensors were normalized with another (F-165).
+        mean_key, std_key = _APPLIED_STAT_KEYS
+        norm_low = normalize(low_energy, norm_stats[mean_key], norm_stats[std_key])
+        norm_high = normalize(high_energy, norm_stats[mean_key], norm_stats[std_key])
 
         torch.save(norm_low, split_dir / f"{scene.scene_id}_low.pt")
         torch.save(norm_high, split_dir / f"{scene.scene_id}_high.pt")
@@ -164,6 +174,23 @@ def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         # eval consumers key on this stamp, never on the rep class (F-19).
         "value_domain": rep.value_domain,
         "norm_stats": norm_stats,
+        # WHICH of those four were applied, in the file rather than in a comment no
+        # reader of meta.json sees (F-M11). Derived from the keys actually used
+        # above, never asserted independently of them — see `normalization.py` for
+        # why the unapplied pair is kept.
+        "norm_stats_applied": {
+            "applied_to_both_legs": list(_APPLIED_STAT_KEYS),
+            "recorded_only": [
+                k for k in sorted(norm_stats) if k not in _APPLIED_STAT_KEYS
+            ],
+            "note": (
+                "The residual framing (pred = low + model(low)) needs input and "
+                "target in ONE affine frame, so both legs use the high stats "
+                "(F-02). The recorded_only stats are applied to nothing; they are "
+                "the record of how the low-ray leg's distribution differs from the "
+                "high leg (F-M11)."
+            ),
+        },
         "split_counts": {
             sp: sum(1 for s in splits.values() if s == sp)
             for sp in all_split_names
