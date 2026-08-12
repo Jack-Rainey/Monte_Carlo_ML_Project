@@ -42,8 +42,8 @@ _N_BANDS = 8
 #: which package code CANNOT import — `scripts/` has no `__init__.py`, is not
 #: installed, and is not on the `PYTHONPATH` the pipeline runs under. Reaching it
 #: would take a sys.path hack, i.e. an assumption about repo layout inside package
-#: code. Two small constants beat that; the integrator has a note to consolidate
-#: them into a shared module (this lane may not create one).
+#: code. Two small constants beat that. They are currently a THIRD copy, not a
+#: single source of truth — the worker inlines both literals again (F-123).
 _RECEIPT_NAME = "amcd_gsound_install.json"
 _RECEIPT_SHA_KEY = "commit_sha"
 
@@ -70,12 +70,18 @@ _AMBISONIC_CONVENTION = "acn_n3d"
 #: about both. But X and Y are NEGATED relative to W while Z is not, which is
 #: exactly (-1)^|m|, and negating X and Y together is a **180 degree yaw**.
 #:
-#: ABSOLUTE SCALE, for completeness: W above is 0.28209 = 1/sqrt(4pi) per unit
-#: source amplitude, i.e. upstream applies the ORTHONORMAL scaling, where textbook
-#: N3D has Y_00 = 1. A single global gain on all 16 channels, so every ratio — which
-#: is all any ISO metric or a DOA estimate reads — is unaffected, and no absolute
-#: level in this project is calibrated against a reference pressure. Recorded rather
-#: than corrected: renormalizing would change every stored IR to fix nothing (AC-57).
+#: ABSOLUTE SCALE: upstream's SH normalization constant is the ORTHONORMAL one,
+#: Y_00 = 1/sqrt(4pi) = 0.28209, where textbook N3D has Y_00 = 1. That is a single
+#: global gain on all channels, so every ratio — which is all any ISO metric or a
+#: DOA estimate reads — is unaffected, and no absolute level here is calibrated
+#: against a reference pressure. Recorded, not corrected: renormalizing would
+#: rewrite every stored IR to fix nothing (AC-57).
+#:
+#: The OBSERVED |W| is NOT that constant: the late field is
+#: `result[c, t] = normalized_sh[c] * carrier[t]` (binding.cpp:423), so a sample of
+#: the synthesis noise carrier multiplies it (AC-75). The ratios above are therefore
+#: the only absolute-scale-free facts here, which is exactly why they are what the
+#: known-answer test asserts.
 #:
 #: Stamped separately rather than folded into the convention string because the
 #: string names ordering + normalization, which are genuinely acn_n3d; the phase
@@ -93,13 +99,25 @@ _SH_CONDON_SHORTLEY_PHASE = True
 #: noise_gen;` at `:329` — verified against SHA 608ea30f, the value
 #: configs/simulators/gsound_sir.yaml pins.
 #:
-#: It is stamped because it is LOAD-BEARING, not for completeness (AC-59). The
-#: carrier is one realization of a random process, and a single realization moves
-#: T30 by ~2.5% and C50 by ~1 dB — about one JND, and half the project's declared
-#: `d0b_t30_jnd_frac`. That error cancels only because the seed is fixed, making the
-#: carrier common-mode across the low and high legs of a paired comparison. A change
-#: to entropy seeding upstream would leave every paired metric silently noisier with
-#: nothing raising, so the fact belongs in provenance where a diff can catch it.
+#: Stamped because it is LOAD-BEARING (AC-59): the carrier is one realization of a
+#: random process, and a single realization moves T30 by ~2.5% and C50 by ~1 dB —
+#: about one JND.
+#:
+#: WHAT IS ESTABLISHED: the seed is fixed, so both legs of a scene are built on the
+#: IDENTICAL carrier sequence, indexed identically.
+#:
+#: WHAT IS NOT: that the induced METRIC error therefore cancels in a paired
+#: comparison. It does not follow — the two legs occupy different delay bins, so
+#: they weight the same carrier differently, and bin occupancy is driven by the ray
+#: budget, which is the swept axis itself. A model puts the residual at sd ~0.45 dB
+#: on the paired C50 delta, ~45% of `d0b_c50_jnd_db` (AC-76, OPEN, with a
+#: zero-render experiment that settles it).
+#:
+#: This value is also UNFALSIFIABLE from here (AC-77/F-124): it is a literal in
+#: amcd's own source, so provenance emits 42 whatever upstream does, and a
+#: provenance diff cannot move. Unlike `speed_of_sound_m_s` (cross-checked against
+#: the paths, RD-19) and `ambisonic_convention` (measured, F-93), it rests entirely
+#: on the `commit_sha` pin.
 _SYNTHESIS_CARRIER_SEED = 42
 
 #: The render worker, as source rather than a module, because it must run under an
@@ -110,8 +128,8 @@ _SYNTHESIS_CARRIER_SEED = 42
 #: different architectures.
 #:
 #: It lives in a string because this lane may not create a new file under
-#: `src/amcd/simulators/` (exact-file ownership, `.claude/lane.json`); the integrator
-#: has a note to promote it to its own module after the merge. `_WORKER_SRC` is
+#: `src/amcd/simulators/` (exact-file ownership, `.claude/lane.json`); promoting it to
+#: `_gsound_worker.py` is RD-121/RR-83, blocked on that ownership. `_WORKER_SRC` is
 #: compiled and executed against stub backends by `tests/test_simulator_seam.py`, so
 #: it has a regression surface that does not require the render host.
 #:
@@ -162,6 +180,15 @@ def _retain(paths, energy_percentage, max_rays):
     requested from upstream because asking getPathData to filter would mean a SECOND
     propagation run just to obtain the unfiltered set the IR must be synthesized
     from - doubling the cost of every render to get one array twice.
+
+    THE SAME SELECTION RULE, not a bit-exact port (AC-82/F-114). Two deliberate
+    divergences, both confined to the `top_percent` branch and both in the direction
+    of determinism: upstream sorts with `std::sort`, which is UNSTABLE, so its kept
+    set is unspecified under tied energies while this one is fixed; and upstream
+    accumulates in float32 while this uses float64, so a cut landing on a boundary
+    can differ by a path. Counts agree with a transcription of upstream over 17
+    edge cases. Assumes non-negative per-path energies, which `searchsorted` needs
+    and upstream's running loop does not.
 
     Returns (kept arrays, total energy over ALL paths, kept share as a percentage or
     None). The share is None - never 0.0 - when total energy is zero, because the
@@ -276,7 +303,7 @@ def main(request_path):
     # ALWAYS the full path set: retention applies ONLY to the saved artifact, never
     # to synthesis. Filtering before synthesis would change the IR itself and so
     # confound the very ray-budget axis under study — top_k 5000 was MEASURED to
-    # retain 43.2% of path energy on a real scene, i.e. it would silently delete
+    # retain 43.1% of path energy on a real scene, i.e. it would silently delete
     # more than half the response.
     #
     # getPathData returns {"path_data": [<per LISTENER>, ...]}, one entry per
@@ -527,7 +554,8 @@ class GsoundSirSimulator:
         Upstream's native retention cannot be used here: it filters inside the same
         call that produces the paths, so requesting it would mean a second
         propagation run purely to obtain the unfiltered set the IR is synthesized
-        from. `_retain` reproduces upstream's selection exactly (Scene.cpp:193-224).
+        from. `_retain` applies upstream's selection rule, with a deterministic
+        tie-break and float64 accumulation (see its docstring; AC-82).
 
         The split matters: retention applies ONLY to the saved artifact. Filtering
         before synthesis would change the IR itself and confound the ray-budget axis
@@ -617,42 +645,28 @@ class GsoundSirSimulator:
             and discarded_db is not None
             and discarded_db > float(self.params["max_discarded_tail_db"])
         )
-        return np.ascontiguousarray(ir, dtype=np.float32), {
+        ir = np.ascontiguousarray(ir, dtype=np.float32)
+        return ir, {
             "native_ir_samples": n_native,
-            # Stamped unconditionally (F-84): the one number that distinguishes a
-            # silent leg from a healthy one, and the denominator discarded_tail_db
-            # is a ratio against.
-            "ir_total_energy": total_energy,
+            "fitted_ir_samples": int(ir.shape[1]),
+            # BOTH energies, and named for the array each describes (F-84/F-111).
+            # They differ whenever the trim branch fires, and it is the FITTED one
+            # that is written to disk and read by every metric. Sum of squared
+            # sample amplitudes, float64 accumulation, uncalibrated — no dB
+            # reference, so comparable between legs of one scene and nothing else.
+            "native_ir_total_energy": total_energy,
+            "fitted_ir_total_energy": float(np.sum(ir.astype(np.float64) ** 2)),
             "truncated": truncated,
             "discarded_tail_db": discarded_db,
             "max_discarded_tail_db": float(self.params["max_discarded_tail_db"]),
             "truncation_qc_flag": flagged,
         }
 
-    def _check_declared_speed(self, speeds: np.ndarray, scene_id: str) -> None:
-        """Falsify the declared `speed_of_sound_m_s` against the paths' own speeds.
-
-        RD-19: gsound's speed is compiled into C++ and can only be DECLARED into
-        provenance. This is the free empirical check that keeps that declaration
-        honest — if upstream ever changes it, the dataset says so instead of
-        inheriting a stale number from config.
-        """
-        declared = float(self.params["speed_of_sound_m_s"])
-        observed = np.unique(np.asarray(speeds, dtype=np.float64))
-        if observed.size == 0:
-            raise ValueError(
-                f"scene {scene_id!r}: the render returned no paths, so the declared "
-                f"speed_of_sound_m_s={declared} could not be cross-checked and the "
-                f"IR has no propagation to synthesize from."
-            )
-        if not np.allclose(observed, declared, rtol=1e-3):
-            raise ValueError(
-                f"scene {scene_id!r}: config declares speed_of_sound_m_s={declared} "
-                f"but the rendered paths report {observed.tolist()[:5]} m/s. gsound's "
-                f"speed is compiled in and can only be declared (RD-19); the "
-                f"declaration is now wrong, so every distance/delay in this dataset "
-                f"would be described by a speed that did not produce it."
-            )
+    # RD-19's declared-speed cross-check lives in the WORKER, not here (F-94). A
+    # parent-side copy over the retained subset was kept briefly as "defence in
+    # depth" and was in fact dead: it re-tested a subset of an array the worker had
+    # already accepted at the same tolerance, so it could not fail, and its empty
+    # branch was unreachable because the worker exits first (F-119).
 
     def render(self, scene: SceneSpec, ray_budget: int) -> IRResult:
         """Render one leg of one scene through the x86 worker.
@@ -699,8 +713,6 @@ class GsoundSirSimulator:
                 f"expected {self.n_channels} for ambisonic order "
                 f"{self._ambisonics_order}."
             )
-        self._check_declared_speed(arrays["speeds_of_sound"], scene.scene_id)
-
         # The band axis must be named by as many centres as it has columns (F-88).
         # Checked against the WORKER's reported count, which is upstream's own, so a
         # config whose band declaration drifts from the compiled filterbank fails
@@ -719,17 +731,16 @@ class GsoundSirSimulator:
 
         ir, truncation = self._fit_to_window(native)
 
-        # A leg with no energy is not a leg (F-84). `_fit_to_window` folds zero total
-        # energy into "nothing was discarded", so a silent render used to return the
-        # same all-clear disclosure as a healthy one and first surfaced as a NaN in a
-        # metric, hours downstream.
-        if truncation["ir_total_energy"] <= 0.0:
+        # A leg with no energy is not a leg (F-84). Tested on the FITTED array — the
+        # one written to disk and read by every metric (F-111).
+        if truncation["fitted_ir_total_energy"] <= 0.0:
             raise ValueError(
                 f"scene {scene.scene_id!r} at diffuse budget {ray_budget}: the "
-                f"rendered IR carries zero total energy over "
-                f"{native.shape[0]} channels x {native.shape[1]} samples. The leg "
-                f"is silent — a propagation or synthesis failure, not a quiet room — "
-                f"and every metric computed from it would be undefined."
+                f"rendered IR carries zero total energy in the "
+                f"{self.n_channels} x {self.n_samples} window that would be written "
+                f"(native was {native.shape[0]} x {native.shape[1]}, energy "
+                f"{truncation['native_ir_total_energy']:.6g}). The stored leg is "
+                f"silent, so every metric computed from it would be undefined."
             )
 
         # None when total energy is zero — the share is undefined there, and a 0.0
@@ -775,12 +786,8 @@ class GsoundSirSimulator:
                 "speed_of_sound_m_s": float(self.params["speed_of_sound_m_s"]),
                 "ambisonic_convention": _AMBISONIC_CONVENTION,
                 "sh_condon_shortley_phase": _SH_CONDON_SHORTLEY_PHASE,
-                # TWO different RNGs, reported separately (AC-59). Flattened into one
-                # boolean they hid a dependency the metrics rest on: the SH synthesis
-                # carrier is SEEDED and therefore common-mode across legs, which is
-                # the only reason its per-realization spread (C50 sd ~1 dB, about one
-                # JND) cancels in a paired comparison. If upstream ever seeded from
-                # entropy instead, every C50 delta would silently acquire that error.
+                # Two RNGs, reported separately — see _SYNTHESIS_CARRIER_SEED for
+                # what that does and does not establish (AC-59/AC-76).
                 "ray_rng_seeded": False,
                 "synthesis_carrier_seed": _SYNTHESIS_CARRIER_SEED,
                 # Kept: REQUIRED_PROVENANCE_KEYS binds every backend, and the two
@@ -839,11 +846,9 @@ class PathRetention(BaseModel):
         if self.value is None:
             raise ValueError(f"path_retention.mode {self.mode!r} requires a `value`")
 
-        # Range and integrality, per mode (F-92). Untyped, an out-of-domain value is
-        # not rejected but silently REINTERPRETED by the worker's cut rule: top_k 0
-        # and -3 both mean "keep everything", top_k 5000.7 truncates, top_percent
-        # 150 means "all" and top_percent 0 keeps one path. An experiment value that
-        # means something other than what it says is worse than one that fails.
+        # Range and integrality, per mode (F-92): out-of-domain values are
+        # REINTERPRETED by the worker's cut rule, not rejected. The two raise
+        # messages below state each domain.
         if self.mode == "top_k":
             if self.value != int(self.value) or int(self.value) < 1:
                 raise ValueError(

@@ -27,6 +27,8 @@ class SceneSpec:
     #: Drawn from the named `scene_generation` seed aspect, never shared with the
     #: split, model-init or shuffling aspects (per-aspect seeds).
     seed: int
+    #: Which room shape the generator sampled, from the `scenes.geometry_families`
+    #: config keys — "shoebox" is the only one today. Config names it, not code.
     geometry_family: str
     #: (width, length, height) in METRES.
     dims: tuple[float, float, float]
@@ -35,16 +37,23 @@ class SceneSpec:
     #: it is that backend's own convention (AC-54/RD-144), so a closed form derived
     #: from this number describes the declared room, not necessarily the rendered one.
     material_absorption: float
-    #: METRES, in the frame above.
+    #: `source_pos` / `receiver_pos`: METRES, in the frame above.
     source_pos: tuple[float, float, float]
     receiver_pos: tuple[float, float, float]
+    #: Per-scene backend overrides. RESERVED AND UNUSED: `scenes/generator.py`
+    #: writes `{}` for every scene and no simulator reads it — it only round-trips
+    #: through `to_dict`/`from_dict`. The field exists so a future regime can vary a
+    #: backend parameter per scene without a second scene type; wiring it up means
+    #: giving it a consumer, not just a value.
     sim_params: dict = field(default_factory=dict)
-    # Which distribution-shift regime this scene was generated for.
-    # "id" → in-distribution (train/valid/test_id); shift names → locked to that test split.
+    #: Which distribution-shift regime this scene was generated for.
+    #: "id" → in-distribution (train/valid/test_id); shift names → locked to that
+    #: test split.
     split_regime: str = "id"
-    # Labels for each distribution-shift axis (geometry/placement/material). A shift
-    # scene differs from the id baseline in exactly one of these — the controlled-shift
-    # integrity check (invariant #10) asserts on these labels, not the split_regime tag.
+    #: Labels for each distribution-shift axis (geometry/placement/material). A shift
+    #: scene differs from the id baseline in exactly one of these — the
+    #: controlled-shift integrity check (invariant #10) asserts on these labels, not
+    #: on the `split_regime` tag.
     regime_axes: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -184,11 +193,10 @@ class PathData:
     def __post_init__(self) -> None:
         n = int(self.num_paths)
         for name, dtype in PATH_ARRAY_DTYPES.items():
-            # Cast HERE, not only on read (F-95). `from_parquet` casts to the
-            # declared dtype, so a producer handing in float64 used to get float32
-            # back from its own round trip with no error and no logged reason. The
-            # declared dtype is the contract; a backend needing more precision
-            # changes PATH_ARRAY_DTYPES rather than passing a wider array.
+            # The declared dtype is enforced at construction, not only on read
+            # (F-95), so written == declared == read-back. A backend needing more
+            # precision widens PATH_ARRAY_DTYPES rather than passing a wider array;
+            # a lossy cast here is currently silent (F-110/F-122).
             arr = np.asarray(getattr(self, name), dtype=dtype)
             if arr.shape[0] != n:
                 raise ValueError(
@@ -369,17 +377,15 @@ class IRResult:
 #:   ray_budget           the budget this leg was rendered at
 #:   speed_of_sound_m_s   the speed the backend actually used (RD-19: gsound's
 #:                        344 m/s lives in C++, so it is DECLARED, not configured)
-#:   ambisonic_convention channel ordering + normalization. For GSound-SIR this is
-#:                        **"acn_n3d"**, not SN3D — verified in the auralizer
-#:                        binding (binding.cpp:18 "normalization constant K(l,m)
-#:                        for N3D", :43 "N3D/ACN ordering"). Getting this wrong is
-#:                        a per-degree sqrt(2l+1) error; it is invisible today
-#:                        because every live scalar metric uses channel 0, where
-#:                        N3D and SN3D agree exactly, and becomes load-bearing the
-#:                        moment evaluation/spatial.py is filled in (AC-15/RD-25).
-#:   rng_seeded           whether the render is reproducible from a seed (RD-23:
-#:                        pygsound exposes none, so reproducibility rests on the
-#:                        cached artifacts, not on re-render bit-identity)
+#:   ambisonic_convention channel ordering + normalization, as a string the backend
+#:                        defines and documents at its own constant (gsound_sir's is
+#:                        `_AMBISONIC_CONVENTION`, measured rather than read off a
+#:                        source comment — AC-57). Named here, never valued: a
+#:                        second backend's convention is its own fact.
+#:   rng_seeded           whether the render is reproducible from a seed. A backend
+#:                        may refine it with its own keys where one boolean hides a
+#:                        distinction that matters (gsound_sir splits the ray tracer
+#:                        from the synthesis carrier — AC-59).
 REQUIRED_PROVENANCE_KEYS = (
     "simulator",
     "ray_budget",
@@ -411,8 +417,15 @@ class Simulator(Protocol):
     Neither is expressible in a `runtime_checkable` Protocol, so both are
     enforced at construction and at render time respectively, not by isinstance.
 
-    A third required member, `min_source_receiver_distance_m`, and an optional
-    `host_scoped_params`, are declared below.
+    A third required member, `min_source_receiver_distance_m`, is declared below.
+
+    A backend may ALSO declare `host_scoped_params() -> tuple[str, ...]`, naming
+    the params of its own that are host facts rather than dataset facts (F-86).
+    It is deliberately NOT a member of this Protocol: Protocol membership is
+    structural, so declaring it here would make every backend that legitimately
+    has nothing to redact — the scaffold included — fail `issubclass` (F-121).
+    `simulator_host_scoped_params` below is the accessor, and it treats absence as
+    "nothing to redact".
     Implementation constraint that goes with it: **no simulator `__init__` may
     require the render environment.** The floor is consulted at gen-scenes, which
     runs in the native pipeline env, while the render backend may live in a
@@ -441,23 +454,6 @@ class Simulator(Protocol):
         Derive it where it is already implied (gsound_sir: source_radius +
         listener_radius) rather than declaring a second number that can disagree
         with the geometry it describes.
-        """
-        ...
-
-    @classmethod
-    def host_scoped_params(cls) -> tuple[str, ...]:
-        """This backend's param names that are HOST facts, not dataset facts.
-
-        Redacted from canonical render provenance: a machine-local value would make
-        the same render carry different provenance on two supported hosts. The
-        BACKEND declares them because only it knows which of its params those are —
-        the render stage's own docstring says no branch there knows what a gsound
-        is, and a second raytracer's host-scoped param would otherwise have to be
-        added to a constant inside the stage (F-86).
-
-        Optional, and empty by default: absence means "nothing to redact", so a
-        backend that declares nothing gets the FULL echo. Serves the roadmap's
-        multiple-raytracers item.
         """
         ...
 

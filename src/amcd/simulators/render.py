@@ -1,4 +1,17 @@
-"""render stage: call simulator for each scene, save paired low+high IRs."""
+"""render stage: the paired low/high render of every scene spec.
+
+Writes per scene, under `renders/<scene_id>/`:
+  low.npy, high.npy     (n_channels, n_samples) float32, the two ray budgets
+  paths_{low,high}.parquet  retained propagation paths, only for backends that
+                        export them (RD-08); the scaffold writes none
+  meta.json             canonical provenance at EVERY save level (RD-16), incl.
+                        `artifact_sha256` over the files above (F-90)
+
+The whole batch is validated before any of it is rendered — separations against
+the backend's declared floor — and orphan render dirs from a larger previous
+scene set are pruned first. Backend refusals are collected and reported together
+rather than aborting mid-batch (F-125).
+"""
 from __future__ import annotations
 
 import hashlib
@@ -145,12 +158,27 @@ def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     if pruned:
         emit(verbosity, "progress", f"  Pruned {pruned} orphan render dir(s) from {renders_dir}")
 
+    # (scene_id, reason) for every scene the backend refused. Collected rather than
+    # raised in place (F-125), for the reason `_preflight_separations` states above:
+    # a backend-side refusal at scene 500 of 720 would abort an emulated batch hours
+    # in with the sentinel unwritten, and redoing it costs those hours again. Here
+    # the whole batch is attempted and every offender is reported at once — and
+    # nothing is silently dropped, because a non-empty list is fatal below.
+    refused: list[tuple[str, str]] = []
+
     for scene in scenes:
         out_dir = renders_dir / scene.scene_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        low_result = sim.render(scene, config.low_ray_budget)
-        high_result = sim.render(scene, config.high_ray_budget)
+        try:
+            low_result = sim.render(scene, config.low_ray_budget)
+            high_result = sim.render(scene, config.high_ray_budget)
+        except ValueError as exc:
+            # The backend's own contract failures (a silent leg, a band-count
+            # disagreement) — never an unexpected error class, which still aborts.
+            refused.append((scene.scene_id, str(exc)))
+            emit(verbosity, "progress", f"  REFUSED {scene.scene_id}: {exc}")
+            continue
 
         for leg, result in (("low", low_result), ("high", high_result)):
             validate_provenance(
@@ -160,9 +188,7 @@ def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 leg=leg,
             )
 
-        # BOTH legs, and a raise rather than a bare `assert` (F-98): the high leg
-        # was checked by nothing, and `python -O` strips an assert — leaving the
-        # only shape guard on the canonical artifact silently absent.
+        # Both legs, and `raise` not `assert` — `python -O` strips asserts (F-98).
         expected_shape = (config.n_channels, config.n_samples)
         for leg, result in (("low", low_result), ("high", high_result)):
             if result.ir.shape != expected_shape:
@@ -215,4 +241,18 @@ def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             )
         )
 
-    emit(verbosity, "progress", f"  Rendered {len(scene_paths)} scenes → {renders_dir}")
+    # Scored vs attempted, always — a refusal must never leave the run looking whole.
+    rendered = len(scenes) - len(refused)
+    emit(
+        verbosity,
+        "progress",
+        f"  Rendered {rendered} of {len(scenes)} scenes → {renders_dir}",
+    )
+    if refused:
+        lines = "\n".join(f"    {sid}: {reason}" for sid, reason in refused)
+        raise ValueError(
+            f"the render backend refused {len(refused)} of {len(scenes)} scenes, so "
+            f"the dataset is incomplete and the stage is not done:\n{lines}\n"
+            f"Every other scene WAS rendered and its artifacts are on disk, so a "
+            f"re-run after fixing these costs only the refused scenes."
+        )
