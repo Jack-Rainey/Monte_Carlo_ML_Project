@@ -162,11 +162,21 @@ configs/            # three kinds of file (see "Config, not code" above):
   representations/  #   representation and simulator — selected by `name`
   simulators/       #   from the master config
 scripts/            # setup_gsound_sir.py — the ref-addressable backend installer
+                    # new_lane.py, lane_guard.py, lane_preflight.py — parallel lanes
 docs/               # research_I_paper.md, design_spec.md, review_ledger.md,
-                    # verbosity.md, gsound_sir_setup.md
+                    # verbosity.md, gsound_sir_setup.md, parallel_protocol.md
+  lanes/            #   one partition file per review cycle (who owns what)
+  ledger_inbox/     #   one file per lane; the integrator folds these into the ledger
 tests/              # invariant / config / shape / metric / cache tests
 experiments/        # run outputs (git-ignored)
 ```
+
+**Review cycles run in parallel, and the protocol is not optional reading.**
+Several sessions work this repository at once, one per git worktree, with
+ownership enforced by a pre-edit hook rather than by discipline. If you are about
+to change anything, read [`docs/parallel_protocol.md`](docs/parallel_protocol.md)
+first — it defines the six rules, the lane exit gate a lane must satisfy before
+it reports, and the seven-step integration gate.
 
 ## Experiment ledger (`docs/design_spec.md` §11)
 
