@@ -279,13 +279,13 @@ def _room_acoustics(
     so the E1 write-up can characterize the dataset it generated. The rendered
     IRs remain the source of truth for every reported metric.
 
-    VALIDITY (AC-21). The estimates above are reported with no indication of when
-    their own premise has failed — and for `test_material_shift`, the very split
-    this artifact was built to characterize, it has failed for 100 % of scenes
-    (alpha median 0.894, Sabine/Eyring ratio median 2.51, 23 % with r_c larger than
-    the room's longest dimension). So each scene now also carries four flags. No
-    formula changes and nothing is dropped: a +4.9 dB DRR from a formula outside
-    its domain is still reported, but it is reported AS an extrapolation.
+    VALIDITY (AC-21). The estimates above were reported with no indication of when
+    their own premise had failed — and on a high-absorption split it fails for
+    most or all scenes. So each scene also carries validity flags. No formula
+    changes and nothing is dropped: a DRR from a formula outside its domain is
+    still reported, but it is reported AS an extrapolation. The realized
+    percentages belong to a realized config, so they live in that config's own
+    comment rather than being copied here (RR-62).
 
     NOT EVERY GEOMETRY IS AN ENCLOSURE (RD-64). Every quantity here — Sabine/Eyring
     T60, room constant, critical distance, DRR — is derived from `dims` on the
@@ -305,7 +305,11 @@ def _room_acoustics(
             "uncharacterized_reason": (
                 "geometry family declares characterization: none — it is not a "
                 "closed enclosure, so Sabine/Eyring T60, room constant, critical "
-                "distance and diffuse-field DRR are undefined for it"
+                "distance and diffuse-field DRR are undefined for it, AND ITS "
+                "RECORD-LENGTH ADEQUACY IS THEREFORE UNCHECKED: the scene is still "
+                "rendered into a record of fixed ir_duration, and a non-enclosure "
+                "has a finite decay too — it merely is not Sabine's, so nothing "
+                "here can compare it against the record (AC-53)"
             ),
             # `t60_exceeds_ir_duration` is OMITTED, not False (F-71). A False here
             # reads as "measured, and within the record", so the scene entered the
@@ -355,6 +359,20 @@ def _room_acoustics(
     # with each scene's own absorption and surface, while the config declares ONE
     # global placement floor, so the floor cannot satisfy it everywhere. The
     # per-scene criterion stays deferred; how far the floor falls short does not.
+    #
+    # ABSORPTION-AREA CONVENTION (AC-51) — the two reverberant-field radii in this
+    # record descend from DIFFERENT conventions, and the record has to say so:
+    #   * `critical_distance_m` uses the Hopkins–Stryker room constant R = Sα/(1−α);
+    #   * `iso_min_distance_*_m` descends from ISO's Sabine absorption area A = Sα.
+    # Their ratio is d_min/r_c = 2·sqrt(16π/24ln10)·sqrt(1−α) = 1.907·sqrt(1−α), so
+    # the standard's "d_min ≈ 2× the reverberation radius" rationale holds only below
+    # α ≈ 0.725 and INVERTS above it — at α 0.98 the ISO minimum lies deep INSIDE the
+    # reported critical distance. Neither number is wrong under its own definition,
+    # which is exactly why both definitions are stated. The two derived flags below
+    # swap strictness at that same α for this reason and no other.
+    #
+    # α throughout is NOMINAL, as configured — pending AC-54, which may replace it
+    # with the backend's effective α_eff = 1−sqrt(1−α).
     d_min_sabine = 2.0 * math.sqrt(alpha * surface / _C_TIMES_SABINE_K)
     d_min_eyring = 2.0 * math.sqrt(-math.log1p(-alpha) * surface / _C_TIMES_SABINE_K)
 
@@ -365,8 +383,12 @@ def _room_acoustics(
         "absorption": alpha,
         "t60_sabine_s": float(t60_sabine),
         "t60_eyring_s": float(t60_eyring),
+        # Hopkins–Stryker: r_c = sqrt(R/16π) with R = Sα/(1−α). See the
+        # absorption-area note above for why this and `iso_min_distance_*_m` are
+        # not on one convention (AC-51).
         "critical_distance_m": r_c,
         "d_over_rc": distance / r_c if r_c > 0 else float("inf"),
+        # ISO's Sabine absorption area A = Sα — NOT the room constant above (AC-51).
         "iso_min_distance_sabine_m": d_min_sabine,
         "iso_min_distance_eyring_m": d_min_eyring,
         # Diffuse-field DRR: direct 1/(4πd²) against the reverberant field 4/R.
@@ -374,7 +396,7 @@ def _room_acoustics(
         # ── Validity indicators (AC-21) ──────────────────────────────────────
         # Sabine and Eyring agree only for small α; the ratio is a direct,
         # assumption-free readout of how far the diffuse-field model is being
-        # stretched (median 2.51 on test_material_shift, max 3.90).
+        # stretched.
         "sabine_eyring_ratio": float(t60_sabine / t60_eyring),
         "alpha_above_diffuse_limit": bool(alpha > alpha_limit),
         # A critical distance larger than the room means the "reverberant field"
@@ -385,25 +407,57 @@ def _room_acoustics(
         # DIRECT field, so the diffuse-field DRR being reported has no reverberant
         # field to divide by. `d_over_rc` was already computed and summarized as a
         # value but never flagged or counted, so the per-split validity summary
-        # omitted the strictest indicator it already had in hand. MEASURED over the
-        # realized base.yaml set: this fires for 92.5 % of test_material_shift and
-        # 17.2 % of id, against `rc_exceeds_max_dim`'s 35.0 % and 0.0 % — an
-        # under-report of ~2.6x on the split the flags were built for.
+        # omitted the strictest indicator it already had in hand.
         "receiver_inside_critical_distance": bool(distance < r_c),
         # AC-30's realized disclosure: this scene's own ISO 3382-1 §5.3 floor against
         # the separation actually drawn. Both estimates are carried because they
         # disagree substantially at high α, and the reader needs to see by how much.
         "below_iso_min_distance_sabine": bool(distance < d_min_sabine),
         "below_iso_min_distance_eyring": bool(distance < d_min_eyring),
-        # AC-22's realized gate: this scene's decay against the record length.
-        # Sabine (the longer estimate) so the flag errs toward declaring a scene
-        # unsupported rather than silently truncating it.
+        # AC-22's design-time record-length flag: this scene's ESTIMATED decay
+        # against the record length. Sabine (the longer estimate) so the flag errs
+        # toward declaring a scene unsupported rather than silently truncating it.
+        #
+        # NOT A MEASUREMENT, and the gate built on it is not one either (F-60). This
+        # is Sabine from geometry × a scalar α; nothing here compares a RENDERED
+        # decay against `ir_duration`. Two ways a truncated scene passes it:
+        #   * Sabine assumes a 4V/S mean free path and under-predicts decay in a
+        #     non-diffuse geometry — base.yaml's corridor family (15-30 m × 1.5-3 m)
+        #     is exactly that, and also the family with the longest records;
+        #   * the scaffold clips rt60 to its own bounds, so the described and the
+        #     rendered decay already differ (recorded by the simulator as
+        #     `rt60_clipped`, which this flag never consults).
+        # The realized check — a FITTED T30 against the realized record length,
+        # counted in the eval output — needs `evaluation/` and a config key, neither
+        # of which is in this lane; it is the F-60 residual (see F-185).
         "t60_exceeds_ir_duration": bool(t60_sabine > ir_duration_s),
     }
 
 
+#: Top-level keys of `placement_report.json` that are NOT a split record, and are
+#: therefore skipped by `_disclose_and_gate_record_length` rather than scored.
+#:
+#: Empty today: every top-level key is currently a split. It is a DECLARED set
+#: rather than an assumption because the roadmap is actively pushing metadata into
+#: this artifact — AC-54/RD-144 want the absorption convention declared in it,
+#: RD-131 wants an AC-54 caveat there, and AC-30/AC-50's disclosure work invites
+#: more. A gate that hardcoded "every top-level key is a split" would foreclose
+#: that; one that indexes blindly raises a bare KeyError instead (S-F4). Adding a
+#: metadata key means adding it here, in the same commit.
+_NON_SPLIT_REPORT_KEYS: frozenset[str] = frozenset()
+
+
 def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) -> None:
-    """Disclose the declared-support corner; gate on the REALIZED over-limit rate.
+    """Disclose the declared-support corner; gate on the over-limit rate of the
+    closed-form ESTIMATE.
+
+    Not on a measurement: `t60_exceeds_ir_duration` is Sabine from geometry, and
+    nothing in the gen-scenes stage compares a RENDERED decay against
+    `ir_duration`. Both limitations of that instrument are named at the flag's own
+    definition in `_room_acoustics`; the realized check is the F-60 residual
+    (F-185). The gate is still worth having — it is the only check that runs
+    BEFORE a batch is rendered — but it is a design-time gate, and calling it
+    "realized" (as this docstring did) overstated what it can refuse.
 
     AC-22 in the shape RD-56 settled. The two halves are deliberately different in
     kind:
@@ -427,6 +481,15 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     per-shift breakdown IS the research result — so every split above the declared
     limit is WARNED about unconditionally, whether or not the overall gate trips
     (RD-65). Warning, not gating, for the reason in the paragraph above.
+
+    WHICH SPLIT SET (S-F7). `report` is keyed by GENERATION-PLAN REGIME, not by
+    declared split, and the two differ in frac mode: `train`/`valid`/`test_id` are
+    generated as one pooled `id` entry and only separated later, at preprocess by
+    `data/splits.py`. So the canonical dry run warns about `id`, never about
+    `train` — a reader who reads `id` as `train` is reading a pool three splits
+    wide. In count mode (`research_i`) each id-pool split IS its own entry, so
+    there the warning is genuinely per declared split, which is RD-65's own
+    scenario.
 
     Both the gate and the warning score only CHARACTERIZED scenes (F-71/RD-112):
     an uncharacterized scene has no closed-form T60, so it can be counted neither
@@ -458,6 +521,19 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     # scene in the split was scored — that contract is what the `.get` relies on.
     per_split = {}
     for name, entry in report.items():
+        if name in _NON_SPLIT_REPORT_KEYS:
+            continue
+        # Diagnosed, not a bare KeyError from the next line (S-F4).
+        if not isinstance(entry, dict) or "t60_over_ir_duration" not in entry:
+            raise ValueError(
+                f"placement_report key {name!r} is neither a split record nor a "
+                f"declared non-split key: the record-length gate scores every "
+                f"top-level key of the report, and this one carries no "
+                f"'t60_over_ir_duration' block. If it is metadata rather than a "
+                f"split, add it to `_NON_SPLIT_REPORT_KEYS` in the same commit that "
+                f"writes it — a report key nothing scores and nothing declares is "
+                f"how a split would go missing from the gate unnoticed."
+            )
         block = entry["t60_over_ir_duration"]
         attempted = entry["n_scenes"]
         scored = attempted - block.get("n_uncharacterized", 0)
@@ -466,12 +542,23 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     # RD-65. Emitted before the overall gate can raise, so a failing run still names
     # the splits responsible.
     for name, (count, scored, attempted) in per_split.items():
+        if not attempted:
+            # A DECLARED split that generated no scene at all. Reachable —
+            # `scenes.n_id: 0` is accepted and yields `id: n_scenes 0` — and
+            # previously silent here, while `probe.py` warns for the analogous
+            # case. An empty split is a fact about this run, not an absence of
+            # one (S-F6).
+            emit(verbosity, "warning",
+                 f"  WARNING: split {name!r} generated 0 scenes, so the "
+                 f"record-length gate has nothing to score for it. A declared "
+                 f"split with no scenes is a fact about this run — reported, not "
+                 f"skipped (S-F6).")
+            continue
         if not scored:
-            if attempted:
-                emit(verbosity, "warning",
-                     f"  WARNING: split {name!r}: 0 of {attempted} scenes are "
-                     f"characterized, so its over-limit fraction is UNDEFINED — "
-                     f"reported as null, never as 0.0 (RD-64/F-71).")
+            emit(verbosity, "warning",
+                 f"  WARNING: split {name!r}: 0 of {attempted} scenes are "
+                 f"characterized, so its over-limit fraction is UNDEFINED — "
+                 f"reported as null, never as 0.0 (RD-64/F-71).")
             continue
         frac = count / scored
         if frac > limit:
@@ -526,13 +613,29 @@ def _scene_is_characterized(room: dict, flags: tuple[str, ...]) -> bool:
     return all(flag in room for flag in flags)
 
 
-def _flag_counts(room_stats: list[dict], flags: tuple[str, ...], **context) -> dict:
+def _flag_counts(
+    room_stats: list[dict],
+    flags: tuple[str, ...],
+    *,
+    uncharacterized_consequence: str,
+    **context,
+) -> dict:
     """Count and fraction for each named per-scene boolean, plus its context.
 
     Reported as counts rather than a bare boolean so a reader sees how much of a
     split is affected: "100 % of test_material_shift is outside the diffuse-field
     domain" and "one scene is" are very different disclosures, and the flag alone
     cannot tell them apart (AC-21/AC-22).
+
+    `uncharacterized_consequence` is REQUIRED, not defaulted (AC-53). This helper
+    is uniform logic spanning heterogeneous blocks, and what exclusion COSTS
+    differs per block: leaving the diffuse-field fractions means the closed-form
+    model simply does not apply, while leaving the record-length fractions means
+    the scene is rendered into a fixed record that nothing then checks. A default
+    would hand a fourth block — the outdoor splits this seam exists for — a
+    sentence that does not describe it, which is the silent exclusion this project
+    forbids. Kept keyword-only and out of `**context` so it shapes the note rather
+    than landing in the artifact as a context key of its own.
     """
     # Uncharacterized scenes leave BOTH numerator and denominator — see
     # `_scene_is_characterized` — and the exclusion is itself reported, because a
@@ -548,7 +651,7 @@ def _flag_counts(room_stats: list[dict], flags: tuple[str, ...], **context) -> d
         out["uncharacterized_note"] = (
             "scenes whose geometry family declares characterization: none are "
             "excluded from these fractions — the closed-form model they measure "
-            "does not apply to a non-enclosure (RD-64)"
+            f"does not apply to a non-enclosure (RD-64). {uncharacterized_consequence}"
         )
     for flag in flags:
         count = sum(1 for r in modelled if r[flag])
@@ -703,10 +806,23 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 room_stats,
                 ("alpha_above_diffuse_limit", "rc_exceeds_max_dim",
                  "receiver_inside_critical_distance"),
+                uncharacterized_consequence=(
+                    "Nothing is lost by the exclusion: these flags ask whether the "
+                    "diffuse-field model is being stretched, and a non-enclosure was "
+                    "never inside it to begin with."
+                ),
                 alpha_limit=scenes_cfg.diffuse_field_alpha_limit,
             ),
             "t60_over_ir_duration": _flag_counts(
                 room_stats, ("t60_exceeds_ir_duration",),
+                uncharacterized_consequence=(
+                    "THEIR RECORD-LENGTH ADEQUACY IS THEREFORE UNCHECKED, not merely "
+                    "excluded (AC-53): each is still rendered into a record of this "
+                    "same fixed ir_duration, and a non-enclosure has a finite decay "
+                    "too — it merely is not Sabine's, so no closed form here can "
+                    "compare it against the record. The count above is the number of "
+                    "scenes nothing checked."
+                ),
                 ir_duration_s=config.ir_duration,
             ),
             # AC-30: the REALIZED shortfall of the single global placement floor
@@ -716,6 +832,12 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             "below_iso_min_distance": _flag_counts(
                 room_stats,
                 ("below_iso_min_distance_sabine", "below_iso_min_distance_eyring"),
+                uncharacterized_consequence=(
+                    "ISO 3382-1 §5.3's d_min is a functional of an enclosure's "
+                    "diffuse-field T60, so there is no V/(cT) to evaluate for a "
+                    "non-enclosure and no shortfall to measure — the criterion does "
+                    "not merely go unchecked, it does not apply."
+                ),
                 declared_distance_min_m=(
                     None if regime.distance_range is None else regime.distance_range[0]
                 ),
