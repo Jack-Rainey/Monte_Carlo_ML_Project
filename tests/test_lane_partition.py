@@ -148,6 +148,7 @@ def test_no_row_id_appears_in_two_places(path: Path, spec: dict) -> None:
         ("integrator_queue", [row["id"] for row in spec.get("integrator_queue", [])]),
         ("awaiting_re_review", spec.get("awaiting_re_review", [])),
         ("raised_against_this_partition", spec.get("raised_against_this_partition", [])),
+        ("unassigned", spec.get("unassigned", [])),
     ]
     for bucket, ids in buckets:
         for row_id in ids:
@@ -227,6 +228,16 @@ def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
         if prefix and num.isdigit():
             used.setdefault(prefix, set()).add(int(num))
 
+    # A CONSUMED block is not a collision. Once a lane reports and its findings
+    # are folded, ids from its own block are live OPEN rows BY DESIGN — that is
+    # rule 6 working, not failing. What RD-126 forbids is a lane allocating an id
+    # that names SOMEONE ELSE's live finding, so an id is exempt here only if the
+    # lane's own inbox is where it came from.
+    own: dict[str, set[str]] = {}
+    for lane in spec["lanes"]:
+        inbox = _REPO_ROOT / lane["inbox"]
+        own[lane["id"]] = set(_ID_RE.findall(inbox.read_text())) if inbox.exists() else set()
+
     seen: dict[tuple[str, int], str] = {}
     for lane in spec["lanes"]:
         for prefix, rng in (lane.get("id_block") or {}).items():
@@ -236,9 +247,13 @@ def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
                 "a 'LO..HI' range."
             )
             for n in range(int(lo), int(hi) + 1):
-                assert n not in used.get(prefix, ()), (
+                assert (
+                    n not in used.get(prefix, ())
+                    or f"{prefix}-{n}" in own[lane["id"]]
+                ), (
                     f"{path.name}: lane {lane['id']}'s block {prefix}-{rng} contains "
-                    f"{prefix}-{n}, which is ALREADY an OPEN ledger row. A lane that "
+                    f"{prefix}-{n}, which is ALREADY an OPEN ledger row raised "
+                    "somewhere other than this lane's own inbox. A lane that "
                     "allocates it would overwrite a live finding (RD-126)."
                 )
                 key = (prefix, n)
@@ -261,6 +276,13 @@ def test_the_partition_covers_exactly_the_ledgers_open_rows(path: Path, spec: di
 
     Only the current cycle's partition is checked against the live ledger; an
     older cycle's file describes a ledger state that no longer exists.
+
+    `unassigned:` is the FIFTH list, added for RD-146. A cycle's fold creates rows
+    the partition could not have planned, because they did not exist when it was
+    drawn — cycle 5's fold created 142. Without a bucket for them this check goes
+    red between every fold and the next partition, and the pressure is then to
+    weaken the check rather than to record the rows. `unassigned:` keeps the
+    coverage identity total while saying plainly that these await a partition.
     """
     if path.stem != _CURRENT_CYCLE:
         pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
@@ -272,6 +294,7 @@ def test_the_partition_covers_exactly_the_ledgers_open_rows(path: Path, spec: di
     planned |= {row["id"] for row in spec.get("integrator_queue", [])}
     planned |= set(spec.get("awaiting_re_review", []))
     planned |= set(spec.get("raised_against_this_partition", []))
+    planned |= set(spec.get("unassigned", []))
 
     open_ids = _open_ledger_ids()
     unplanned = open_ids - planned
@@ -539,6 +562,29 @@ def test_a_fix_path_that_does_not_exist_is_declared_as_new(path: Path, spec: dic
 #: event this check exists to prevent.
 _ID_RE = re.compile(r"\b((?:RD|F|AC|RR)-\d+)\b")
 _FOLDED_RE = re.compile(r"\b(?:RD|F|AC|RR)-\d+\b[^\n]{0,80}?folded into\b", re.IGNORECASE)
+#: A `- <ID> — NOT A FINDING…` bullet under the ledger's fold-decisions heading.
+_FOLD_DECISION_RE = re.compile(r"^- ((?:RD|F|AC|RR)-\d+)\s+—\s+\S", re.MULTILINE)
+
+
+def _fold_decisions() -> set[str]:
+    """Ids an inbox mentions that the fold deliberately did NOT turn into a row.
+
+    A lane's id block is a RESERVATION, not a promise: its bounds get quoted in
+    prose (`RD-175..199`), and a lane can leave a dangling citation to a number it
+    never raised (`RD-182`). Neither is a finding, and neither can be forced into a
+    row without inventing one.
+
+    Every entry needs a stated reason, so that "it was never a finding" cannot
+    quietly become the place a genuinely dropped finding goes — which is the whole
+    failure mode this check exists for.
+    """
+    ledger = (_REPO_ROOT / "docs" / "review_ledger.md").read_text()
+    heading = "### Fold decisions — ids raised in an inbox that deliberately became NO row"
+    if heading not in ledger:
+        return set()
+    tail = ledger[ledger.index(heading) + len(heading):]
+    end = tail.find("\n## ")
+    return set(_FOLD_DECISION_RE.findall(tail if end == -1 else tail[:end]))
 
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
@@ -577,11 +623,12 @@ def test_every_inbox_finding_reaches_the_ledger(path: Path, spec: dict) -> None:
             block |= {f"{prefix}-{n}" for n in range(int(lo), int(hi) + 1)}
 
         raised = {i for i in _ID_RE.findall(text) if i in block}
-        missing = sorted(raised - open_ids - folded)
+        missing = sorted(raised - open_ids - folded - _fold_decisions())
         assert not missing, (
             f"{path.name}: lane {lane['id']} raised {missing} in {lane['inbox']} "
             "and they are not OPEN rows in docs/review_ledger.md. The fold must "
-            "give every finding a row with a file anchor, or record it as "
-            "'folded into <id>' in the inbox. A finding in neither place is "
-            "invisible to every later cycle (RD-142, F-160)."
+            "give every finding a row with a file anchor, record it as 'folded "
+            "into <id>' in the inbox, or list it with a reason under the ledger's "
+            "'Fold decisions' heading. A finding in none of the three is invisible "
+            "to every later cycle (RD-142, F-160)."
         )
