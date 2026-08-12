@@ -15,8 +15,21 @@ def compute_stats(
     NOTE on which stats are applied: the residual framing (pred = low + model(low))
     requires input and target to live in ONE affine frame, so preprocess.py
     normalizes BOTH low and high with the HIGH stats. `low_mean`/`low_std` are
-    therefore computed and stamped for provenance/diagnostics but are NOT applied
-    to any tensor. See preprocess.py and ledger F-02.
+    therefore computed and stamped but are NOT applied to any tensor. See
+    preprocess.py and ledger F-02.
+
+    WHY THEY ARE COMPUTED ANYWAY, since "emits output, contributes nothing" is a
+    fair reading of unapplied output and was raised as one (F-M11). They are the
+    only on-disk record of how the LOW-RAY leg's distribution differs from the
+    high leg — the axis the roadmap's ray-count sweep (paper §6) varies, and the
+    quantity that says whether the single affine frame above is a reasonable
+    framing or a lossy one at a given ray budget. Deleting them would remove the
+    evidence for F-02's own decision.
+
+    They are recorded under `low_mean`/`low_std`, which say nothing themselves —
+    `tests/test_invariants.py` asserts those four key names verbatim, so renaming
+    them is a coordinated change. The disclosure is a SIBLING key in the same
+    `meta.json`, `norm_stats_applied`, naming which of the four were applied.
     """
     if not train_lows or not train_highs:
         raise ValueError("Cannot compute stats: training split is empty.")

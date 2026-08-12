@@ -10,6 +10,96 @@ import pandas as pd
 from ..config import Config
 from ..runtime import Verbosity, emit
 
+#: Marker for a metric whose unit is the OPERAND DOMAIN's, squared — it is not a
+#: fixed string because the same metric has different units under different
+#: representations. Resolved from the preprocess-stamped `value_domain`.
+_OPERAND_DOMAIN_SQUARED = object()
+
+#: Metric → the unit `paired_improvement` returns it in (evaluation/metric_row.py).
+#:
+#: A UNIT CANNOT BE DERIVED FROM `kind` (AC-48/RD-201). `kind` is
+#: match_reference|maximize|minimize, and `T30` and `C50` share `match_reference`
+#: while one is seconds and the other decibels — so the reported `Imp mean`, CI and
+#: MDES columns mixed s and dB in one table with nothing distinguishing them.
+#:
+#: Declared per metric rather than defaulted, and `_unit_for` RAISES on an
+#: unlisted one: a blank unit on a physical quantity is exactly the silent
+#: exclusion the drop log exists to prevent, and a metric added later must state
+#: its unit rather than inherit a guess. The durable form of this table is a
+#: `unit` declared beside `kind` on the metric itself and carried into
+#: `ci_table.csv`; that spans the metric-computation lane, so it is filed for the
+#: integrator rather than half-built here.
+_METRIC_UNITS: dict[str, object] = {
+    "T30": "s",
+    "EDT": "s",
+    "C50": "dB",
+    "energy_snr_db": "dB",
+    # An operand-domain MSE against the high reference (evaluation/signal.py), so
+    # its unit is whatever the representation encodes in — squared.
+    "energy_mse": _OPERAND_DOMAIN_SQUARED,
+}
+
+#: `value_domain` → how to render an operand-domain-squared unit. The vocabulary
+#: is declared on the representation (`representations/base.py`) and stamped by
+#: preprocess; adding a domain there means adding it here, or `_unit_for` refuses
+#: the run rather than guessing.
+#:
+#: The amplitude domain is raw ambisonic samples in arbitrary units — the package
+#: declares no unit for them — so it renders as `a.u.²` rather than an invented
+#: one. (`amp²` was rejected: it reads as ampere-squared, AC-125.)
+_DOMAIN_UNITS = {"db": "dB²", "amplitude": "a.u.²"}
+
+
+def _unit_for(metric: str, value_domain: str) -> str:
+    """The unit of `metric`'s improvement columns, or raise naming the metric.
+
+    `value_domain` is the PREPROCESS-STAMPED domain, never inferred from a
+    representation class — the same rule `evaluation/signal.py` states for the
+    metrics themselves (F-19).
+    """
+    try:
+        unit = _METRIC_UNITS[metric]
+    except KeyError:
+        raise ValueError(
+            f"Metric {metric!r} reaches the report with no declared unit. Its "
+            f"improvement mean, CI and MDES are rendered as bare numbers beside "
+            f"metrics measured in seconds and in decibels, so a reader cannot tell "
+            f"what it is. Add it to `_METRIC_UNITS` in reporting/tables.py."
+        ) from None
+    if unit is not _OPERAND_DOMAIN_SQUARED:
+        return unit
+    try:
+        return _DOMAIN_UNITS[value_domain]
+    except KeyError:
+        raise ValueError(
+            f"Metric {metric!r} is measured in the operand domain, but the "
+            f"preprocess-stamped value_domain {value_domain!r} is not one of "
+            f"{sorted(_DOMAIN_UNITS)}."
+        ) from None
+
+
+def _stamped_value_domain(run_dir: Path) -> str:
+    """The domain preprocess encoded in, from its own stamp."""
+    meta_path = run_dir / "preprocessed" / "meta.json"
+    if not meta_path.exists():
+        raise FileNotFoundError(
+            f"No preprocessing metadata at {meta_path}, so the operand domain the "
+            f"reported metrics are measured in is unknown. Run preprocess first."
+        )
+    with open(meta_path) as f:
+        meta = json.load(f)
+    try:
+        return meta["value_domain"]
+    except KeyError:
+        # A pre-stamp preprocess run — a real population, and the sibling consumer
+        # in evaluation/ already fails loud on it. Say the same thing here rather
+        # than raising a bare KeyError with a traceback (F-164).
+        raise KeyError(
+            f"{meta_path} has no 'value_domain'. It predates the domain stamp, so "
+            f"the unit the reported metrics are measured in cannot be established. "
+            f"Re-run preprocess."
+        ) from None
+
 
 def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     stats_dir = run_dir / "stats"
@@ -29,7 +119,20 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # is the paired-improvement population; a gap vs attempted means legs were
     # dropped — per-leg reasons in the run's metrics/drops.csv.
     col_w = {"metric": 22, "n": 8, "pred": 10, "imp": 10, "ci": 22, "mdes": 10,
-             "improved": 14, "caveat": 18}
+             "unit": 6, "improved": 14, "caveat": 18}
+
+    # The domain the operand-domain metrics are measured in, read once from
+    # preprocess's own stamp rather than per row.
+    value_domain = _stamped_value_domain(run_dir)
+
+    # Resolve the unit for EVERY metric present, up front — not lazily per
+    # rendered row (F-163/AC-130). `_metric_row` returns early for an unscored
+    # row, so a lazy lookup made the "an undeclared metric is refused" contract
+    # depend on the DATA: a new metric passed on the run where it happened to be
+    # unscored and crashed the report on a later run that scored it, moving the
+    # failure away from the change that caused it. The guard is over the metric
+    # SET, so it fires on the first run that mentions the metric at all.
+    units = {row["metric"]: _unit_for(row["metric"], value_domain) for row in summary}
 
     def _caveats(row: dict) -> str:
         """Composition caveats on the scored population (F-62 / AC-25 / RD-78).
@@ -76,6 +179,8 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             f"{imp_mean_str:>{col_w['imp']}} "
             f"{ci_str:<{col_w['ci']}} "
             f"{mdes_str:>{col_w['mdes']}} "
+            # AC-48 — the footer line states which columns this labels.
+            f"{units[row['metric']]:<{col_w['unit']}} "
             f"{improved_str:<{col_w['improved']}} "
             f"{_caveats(row):<{col_w['caveat']}}"
         ).rstrip()
@@ -89,6 +194,7 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         f"{'Imp mean':>{col_w['imp']}} "
         f"{ci_label:<{col_w['ci']}} "
         f"{'MDES':>{col_w['mdes']}} "
+        f"{'Unit':<{col_w['unit']}} "
         f"{'% Improved':<{col_w['improved']}} "
         f"{'Caveats':<{col_w['caveat']}}"
     ).rstrip()
@@ -131,6 +237,14 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     lines += [
         "",
         "N sc/att = scenes scored / attempted; per-leg drop reasons: metrics/drops.csv",
+        "Unit applies to Pred mean, Imp mean, CI and MDES. Rows mix seconds, decibels",
+        "  and dB², so these columns are NOT comparable across rows. dB² is a mean",
+        "  SQUARED level difference, not decibels — take its square root for an RMS",
+        "  level error (AC-126).",
+        "Imp mean is a REDUCTION IN |ERROR| against the high-ray reference for the",
+        "  match-reference metrics (T30, EDT, C50, energy_mse) and pred − low for the",
+        "  maximize ones (energy_snr_db); Pred mean is the absolute value. Same unit,",
+        "  different reference point — a negative Imp mean means the error GREW (AC-128).",
         "Caveats — partial-band: the band average is over fewer bands than declared, so",
         "  this split's CI pools improvements computed over DIFFERENT band sets (F-62).",
         "  pred-unresolved: the model produced no measurable value in a band the physical",
