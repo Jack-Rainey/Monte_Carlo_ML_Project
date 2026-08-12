@@ -241,6 +241,26 @@ d0b_t30_jnd_frac: 0.05      # 5% of reference T30
 d0b_edt_jnd_frac: 0.05      # 5% of reference EDT (ISO 3382-1 Annex A: EDT limen == T limen)
 d0b_c50_jnd_db: 1.0         # 1 dB absolute
 
+# ── Ray-budget convergence tolerance (RD-17, RD-263) ──────────────────────────
+# The high leg (`high_ray_budget`) is treated as a CONVERGED REFERENCE by every
+# paired-improvement metric, by D0a's headroom and by D0b's carrier test, and until
+# the RD-17 probe ran nothing had ever checked that. These declare what "converged"
+# means, so the probe reports a verdict against a stated threshold rather than an
+# eyeballed one.
+#
+# Set to the SAME JND tolerances the D0b carrier test uses, deliberately: a
+# reference leg is converged when doubling the rays again would not move a reported
+# quantity by more than the smallest difference a listener could detect. A tighter
+# threshold would be measuring the raytracer's Monte-Carlo noise, not its adequacy.
+#
+# The probe is a TOLERANCE CHECK over a handful of scenes, NOT a CI-backed
+# convergence claim, and must be reported as such (RD-263).
+convergence:
+  t30_frac: 0.05            # matches d0b_t30_jnd_frac
+  c50_db: 1.0               # matches d0b_c50_jnd_db
+  band_energy_frac: 0.05    # per-band energy, relative
+
+
 # ── ISO 3382 evaluation bands (Hz) — design_spec §7 / §3 ──────────────────────
 #
 # DECLARED TWICE, AND BOTH MUST MOVE TOGETHER (RR-116).

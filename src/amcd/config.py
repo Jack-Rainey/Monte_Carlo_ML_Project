@@ -357,6 +357,25 @@ class SplitSpec(BaseModel):
         return not self.axes
 
 
+class ConvergenceTolerance(BaseModel):
+    """When the high ray-budget leg counts as a converged reference (RD-17).
+
+    Set to the same JND tolerances the D0b carrier test uses, deliberately: a
+    reference is converged when doubling the rays again would not move a reported
+    quantity by more than the smallest audible difference. Tighter than that
+    measures the raytracer's Monte-Carlo noise rather than its adequacy.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    #: Relative, against the high leg's own T30.
+    t30_frac: float
+    #: Absolute dB — C50 is already a level difference.
+    c50_db: float
+    #: Relative, per ISO evaluation band.
+    band_energy_frac: float
+
+
 class Margins(BaseModel):
     """Per-axis clearances (m) keeping sources/receivers off the surfaces.
 
@@ -701,6 +720,13 @@ class Config(BaseModel):
     d0b_t30_jnd_frac: float
     d0b_edt_jnd_frac: float
     d0b_c50_jnd_db: float
+
+    #: What "the high leg is a CONVERGED REFERENCE" means, declared rather than
+    #: eyeballed (RD-17, RD-263). Every paired-improvement metric, D0a's headroom
+    #: and D0b's carrier test treat `high_ray_budget` as ground truth, and nothing
+    #: had ever checked it. The RD-17 probe reports against these thresholds — as a
+    #: TOLERANCE CHECK over a handful of scenes, never as a CI-backed claim.
+    convergence: "ConvergenceTolerance"
 
     # ISO 3382 evaluation bands (Hz) — design_spec §7 / §3
     iso_eval_freqs: list[int]
