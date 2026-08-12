@@ -229,6 +229,64 @@ def _ids_lanes_raised_from_their_own_blocks(spec: dict) -> set[str]:
     return raised
 
 
+@lru_cache(maxsize=None)
+def _ids_open_before_this_cycle(partition_name: str) -> frozenset[str]:
+    """OPEN row ids in the ledger as of the commit that DREW this cycle.
+
+    The non-circular discriminator for F-210. What RD-126 forbids is a lane
+    allocating an id that already names a LIVE finding, so the question is "was
+    this id open when the cycle was drawn" — and only history answers it.
+
+    Every lane-side signal is defeated by the offence itself: a lane that
+    allocates a colliding id necessarily writes that id into its own inbox, so an
+    inbox-derived exemption fires precisely in the case it must catch. That was
+    measured on the shipped guard — appending one line naming a live id to a
+    lane's inbox turned the collision green.
+
+    The ADDING commit, not the last-modified one: the partition file is edited
+    throughout its cycle, including by the integration that folds the lanes' own
+    new ids into the ledger.
+
+    Empty set if git cannot answer, which makes the guard STRICTER (a consumed
+    block then reads as a collision) rather than looser.
+    """
+    def _git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=_REPO_ROOT, capture_output=True, text=True, timeout=60
+        ).stdout.strip()
+
+    cycle = partition_name.removesuffix(".yaml")
+    try:
+        # WHERE THE LANES DIVERGED is when the cycle was drawn — the ledger at
+        # that commit is what a lane could have collided with. The partition
+        # FILE's creation is not the same instant: cycle 5's was written during
+        # cycle 4's integration, before cycle 4's own fold had added the ids
+        # cycle 5's lanes would go on to consume.
+        base = ""
+        for ref in _git("branch", "--list", f"lane/*-{cycle}", "--format=%(refname)").splitlines():
+            base = _git("merge-base", "HEAD", ref.strip())
+            if base:
+                break
+        if not base:   # branches retired; fall back to the partition's creation
+            drawn = _git("log", "--diff-filter=A", "--format=%H", "-1", "--",
+                         f"docs/lanes/{partition_name}")
+            base = f"{drawn}^" if drawn else ""
+        if not base:
+            return frozenset()
+        blob = subprocess.run(
+            ["git", "show", f"{base}:docs/review_ledger.md"],
+            cwd=_REPO_ROOT, capture_output=True, text=True, timeout=60,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    out = set()
+    for line in blob.splitlines():
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) > 5 and cells[4].startswith("OPEN"):
+            out.add(cells[1])
+    return frozenset(out)
+
+
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
 def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
     """Rule 6: each lane allocates new ids only from its own declared block, and no
@@ -262,12 +320,12 @@ def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
     # block to "99..99" — F-99 is a live pre-existing row — PASSES as soon as M's
     # inbox names F-99.
     #
-    # Attribution is computed from AUTHORSHIP, not from a bucket: an id is exempt
-    # only if it lies in some lane's own declared block AND appears in THAT lane's
-    # own inbox. Deriving it from a partition list instead would make the guard
-    # depend on bucket hygiene — and RD-264 has since split the fold's output
-    # across two buckets, which would have silently widened the exemption.
-    consumed = _ids_lanes_raised_from_their_own_blocks(spec)
+    # An id is a COLLISION only if it was already a live finding when this cycle
+    # was DRAWN (F-210). Consuming your own block and folding the results makes
+    # those ids OPEN by design — that is rule 6 working — so "OPEN now" is the
+    # wrong test. And every lane-side signal is defeated by the offence itself,
+    # which is why this reads history instead.
+    was_live = _ids_open_before_this_cycle(path.name)
 
     seen: dict[tuple[str, int], str] = {}
     for lane in spec["lanes"]:
@@ -278,14 +336,11 @@ def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
                 "a 'LO..HI' range."
             )
             for n in range(int(lo), int(hi) + 1):
-                assert (
-                    n not in used.get(prefix, ())
-                    or f"{prefix}-{n}" in consumed
-                ), (
+                assert f"{prefix}-{n}" not in was_live, (
                     f"{path.name}: lane {lane['id']}'s block {prefix}-{rng} contains "
-                    f"{prefix}-{n}, which is ALREADY an OPEN ledger row and is NOT "
-                    "one this cycle's fold created. A lane that allocates it would "
-                    "overwrite a live finding (RD-126, F-210)."
+                    f"{prefix}-{n}, which was ALREADY a live OPEN row when this "
+                    "cycle was drawn. A lane allocating it would overwrite a live "
+                    "finding (RD-126, F-210)."
                 )
                 key = (prefix, n)
                 assert key not in seen, (
@@ -591,6 +646,15 @@ def test_a_fix_path_that_does_not_exist_is_declared_as_new(path: Path, spec: dic
 #: eighteen readability findings existed ONLY as prose, so a table-row-only reader
 #: would have declared them absent and lost them at the fold — which is the exact
 #: event this check exists to prevent.
+#: A resolution that already claims a fix. The ledger's own words are the
+#: authority — a hand-maintained list of such rows is exactly what drifted.
+_FIX_CLAIMED_RE = re.compile(
+    r"fix applied|FIXED, awaiting|partial fix applied|CORRECTED, awaiting"
+    r"|RE-DERIVED AT THIS|FIXED IN LANE|BOTH HALVES APPLIED"
+    r"|CONFIRMED AND CLOSED BY MEASUREMENT|APPLIED at this integration",
+    re.IGNORECASE,
+)
+
 _ID_RE = re.compile(r"\b((?:RD|F|AC|RR)-\d+)\b")
 _FOLDED_RE = re.compile(r"\b(?:RD|F|AC|RR)-\d+\b[^\n]{0,80}?folded into\b", re.IGNORECASE)
 #: A `- <ID> — NOT A FINDING…` bullet under the ledger's fold-decisions heading.
@@ -809,3 +873,41 @@ def test_some_lane_carries_a_row_that_can_move_the_gate(path: Path, spec: dict) 
         "(RD-81). Give the gate a lane, or declare `gate.exception` saying why "
         "this cycle deliberately does not (RD-254, RD-266)."
     )
+
+
+@pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
+def test_no_lane_is_assigned_a_row_whose_fix_is_already_claimed(path: Path, spec: dict) -> None:
+    """Planning step 3, asserted for the first time (RD-264, RD-202).
+
+    "Exclude fix-applied rows from every lane; assigning one invites a second fix
+    stacked on a first that nobody checked." That has been the rule since cycle 4
+    and nothing has ever enforced it — cycle 5 then assigned 35 such rows to lane
+    P and 9 to lane S, roughly 40 % of two lanes' apparent workload, and lane P's
+    entire deliverable turned out to be verification rather than work.
+
+    Such a row needs a reviewer VERDICT, which only the integration pass produces.
+    It belongs in `awaiting_re_review:`, never in a lane's `rows:`.
+
+    Derived from the resolution text rather than a hand-maintained list, because a
+    hand-maintained one is what drifted: the ledger says "fix applied … awaiting
+    re-review" in the row itself, so that is the authority.
+    """
+    if path.stem != _CURRENT_CYCLE:
+        pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+
+    claimed = {
+        cells[1]
+        for line in (_REPO_ROOT / "docs" / "review_ledger.md").read_text().splitlines()
+        if len(cells := [c.strip() for c in line.split("|")]) > 7
+        and cells[4].startswith("OPEN")
+        and _FIX_CLAIMED_RE.search(cells[7])
+    }
+    for lane in spec["lanes"]:
+        offending = sorted({row["id"] for row in lane["rows"]} & claimed)
+        assert not offending, (
+            f"{path.name}: lane {lane['id']} is assigned {offending}, whose "
+            "resolutions already claim a fix nobody has re-derived. A second fix "
+            "stacked on an unchecked first is what planning step 3 forbids — move "
+            "them to `awaiting_re_review:`, where the integration reviewer pass "
+            "gives them a verdict (RD-264)."
+        )

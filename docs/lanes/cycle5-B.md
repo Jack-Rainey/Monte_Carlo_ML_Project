@@ -18,9 +18,11 @@ four ways, including with live rows.
 
 A fixed-seed `ci_table.csv` A/B against the baseline captured before the lanes
 started. **Declare your expected effect on that table before you begin** (RD-91,
-RD-149): only the metric lane may legitimately move it, and the detector can only
-discriminate interference from legitimate change if every other lane has declared
-"none" in advance.
+RD-149): the detector is the SET of declarations, not the premise that only the metric
+lane can move the table — that premise is false by construction, since the lane
+owning stats/reporting writes it and the lane owning scenes/ sets the population
+(RD-191/RD-261). A row that moves without a pre-registered declaration is a
+finding.
 
 ## Assigned rows (40)
 
