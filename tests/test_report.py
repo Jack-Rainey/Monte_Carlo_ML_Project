@@ -46,8 +46,8 @@ def _summary_row(metric: str, **overrides) -> dict:
     return row
 
 
-def _render(rows: list[dict], value_domain: str = "db") -> str:
-    cfg = tiny_config()
+def _render(rows: list[dict], value_domain: str = "db", config=None) -> str:
+    cfg = tiny_config() if config is None else config
     with tempfile.TemporaryDirectory() as d:
         run_dir = Path(d)
         (run_dir / "stats").mkdir()
@@ -169,3 +169,108 @@ class TestReportedImprovementsCarryTheirUnit:
     def test_an_unknown_operand_domain_is_refused(self) -> None:
         with pytest.raises(ValueError, match="value_domain"):
             _render([_summary_row("energy_mse")], value_domain="quefrency")
+
+
+class TestTheUnconvergedReferenceReachesTheReader:
+    """AC-187: the ray-budget probe measured that the high leg is NOT a converged
+    reference for C50 — worst deviation 3.24 dB against the 1.0 dB ISO JND.
+
+    Every paired improvement in this table is computed against that leg, so this is
+    a caveat on the GROUND TRUTH rather than on the scored population, and the
+    existing caveat machinery could not express it: a C50 row can be 12/12 scored,
+    fully band-resolved and low-variance, and still rest on a premise measured
+    false. It therefore appears on every row of the metric, in every split.
+    """
+
+    def test_every_row_of_an_unconverged_metric_carries_the_caveat(self) -> None:
+        txt = _render([_summary_row("C50"), _summary_row("T30")])
+        c50 = next(l for l in txt.splitlines() if l.startswith("C50"))
+        t30 = next(l for l in txt.splitlines() if l.startswith("T30"))
+        assert "reference unconverged" in c50, c50
+        assert "reference unconverged" not in t30, (
+            "T30 is measured CONVERGED (16/18 cells within 5 %) — labelling it too "
+            "would make the caveat meaningless"
+        )
+
+    def test_a_fully_scored_row_still_carries_it(self) -> None:
+        """The point of the row: nothing about the scored population reveals this."""
+        txt = _render([_summary_row("C50", n_scored=3, n_attempted=3)])
+        c50 = next(l for l in txt.splitlines() if l.startswith("C50"))
+        assert "3/3" in c50 and "reference unconverged" in c50, c50
+
+    def test_the_footer_states_the_measurement_and_the_tolerance(self) -> None:
+        """"Unconverged" alone is not actionable — 3.24 dB against a 1.0 dB JND is
+        a different fact from 1.1 dB."""
+        txt = _render([_summary_row("C50")])
+        assert "REFERENCE CONVERGENCE" in txt
+        assert "3.24 dB" in txt, txt
+        assert "12/20" in txt, txt
+        assert "declared 1 dB" in txt, txt
+
+    def test_the_csv_carries_it_too(self) -> None:
+        """AC-129's rule: the machine-readable artifact is the one a downstream
+        analysis opens, so it must not ship the improvement without the caveat."""
+        import csv
+        import tempfile
+
+        cfg = tiny_config()
+        with tempfile.TemporaryDirectory() as d:
+            run_dir = Path(d)
+            (run_dir / "stats").mkdir()
+            (run_dir / "stats" / "summary.json").write_text(
+                json.dumps([_summary_row("C50"), _summary_row("T30")])
+            )
+            (run_dir / "preprocessed").mkdir()
+            (run_dir / "preprocessed" / "meta.json").write_text(
+                json.dumps({"value_domain": "db"})
+            )
+            run_report(cfg, run_dir, QUIET)
+            rows = list(csv.DictReader(
+                (run_dir / "report" / "metrics_table.csv").open()
+            ))
+        by_metric = {r["metric"]: r["reference_converged"] for r in rows}
+        assert by_metric["C50"] == "False", by_metric
+        assert by_metric["T30"] == "True", by_metric
+
+    def test_a_declaration_this_run_cannot_apply_is_LOGGED_not_silent(self) -> None:
+        """A caveat that matches no reported metric is a SKIP, and this project logs
+        every skip with its reason.
+
+        Not refused: a run may legitimately report a subset — the energy metrics
+        without the ISO ones — and raising there would fail a correct config on a
+        correct run. But a misspelt metric name would otherwise vanish entirely,
+        taking the finding with it, so the footer names it either way.
+        """
+        cfg = tiny_config()
+        cfg.convergence.reference_unconverged = {
+            "C80": cfg.convergence.reference_unconverged["C50"]
+        }
+        txt = _render([_summary_row("C50")])
+        assert "C80" not in txt, "the caveat was applied to a metric it does not name"
+
+        txt = _render([_summary_row("C50")], config=cfg)
+        assert "C80: declared unconverged, but SKIPPED" in txt, txt
+        c50 = next(l for l in txt.splitlines() if l.startswith("C50 "))
+        assert "reference unconverged" not in c50, (
+            "a declaration for C80 must not caveat C50's rows"
+        )
+
+    def test_nothing_is_said_when_the_reference_is_converged(self) -> None:
+        """The footer must not carry a permanent paragraph about a resolved
+        concern: if a later probe clears C50, emptying the map clears the text."""
+        cfg = tiny_config()
+        cfg.convergence.reference_unconverged = {}
+        with tempfile.TemporaryDirectory() as d:
+            run_dir = Path(d)
+            (run_dir / "stats").mkdir()
+            (run_dir / "stats" / "summary.json").write_text(
+                json.dumps([_summary_row("C50")])
+            )
+            (run_dir / "preprocessed").mkdir()
+            (run_dir / "preprocessed" / "meta.json").write_text(
+                json.dumps({"value_domain": "db"})
+            )
+            run_report(cfg, run_dir, QUIET)
+            txt = (run_dir / "report" / "summary.txt").read_text()
+        assert "REFERENCE CONVERGENCE" not in txt
+        assert "reference unconverged" not in txt

@@ -384,6 +384,43 @@ class ConvergenceTolerance(BaseModel):
     #: Relative, per ISO evaluation band.
     band_energy_frac: float
 
+    #: Metrics the probe found the reference leg is NOT converged for, each with the
+    #: measurement (AC-187). Absent from this map = converged.
+    #:
+    #: Every paired improvement treats the high leg as ground truth. Where that
+    #: premise is measured false the number is still reported — suppressing it would
+    #: hide the finding rather than disclose it — but it cannot be reported bare, so
+    #: `reporting/tables.py` renders a caveat on exactly these metrics' rows.
+    #:
+    #: A MAP, not a flag, because "unconverged" is not a yes/no a reader can act on:
+    #: 3.24 dB against a 1.0 dB tolerance is a different fact from 1.1 dB, and the
+    #: cell counts say how much of the probe missed rather than only that some did.
+    reference_unconverged: dict[str, "UnconvergedMetric"] = {}
+
+
+class UnconvergedMetric(BaseModel):
+    """What the ray-budget probe measured for one metric it failed (AC-187)."""
+
+    model_config = {"extra": "forbid"}
+
+    #: Largest observed deviation between the reference budget and the doubled one,
+    #: in `unit`.
+    worst_deviation: float
+    #: The tolerance it was judged against, in the same `unit`. Declared here rather
+    #: than looked up from the scalars above by metric name: that lookup would be a
+    #: hidden map (`C50` -> `c50_db`, `T30` -> `t30_frac`) which a new metric would
+    #: silently miss, and the two are in different units besides.
+    tolerance: float
+    #: The unit `worst_deviation` is in — dB for C50, a fraction for T30. Declared
+    #: rather than inferred from the metric name so the caveat renders a quantity a
+    #: reader can check against the tolerance beside it.
+    unit: str
+    #: Scored (scene, band) cells within tolerance, out of `n_cells`. Reported as a
+    #: pair because "12 of 20" and "12 of 200" are different findings, and because
+    #: unscored cells are not evidence of convergence.
+    n_within_tolerance: int
+    n_cells: int
+
 
 class MetricOctaveFilter(BaseModel):
     """The octave-band filter the reported ISO-3382 metrics are computed through.

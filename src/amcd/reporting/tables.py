@@ -110,6 +110,62 @@ def _stamped_value_domain(run_dir: Path, config=None) -> str:
     return stamped
 
 
+def _unconverged_reference_footer(config: Config, unapplied: list[str]) -> list[str]:
+    """Footer lines for every metric whose REFERENCE LEG is not converged (AC-187).
+
+    The other caveats in this table describe the scored population — how many bands
+    survived, how noisy the estimator is at this decay. This one describes the
+    GROUND TRUTH: `improvement` for a match-reference metric is
+    |low − high| − |pred − high|, so a high leg that moves with the ray budget moves
+    every term in it, and no amount of scoring discipline detects that from inside
+    the run.
+
+    Each entry renders its MEASUREMENT beside its TOLERANCE, because "unconverged"
+    alone is not actionable — 3.24 dB against a 1.0 dB JND is a different fact from
+    1.1 dB, and a reader deciding whether to quote a C50 absolute needs the size.
+
+    `unapplied` names declared metrics this run does not report. Listed rather than
+    refused: reporting a subset is legitimate (a run may carry the energy metrics
+    and not the ISO ones), but a misspelt metric name would otherwise vanish, and
+    this project logs every skip with its reason.
+
+    Returns nothing at all when the map is empty, so clearing it after a future
+    probe clears the text — the footer never carries a paragraph about a resolved
+    concern.
+    """
+    unconverged = config.convergence.reference_unconverged
+    if not unconverged:
+        return []
+
+    applied = sorted(set(unconverged) - set(unapplied))
+    lines = [
+        "REFERENCE CONVERGENCE — a caveat on the GROUND TRUTH, not on the scored",
+        "  population. Every paired improvement here is measured against the high-ray",
+        "  leg, and the ray-budget probe measured that it is not a converged one:",
+    ]
+    for metric in applied:
+        m = unconverged[metric]
+        lines.append(
+            f"  {metric}: worst deviation {m.worst_deviation:g} {m.unit}, "
+            f"{m.n_within_tolerance}/{m.n_cells} cells within the declared "
+            f"{m.tolerance:g} {m.unit}. Rows carry `reference unconverged`."
+        )
+    for metric in sorted(unapplied):
+        lines.append(
+            f"  {metric}: declared unconverged, but SKIPPED — this run does not "
+            f"report it, so no row carries the caveat."
+        )
+    if applied:
+        lines += [
+            "  The values ARE reported: suppressing them would hide the finding rather",
+            "  than disclose it. But no absolute or improvement for these metrics may",
+            "  be compared against Research I or the literature on this run's strength.",
+            "  Raising high_ray_budget is not a fix — 800k costs 35x for 4x the rays",
+            "  and is itself unverified (AC-187).",
+        ]
+    return lines
+
+
 def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     stats_dir = run_dir / "stats"
     report_dir = run_dir / "report"
@@ -144,6 +200,14 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         for row in summary
     }
 
+    # A declared unconverged-reference caveat that matches no reported metric is a
+    # SKIP, and this project logs every skip as (unit, reason) rather than letting
+    # it pass unremarked (AC-187). It is not fatal: a run may legitimately report a
+    # subset — the energy metrics without the ISO ones — and refusing there would
+    # make a correct config fail on a correct run. But it is also how a typo hides,
+    # so the footer names it either way.
+    unapplied = sorted(set(config.convergence.reference_unconverged) - set(units))
+
     def _caveats(row: dict) -> str:
         """Composition caveats on the scored population (F-62 / AC-25 / RD-78).
 
@@ -167,6 +231,13 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             # below the declared n cannot reach its nominal coverage, so calling it
             # a "95 % CI" is the overclaim (F-M7/F-105).
             parts.append("CI uncalibrated at this n")
+        if row["metric"] in config.convergence.reference_unconverged:
+            # NOT a property of this split's data — a property of the REFERENCE
+            # every row of this metric is measured against (AC-187). It therefore
+            # appears on every C50 row in every split, including fully scored ones,
+            # which is the point: `12/12` otherwise reads as a clean result for a
+            # comparison whose ground truth is measured not to be ground truth.
+            parts.append("reference unconverged")
         if row.get("n_resolvability_limited"):
             # Also not a drop: the PHYSICAL legs reported a value from a band their
             # own octave filter cannot resolve. Scored and disclosed rather than
@@ -291,6 +362,7 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         "  Scored and disclosed, never censored — censoring an estimator on its own",
         "  value biases the survivors (AC-38) — but the absolute is the least",
         "  trustworthy in the table (F-M2).",
+        *_unconverged_reference_footer(config, unapplied),
         "=" * 70,
     ]
     summary_txt = "\n".join(lines)
@@ -306,6 +378,12 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # dB-valued improvement answers only the first.
     df = df.copy()
     df["unit"] = df["metric"].map(units)
+    # AC-187, carried into the machine-readable artifact for the AC-129 reason the
+    # unit is: a downstream analysis opens this file, not summary.txt, and a C50
+    # improvement whose reference is unconverged must not arrive there bare.
+    df["reference_converged"] = ~df["metric"].isin(
+        config.convergence.reference_unconverged
+    )
     df.to_csv(report_dir / "metrics_table.csv", index=False)
 
     # Supplementary bundle: copy config stamp + versions. Provenance, same gate

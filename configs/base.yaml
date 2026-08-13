@@ -329,6 +329,48 @@ convergence:
   c50_db: 1.0               # matches d0b_c50_jnd_db
   band_energy_frac: 0.05    # per-band energy, relative
 
+  # ── THE PROBE RAN, AND C50 FAILED (AC-187) ──────────────────────────────────
+  #
+  # 200,000 vs 800,000 rays over 10 scenes through the production ISO path:
+  #
+  #     T30   16/18 scored cells within the declared 5 %   worst 7.0 %
+  #     C50   12/20 scored cells within the declared 1 dB  worst 3.24 dB
+  #
+  # 3.24 dB is 3.2x the ISO JND this file declares. Control for single-realization
+  # variance — nominally identical 200k/210k/220k budgets, which no convergence
+  # argument distinguishes and for which pygsound exposes no RNG seed — puts the
+  # 200k-vs-800k delta at 3.5x to 21.2x that spread in 5 of 6 cells. The exception
+  # is the most anechoic cell at 500 Hz, whose spread (2.038 dB) exceeds the
+  # tolerance itself, so that cell is UNASSESSABLE rather than converged.
+  #
+  # So every paired C50 improvement treats as ground truth a leg that is measured
+  # not to be one, and the report has to say so on the rows it affects — which is
+  # what this key is for. `c50_db` is NOT loosened to make the failure go away:
+  # it is the ISO JND, and moving it would change what "converged" means in order
+  # to hide the result.
+  #
+  # TWO THINGS ARE NOT ESTABLISHED and must not be read in: that 800k WOULD
+  # converge (verifying it needs 3.2M rays at ~10 h/scene, which is not
+  # affordable), and that the deficit is uniform (it grows with room size and is
+  # worst at 1000 Hz). Raising `high_ray_budget` is therefore a decision to spend
+  # ~9 days for an unverified reference — cost is strongly superlinear, 30.5 s at
+  # 200k against 1067 s at 800k, 35x for 4x the rays — not a fix.
+  #
+  # E1 is unaffected either way: Research I pins 200,000 (paper Figure 5), so
+  # faithfulness fixes the budget regardless of what convergence would prefer.
+  #
+  # Declared per metric so the reference's adequacy is an explicit contract rather
+  # than an assumption each metric inherits silently. A metric absent from this map
+  # is one the probe found converged; `reporting/tables.py` renders a caveat for
+  # every metric present in it, and refuses a name that is not a reported metric.
+  reference_unconverged:
+    C50:
+      worst_deviation: 3.24
+      tolerance: 1.0          # == c50_db above; restated so the caveat renders both
+      unit: dB
+      n_within_tolerance: 12
+      n_cells: 20
+
 
 # ── ISO 3382 evaluation bands (Hz) — design_spec §7 / §3 ──────────────────────
 #

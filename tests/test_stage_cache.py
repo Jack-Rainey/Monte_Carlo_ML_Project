@@ -882,6 +882,13 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         "d0b_edt_jnd_frac": 0.07,
         "d0b_c50_jnd_db": 1.5,
         "d0b_min_scored_frac": 0.5,
+        # AC-187: the convergence verdict is RENDERED in the report (per-row caveat,
+        # footer, CSV column), so a cached report must not serve a stale one. It was
+        # exempt only while nothing read it.
+        "convergence": {
+            "t30_frac": 0.09, "c50_db": 2.0, "band_energy_frac": 0.09,
+            "reference_unconverged": {},
+        },
         "bootstrap_n_resamples": 500,
         "bootstrap_alpha": 0.1,
         "bootstrap_min_n_for_calibrated_ci": 6,

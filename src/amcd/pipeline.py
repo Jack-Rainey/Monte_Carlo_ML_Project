@@ -325,6 +325,12 @@ def _report_fingerprint(config: Config) -> dict:
     fingerprint over this stage's own inputs cannot see the numbers it formats.
     """
     return {
+        # AC-187's verdict is RENDERED here — a per-row caveat, a footer paragraph
+        # and a CSV column — so it is a reported quantity and a cached report must
+        # not serve a stale one. This is exactly the trigger the field's former
+        # FINGERPRINT_EXEMPT_FIELDS entry named ("non-exempt the moment a
+        # convergence verdict reaches a reported table").
+        "convergence": config.convergence.model_dump(mode="json"),
         "report_format": config.report_format,
         # THE OPERAND DOMAIN THE UNITS ARE RENDERED FROM (F-162). `report` reads
         # `preprocessed/meta.json` `value_domain` to decide whether an
@@ -515,15 +521,6 @@ STAGE_UPSTREAM: dict[str, str | None] = {
 #: reason must contain "Non-exempt", or say the field is "fingerprinted through"
 #: another key.
 FINGERPRINT_EXEMPT_FIELDS: dict[str, str] = {
-    "convergence": (
-        "RD-17's ray-budget convergence tolerances (config.py `ConvergenceTolerance`). "
-        "Read ONLY by scripts/rd17_convergence_probe.py, which is an engineering-"
-        "feasibility probe outside the pipeline and writes no canonical artifact — no "
-        "stage consumes these, so no stage output can go stale when they move. "
-        "Non-exempt the moment a convergence verdict reaches a reported table or a "
-        "canonical artifact: it must then be fingerprinted through whichever stage "
-        "carries it, or a stale verdict would be served as current."
-    ),
     "run_id": (
         "Experiment-ledger label with no pipeline consumer (config.py `run_id`). "
         "Fingerprinting it would discard an expensive artifact on a relabel. "
