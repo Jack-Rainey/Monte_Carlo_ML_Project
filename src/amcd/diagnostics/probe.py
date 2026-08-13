@@ -49,6 +49,7 @@ import torch
 from ..config import Config
 from ..data.normalization import denormalize
 from ..evaluation.room_acoustic import (
+    channel_per_band_metrics,
     _shared_truncation_per_band,
     channel_band_avg_metrics,
 )
@@ -222,6 +223,66 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
 # D0b — carrier ceiling test
 # ---------------------------------------------------------------------------
 
+def _band_intersected_pair(
+    oracle_w: np.ndarray, reference_w: np.ndarray, *, config,
+    iso_eval_freqs: list[float], shared_trunc,
+) -> tuple[dict[str, float], dict[str, float], dict[str, str]]:
+    """Band-average two legs over the bands BOTH resolve, plus the drop reasons.
+
+    `channel_band_avg_metrics` averages one IR over its own surviving bands, which
+    is right for a standalone IR and wrong for a comparison: two legs of the same
+    scene can then be averaged over different band sets, and the difference between
+    those sets shows up as a residual with no acoustic cause. The eval stage
+    already intersects (AC-08); this is the same rule for D0b (F-101).
+
+    A band excluded here is recorded with the leg and the reason, so a residual
+    computed over fewer bands is visible rather than silent.
+    """
+    per_leg = {
+        leg: channel_per_band_metrics(
+            ir, sample_rate=config.sample_rate, iso_eval_freqs=iso_eval_freqs,
+            onset_rel_db=config.metric_onset_rel_db,
+            band_resolvability_margin=config.metric_band_resolvability_margin,
+            min_decay_range_db=config.metric_min_decay_range_db,
+            trunc_idx_per_band=shared_trunc,
+        )
+        for leg, ir in (("oracle", oracle_w), ("reference", reference_w))
+    }
+    oracle_vals: dict[str, float] = {}
+    ref_vals: dict[str, float] = {}
+    reasons: dict[str, str] = {}
+    for metric in ("T30", "EDT", "C50"):
+        kept, dropped = [], []
+        for b, fc in enumerate(iso_eval_freqs):
+            finite = {
+                leg: not np.isnan(bands[b][0][metric]) and metric not in bands[b][2]
+                for leg, bands in per_leg.items()
+            }
+            if all(finite.values()):
+                kept.append(b)
+            else:
+                lost = [leg for leg, ok in finite.items() if not ok]
+                dropped.append(f"{fc:g} Hz ({'/'.join(lost)})")
+        if not kept:
+            oracle_vals[metric] = float("nan")
+            ref_vals[metric] = float("nan")
+            reasons[metric] = (
+                f"no eval band is resolvable in BOTH legs: {', '.join(dropped)}"
+            )
+            continue
+        oracle_vals[metric] = float(np.mean(
+            [per_leg["oracle"][b][0][metric] for b in kept]))
+        ref_vals[metric] = float(np.mean(
+            [per_leg["reference"][b][0][metric] for b in kept]))
+        if dropped:
+            reasons[metric] = (
+                f"partial: averaged over {len(kept)} of {len(iso_eval_freqs)} bands; "
+                f"excluded from BOTH legs to keep the residual comparable: "
+                f"{', '.join(dropped)}"
+            )
+    return oracle_vals, ref_vals, reasons
+
+
 def _run_d0b(
     config: Config,
     preprocessed_dir: Path,
@@ -320,20 +381,22 @@ def _run_d0b(
                 iso_eval_freqs=iso_eval_freqs,
                 onset_rel_db=config.metric_onset_rel_db,
             )
-            oracle_metrics, oracle_nan_reasons = channel_band_avg_metrics(
-                oracle_ir[0], sample_rate=config.sample_rate,
-                iso_eval_freqs=iso_eval_freqs, onset_rel_db=config.metric_onset_rel_db,
-                band_resolvability_margin=config.metric_band_resolvability_margin,
-                min_decay_range_db=config.metric_min_decay_range_db,
-                trunc_idx_per_band=shared_trunc,
+            # BAND-INTERSECTED ACROSS LEGS, as eval does (AC-08 / F-101).
+            #
+            # Averaging each leg over ITS OWN surviving bands lets the residual be
+            # decided by band COMPOSITION rather than by acoustics: measured at an
+            # identical true T60 = 0.045 s with only different noise realizations,
+            # the oracle averaged [1000] while the reference averaged [500, 1000],
+            # giving a residual of 0.00244 from composition alone. The asymmetry is
+            # DIRECTIONAL, because the oracle sits on the noisier low-ray carrier
+            # and so loses bands more often — so this inflates the very residual
+            # D0b compares against a JND.
+            oracle_metrics, ref_metrics, band_reasons = _band_intersected_pair(
+                oracle_ir[0], high_ref_ir[0], config=config,
+                iso_eval_freqs=iso_eval_freqs, shared_trunc=shared_trunc,
             )
-            ref_metrics, ref_nan_reasons = channel_band_avg_metrics(
-                high_ref_ir[0], sample_rate=config.sample_rate,
-                iso_eval_freqs=iso_eval_freqs, onset_rel_db=config.metric_onset_rel_db,
-                band_resolvability_margin=config.metric_band_resolvability_margin,
-                min_decay_range_db=config.metric_min_decay_range_db,
-                trunc_idx_per_band=shared_trunc,
-            )
+            oracle_nan_reasons = band_reasons
+            ref_nan_reasons = band_reasons
 
             residuals: dict[str, float] = {}
             for key in ("T30", "EDT", "C50"):

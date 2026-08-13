@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
+
 from amcd.config import Config
 from amcd.pipeline import Pipeline
 from amcd.runtime import Verbosity
@@ -247,3 +249,63 @@ class TestThePerSplitRecordSchema:
         assert seen["unscored"] >= 2 and seen["scored"] >= 2, (
             f"fixture is inert — both shapes must occur: {seen}"
         )
+
+
+class TestD0bComparesTheSameBands:
+    """F-101: the D0b residual must be decided by acoustics, not by which bands
+    each leg happened to keep.
+
+    `channel_band_avg_metrics` averages ONE IR over its own surviving bands, which
+    is right for a standalone IR and wrong for a comparison. Averaging each leg
+    separately let oracle and reference span different band sets, and the
+    difference between the sets appeared as a residual with no acoustic cause —
+    measured at an identical true T60 with only different noise realizations. The
+    asymmetry is directional, because the oracle sits on the noisier low-ray
+    carrier and loses bands more often, so it inflates the residual D0b compares
+    against a JND. The eval stage already intersects (AC-08).
+    """
+
+    FREQS = [500.0, 1000.0]
+
+    class _Cfg:
+        sample_rate = 48000
+        metric_onset_rel_db = -20.0
+        metric_band_resolvability_margin = 2.0
+        metric_min_decay_range_db = {"T30": 45.0, "EDT": 20.0}
+
+    @staticmethod
+    def _decay(t60: float, seed: int, n: int = 24000) -> np.ndarray:
+        t = np.arange(n) / 48000
+        rng = np.random.default_rng(seed)
+        return (rng.standard_normal(n) * np.exp(-6.907 * t / t60)).astype(np.float32)
+
+    def test_both_legs_average_over_one_band_set(self) -> None:
+        """The property, asserted directly: whatever is dropped is dropped from
+        BOTH legs, so a surviving residual cannot be composition."""
+        from amcd.diagnostics.probe import _band_intersected_pair
+        from amcd.evaluation.room_acoustic import channel_per_band_metrics
+
+        oracle = self._decay(0.045, 11)
+        reference = self._decay(0.045, 12)
+        oracle_vals, ref_vals, _reasons = _band_intersected_pair(
+            oracle, reference, config=self._Cfg,
+            iso_eval_freqs=self.FREQS, shared_trunc=None,
+        )
+        # A metric is scored for both legs or for neither — never one.
+        for metric in ("T30", "EDT", "C50"):
+            assert np.isnan(oracle_vals[metric]) == np.isnan(ref_vals[metric]), (
+                f"{metric} is scored for one leg and not the other, so the D0b "
+                f"residual for it would compare different band sets (F-101)"
+            )
+
+    def test_a_partial_average_says_which_bands_it_lost(self) -> None:
+        """A residual over fewer bands is still reported — but never silently."""
+        from amcd.diagnostics.probe import _band_intersected_pair
+
+        _o, _r, reasons = _band_intersected_pair(
+            self._decay(0.045, 11), self._decay(0.045, 12), config=self._Cfg,
+            iso_eval_freqs=self.FREQS, shared_trunc=None,
+        )
+        assert reasons, "a dropped band left no reason"
+        for reason in reasons.values():
+            assert "Hz" in reason and ("partial" in reason or "no eval band" in reason)
