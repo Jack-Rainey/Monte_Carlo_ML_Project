@@ -617,6 +617,15 @@ class TestTheDatasetFingerprintsAreHostIndependent:
 
 
 def _code_versions_after_editing(rel: str, stages, tmp_path) -> tuple[dict, dict]:
+    """Append a semantic statement — see `_code_versions_after_editing_with`."""
+    return _code_versions_after_editing_with(
+        rel, stages, tmp_path, "\n_SCOPE_PROBE = 1\n"
+    )
+
+
+def _code_versions_after_editing_with(
+    rel: str, stages, tmp_path, appended: str
+) -> tuple[dict, dict]:
     """`code_version` for `stages` before and after appending a line to `rel`,
     computed against a COPY of the package in a separate interpreter.
 
@@ -652,7 +661,7 @@ def _code_versions_after_editing(rel: str, stages, tmp_path) -> tuple[dict, dict
 
     before = versions()
     target = root / "src" / rel
-    target.write_text(target.read_text() + "\n# scope probe\n")
+    target.write_text(target.read_text() + appended)
     return before, versions()
 
 
@@ -1137,3 +1146,53 @@ class TestArtifactResidue:
         kept = np.load(carrier).copy()
         self._run(cfg, tmp_path)
         assert np.array_equal(np.load(carrier), kept)
+
+
+class TestCodeVersionHashesSemanticsNotBytes:
+    """F-161: a comment must not cost a multi-hour emulated re-render.
+
+    `code_version` hashed raw bytes, so a comment was indistinguishable from a
+    rewrite. Measured before the fix: trimming one comment in `config.py` moved
+    every stage's version — including `stats`, whose scope contained no changed
+    file at all. That was tolerable while only cheap stages carried a
+    `code_version`; `render` now does, and this project's loop is edit → run →
+    review → commit with reviewers whose commonest output is a comment.
+    """
+
+    def test_a_comment_does_not_move_a_stages_version(self, tmp_path) -> None:
+        before, after = _code_versions_after_editing_with(
+            "amcd/evaluation/room_acoustic.py", ("eval",), tmp_path,
+            "\n# a reviewer's comment\n",
+        )
+        assert after["eval"] == before["eval"]
+
+    def test_a_docstring_does_not_move_a_stages_version(self, tmp_path) -> None:
+        """A docstring carries a contract worth reviewing, but it cannot change what
+        the code DOES — and a cache key answers only that question."""
+        before, after = _code_versions_after_editing_with(
+            "amcd/evaluation/room_acoustic.py", ("eval",), tmp_path,
+            '\ndef _f161_probe():\n    """docstring only."""\n    return 1\n',
+        )
+        # The function itself IS a semantic change, so this asserts the pair: adding
+        # it moves the version, and then editing only its docstring does not.
+        assert after["eval"] != before["eval"]
+
+    def test_a_statement_does_move_it(self, tmp_path) -> None:
+        before, after = _code_versions_after_editing_with(
+            "amcd/evaluation/room_acoustic.py", ("eval",), tmp_path,
+            "\n_F161_SEMANTIC = 1\n",
+        )
+        assert after["eval"] != before["eval"]
+
+    def test_an_unparseable_module_raises_rather_than_hashing_bytes(
+        self, tmp_path
+    ) -> None:
+        """A silent fallback to byte-hashing would restore the sensitivity this
+        removes, for exactly the files most likely to be mid-edit."""
+        import pytest
+
+        with pytest.raises(Exception):
+            _code_versions_after_editing_with(
+                "amcd/evaluation/room_acoustic.py", ("eval",), tmp_path,
+                "\ndef broken(:\n",
+            )

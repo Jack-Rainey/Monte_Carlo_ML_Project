@@ -21,6 +21,7 @@ fallback edit does not invalidate every fingerprinted stage.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import platform
 import subprocess
@@ -142,8 +143,51 @@ def code_version(scope: tuple[str, ...]) -> str:
             # The relative path participates, so moving or renaming a module
             # changes the version even when the bytes are unchanged.
             digest.update(path.relative_to(_PACKAGE_ROOT).as_posix().encode())
-            digest.update(path.read_bytes())
+            digest.update(_semantic_digest(path).encode())
     return digest.hexdigest()
+
+
+def _semantic_digest(path: Path) -> str:
+    """A module's SEMANTICS, so a comment or a docstring edit is not a code change.
+
+    This hashed raw bytes, which made a comment indistinguishable from a rewrite
+    (F-161). That was tolerable while only cheap stages carried a `code_version`;
+    it is not now that `render` does, because this project's loop is edit → run →
+    review → commit and its reviewers' most common output is a comment. Measured
+    before the fix: trimming one comment in `config.py` moved every stage's
+    version, including `stats`, whose scope contains no changed file at all.
+    A comment-only edit would now force a multi-hour emulated re-render.
+
+    So the AST is hashed with docstrings stripped. A docstring in this project
+    carries a contract and is worth reviewing — but it cannot change what the code
+    DOES, and a cache key answers only that question. Anything that alters
+    behaviour, including a changed literal or a reordered statement, still moves
+    the digest.
+
+    Raises on a file that will not parse rather than falling back to bytes: a
+    module that cannot be parsed cannot be run, and a silent fallback would restore
+    the very sensitivity this removes for exactly the files most likely to be
+    mid-edit.
+    """
+    source = path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        raise ValueError(
+            f"{path} does not parse, so its contribution to code_version cannot be "
+            f"computed: {exc}. A module that cannot be parsed cannot be imported "
+            f"either, so this is a real error rather than a hashing detail."
+        ) from None
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                 ast.AsyncFunctionDef)):
+            continue
+        body = node.body
+        if (body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            node.body = body[1:] or [ast.Pass()]
+    return ast.dump(tree)
 
 
 def host_platform() -> str:
