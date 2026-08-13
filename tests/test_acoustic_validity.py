@@ -490,3 +490,59 @@ class TestEvalBandsAgainstTheBackend:
         cfg = Config.load(_BASE, Path("configs/overlays/simulator_dry_run.yaml"), layer)
         assert 8000 in cfg.iso_eval_freqs
         _check_eval_bands_against_the_backend(cfg)  # must not raise
+
+
+class TestOneAbsorptionClip:
+    """AC-41: the room the report DESCRIBES and the room the scaffold RENDERS must
+    be the same room.
+
+    Both clip absorption before their closed forms — the endpoints are singular,
+    not merely extreme, since Sabine and the room constant divide by alpha and by
+    (1-alpha). They clipped to DIFFERENT intervals: 1e-6 in the generator and 0.01
+    in the scaffold, so above alpha 0.99 the two disagreed with nothing recording
+    it. `ceiling_absorptive` declares alpha up to 0.98 and `material_regimes` can
+    declare more, so this is inside the study's own reachable range.
+    """
+
+    def test_both_call_sites_use_the_shared_clip(self) -> None:
+        import inspect
+
+        from amcd.scenes import generator
+        from amcd.simulators import dry_run
+
+        for module in (generator, dry_run):
+            src = inspect.getsource(module)
+            assert "np.clip(scene.material_absorption" not in src, module.__name__
+            assert "np.clip(absorption" not in src, module.__name__
+            assert "clip_absorption(" in src, module.__name__
+
+    def test_a_clipped_alpha_is_disclosed_not_swallowed(self) -> None:
+        """A clipped alpha means the value used is not the value declared, so the
+        reader of an IR is owed it exactly as the reader of the report is."""
+        from amcd.acoustics import ALPHA_CLIP, clip_absorption
+
+        lo, hi = ALPHA_CLIP
+        assert clip_absorption(0.5) == (0.5, False)
+        assert clip_absorption(0.0)[1] is True
+        assert clip_absorption(1.0) == (hi, True)
+        assert lo > 0.0 and hi < 1.0, "the interval must be OPEN — both ends are singular"
+
+    def test_the_scaffold_stamps_whether_it_clipped(self) -> None:
+        from amcd.simulators.base import SceneSpec, build_simulator
+
+        cfg = Config.load(_BASE, Path("configs/overlays/simulator_dry_run.yaml"))
+        sim = build_simulator(
+            cfg.simulator.name, cfg.simulator.params, n_channels=cfg.n_channels,
+            n_samples=cfg.n_samples, sample_rate=cfg.sample_rate,
+        )
+        scene = SceneSpec(
+            scene_id="clip", seed=1, geometry_family="shoebox", dims=(6.0, 5.0, 3.0),
+            material_absorption=0.98, source_pos=(0.5, 0.5, 1.5),
+            receiver_pos=(5.5, 4.5, 1.5),
+        )
+        meta = sim.render(scene, cfg.low_ray_budget).meta
+        assert meta["alpha_clipped"] is False, (
+            "alpha 0.98 is inside the declared ceiling_absorptive range and must "
+            "not be clipped — if it is, the scaffold renders a different room than "
+            "placement_report.json describes"
+        )

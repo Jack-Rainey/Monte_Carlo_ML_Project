@@ -34,6 +34,31 @@ SPEED_OF_SOUND_M_S = 343.0
 SABINE_K = 24.0 * math.log(10.0) / SPEED_OF_SOUND_M_S
 
 
+#: Absorption is clipped to this OPEN interval before any closed form uses it.
+#: Sabine, Eyring, the room constant and the critical distance all divide by alpha
+#: or by (1-alpha), so the endpoints are singular rather than merely extreme.
+#:
+#: ONE interval, shared, because the report and the scaffold used different ones —
+#: `1e-6` here and `0.01` in `dry_run` — so above alpha 0.99 the room the report
+#: DESCRIBED and the room the scaffold RENDERED were different rooms, with nothing
+#: recording it (AC-41). That is the divergence this module exists to prevent, on a
+#: third quantity after the T60s and the speed of sound.
+ALPHA_CLIP = (1e-6, 1.0 - 1e-6)
+
+
+def clip_absorption(absorption: float) -> tuple[float, bool]:
+    """`absorption` inside `ALPHA_CLIP`, and whether clipping changed it.
+
+    Returns the flag rather than swallowing it: a clipped alpha means the value
+    used is not the value declared, and every caller that publishes a number
+    derived from it owes the reader that fact — the scaffold stamps
+    `alpha_clipped` beside `rt60_clipped` for exactly this reason.
+    """
+    lo, hi = ALPHA_CLIP
+    clipped = min(max(float(absorption), lo), hi)
+    return clipped, clipped != float(absorption)
+
+
 def box_volume_and_surface(dims: tuple[float, float, float]) -> tuple[float, float]:
     """Volume (m³) and total interior surface (m²) of a shoebox.
 

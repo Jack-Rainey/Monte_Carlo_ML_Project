@@ -28,6 +28,7 @@ import numpy as np
 
 from ..acoustics import (
     box_volume_and_surface,
+    clip_absorption,
     critical_distance,
     min_measurement_distance,
     diffuse_field_drr_db,
@@ -387,7 +388,7 @@ def _room_acoustics(
     # α_eff = 1−sqrt(1−α); at that α_eff every T60 here is 1.45-1.98× longer. Stated
     # at function scope because the flag it matters most for is the record-length
     # one, ~60 lines below (AC-54/AC-55/AC-56).
-    alpha = float(np.clip(absorption, 1e-6, 1.0 - 1e-6))
+    alpha, _alpha_clipped = clip_absorption(absorption)
 
     # Shared declarations (amcd.acoustics) — the scaffold renders from the same
     # constant and the same formula, so the described room and the rendered room

@@ -545,8 +545,9 @@ class TestTheExpensiveArtifactIsCacheProtected:
         import shutil, subprocess, sys
 
         root = tmp_path / "pkg"
-        shutil.copytree(Path("src"), root / "src")
-        shutil.copytree(Path("configs"), root / "configs")
+        ignore = shutil.ignore_patterns("__pycache__", "._*", "*.pyc")
+        shutil.copytree(Path("src"), root / "src", ignore=ignore)
+        shutil.copytree(Path("configs"), root / "configs", ignore=ignore)
         probe = root / "probe.py"
         probe.write_text(
             f"import sys; sys.path.insert(0, {str(root / 'src')!r})\n"
@@ -643,9 +644,14 @@ def _code_versions_after_editing_with(
     import subprocess
     import sys
 
+    # Ignore what is neither source nor stable: `__pycache__` is rewritten by any
+    # concurrent interpreter and `._*` are AppleDouble sidecars this exFAT volume
+    # materialises, so copying either makes the probe fail for reasons that have
+    # nothing to do with the code under test.
     root = tmp_path / "pkg"
-    shutil.copytree(Path("src"), root / "src")
-    shutil.copytree(Path("configs"), root / "configs")
+    ignore = shutil.ignore_patterns("__pycache__", "._*", "*.pyc")
+    shutil.copytree(Path("src"), root / "src", ignore=ignore)
+    shutil.copytree(Path("configs"), root / "configs", ignore=ignore)
     probe = root / "probe.py"
     probe.write_text(
         f"import sys, json; sys.path.insert(0, {str(root / 'src')!r})\n"

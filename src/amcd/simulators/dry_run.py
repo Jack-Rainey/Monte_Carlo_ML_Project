@@ -4,7 +4,12 @@ from __future__ import annotations
 import numpy as np
 from pydantic import BaseModel
 
-from ..acoustics import diffuse_field_drr_db, room_constant, sabine_rt60
+from ..acoustics import (
+    clip_absorption,
+    diffuse_field_drr_db,
+    room_constant,
+    sabine_rt60,
+)
 from ..registry import simulator_registry
 from .base import IRResult, SceneSpec
 
@@ -104,7 +109,7 @@ class DryRunSimulator:
         # characterization, so the T60 described and the T60 rendered cannot drift
         # apart (AC-24). The clamps below stay — they are numerical guards for the
         # scaffold — but they are now RECORDED in provenance rather than silent.
-        alpha = float(np.clip(scene.material_absorption, 0.01, 0.99))
+        alpha, alpha_clipped = clip_absorption(scene.material_absorption)
         rt60_native = sabine_rt60(volume, surface, alpha)
         rt60 = float(np.clip(rt60_native, 0.05, 3.0))
         rt60_clipped = rt60 != rt60_native
@@ -192,7 +197,7 @@ class DryRunSimulator:
         # Both quantities come from `amcd.acoustics`, for the reason AC-24 gave for
         # the T60: the room the report DESCRIBES and the room the scaffold RENDERS
         # must not be able to drift apart.
-        surface_alpha = float(np.clip(scene.material_absorption, 0.01, 0.99))
+        surface_alpha, _ = clip_absorption(scene.material_absorption)
         r_constant = room_constant(surface, surface_alpha)
         decay_energy = float(np.sum(decay.astype(np.float64) ** 2))
         diffuse_gain = float(
@@ -244,6 +249,10 @@ class DryRunSimulator:
                 # described as one room and rendered as another (AC-24).
                 "rt60_native_s": rt60_native,
                 "rt60_clipped": bool(rt60_clipped),
+                # Stamped beside it (AC-41): a clipped alpha means the room this
+                # rendered is not the room the scene declared, and the reader of an
+                # IR is owed that as much as the reader of the report.
+                "alpha_clipped": bool(alpha_clipped),
                 "distance_m": distance,
                 "noise_scale": noise_scale,
                 # ── What `noise_scale` is, and what it is NOT (AC-35) ──────────

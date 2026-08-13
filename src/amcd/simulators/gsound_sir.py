@@ -552,6 +552,22 @@ class GsoundSirSimulator:
         `truncation_qc_flag` records the threshold breach. NOTHING CONSUMES IT YET:
         the per-criterion QC record that acts on it is Step 4's (RD-14). It is
         disclosure, not a gate.
+
+        IT IS ALSO STRUCTURALLY UNREACHABLE UNDER `configs/base.yaml`, AND THAT IS
+        A PROPERTY OF THE CONFIG PAIR RATHER THAN A DEFECT (F-83). The trim branch
+        fires only when the native record EXCEEDS the window, and this backend's
+        native record is bounded by the compiled `max_ir_length_s` (3.0 s, plus the
+        auralizer's tail padding). Under base's `ir_duration: 4.25` the window is
+        always the larger of the two, so `_fit_to_window` always pads and both
+        `discarded_tail_db` and this flag are constant.
+
+        It is LIVE under `configs/research_i.yaml`, whose RI-pinned `ir_duration` is
+        3.0 s — the same length as the cap, where the padding either side of it
+        decides the branch. So this is a backstop for record-shorter-than-cap
+        configs, not dead code: deleting it would remove the disclosure exactly
+        where the reproduction config needs it. The regression test drives the
+        firing case through a CONFIG rather than a hand-built array, so the
+        reachability claim is checked rather than asserted.
         """
         n_native = int(native.shape[1])
         total_energy = float(np.sum(native.astype(np.float64) ** 2))

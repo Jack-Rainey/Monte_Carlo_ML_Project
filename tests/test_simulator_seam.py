@@ -2020,3 +2020,50 @@ class TestRenderArtifactsHaveAVerifier:
         scene = self._scene_dir(tmp_path)
         (scene / "meta.json").write_text(json.dumps({"artifact_sha256": {}}))
         assert verify_render_artifacts(tmp_path / "renders")
+
+
+class TestTruncationDisclosureReachabilityPerConfig:
+    """F-83: `truncation_qc_flag` cannot fire under `base.yaml`, and that is a
+    property of the CONFIG PAIR rather than dead code.
+
+    The trim branch fires only when the native record exceeds the window. This
+    backend's native record is bounded by the compiled `max_ir_length_s` plus the
+    auralizer's tail padding, so under base's `ir_duration: 4.25` the window always
+    wins and the flag is constant. Under `research_i.yaml`, whose RI-pinned
+    `ir_duration` is 3.0 s — the same length as the cap — it is live.
+
+    Driven through the CONFIGS rather than a hand-built array, so the reachability
+    claim in the source is checked rather than asserted: if either `ir_duration` or
+    `max_ir_length_s` moves, this says which way.
+    """
+
+    @staticmethod
+    def _disclosure(cfg) -> dict:
+        sim = build_simulator(
+            cfg.simulator.name, cfg.simulator.params, n_channels=cfg.n_channels,
+            n_samples=cfg.n_samples, sample_rate=cfg.sample_rate,
+        )
+        cap_samples = int(float(cfg.simulator.params["max_ir_length_s"]) * cfg.sample_rate)
+        native = np.zeros((cfg.n_channels, cap_samples + 2048), dtype=np.float32)
+        native[0, :] = 0.01          # energy everywhere, so a trim discards some
+        return sim._fit_to_window(native)[1]
+
+    def test_base_cannot_reach_the_trim_branch(self) -> None:
+        cfg = Config.load(Path("configs/base.yaml"))
+        assert cfg.n_samples / cfg.sample_rate > float(
+            cfg.simulator.params["max_ir_length_s"]
+        ) + 2048 / cfg.sample_rate, (
+            "base's window no longer exceeds the backend's realized cap, so the "
+            "trim branch has become reachable — the disclosure below is no longer "
+            "constant and its docstring is stale"
+        )
+        d = self._disclosure(cfg)
+        assert d["truncated"] is False and d["truncation_qc_flag"] is False
+
+    def test_research_i_does_reach_it(self) -> None:
+        """The reason the flag is kept: the reproduction config is where a record
+        shorter than the cap makes the discarded tail a real quantity."""
+        cfg = Config.load(Path("configs/base.yaml"), Path("configs/research_i.yaml"))
+        d = self._disclosure(cfg)
+        assert d["truncated"] is True and d["truncation_qc_flag"] is True
+        assert d["discarded_tail_db"] is not None
