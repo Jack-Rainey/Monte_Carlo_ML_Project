@@ -105,27 +105,34 @@ class TestRealizedRecordLengthGate:
         # Near-anechoic by construction: nothing there is long enough to censor.
         assert per_split["test_material_shift"] == 0
 
-    def test_research_i_is_refused_by_its_own_declared_tolerance(
+    def test_research_i_pins_the_depth_that_makes_its_population_measurable(
         self, tmp_path: Path
     ) -> None:
-        """THE RESEARCH I POPULATION IS NOT ADMISSIBLE ON THIS BACKEND, and this
-        pins that rather than papering over it.
+        """RI never named `diffuse_depth`, so it ran pygsound's default of 100.
 
-        RI's 3.0 s record was always known not to cover its 4.09 s corner. Under the
-        corrected support law (AC-186) the realized shortfall is 40/720 = 5.56 %,
-        above RI's own declared `max_t60_over_ir_duration_frac` of 0.05, so
-        `gen-scenes` REFUSES rather than generating a dataset whose reverberant tail
-        cannot be scored.
+        That default is not neutral: it is the reflection-order bound, and it is
+        what actually sets the record length (AC-186 — realized support scales as
+        `depth**0.688` and does not depend on T60 at all). At 100 it truncates
+        5.56 % of RI's own declared population below ISO 3382-1's 45 dB for a T30
+        fit, above RI's declared 0.05 tolerance, so `gen-scenes` refused outright.
 
-        This is a live research decision, not a defect to be tuned away: either the
-        tolerance is raised with a stated reason, or RI's declared population is
-        accepted as partly unmeasurable on GSound-SIR. Loosening the number to make
-        the gate pass would hide exactly what the gate was built to surface, so the
-        test asserts the refusal and its measured rate.
+        `research_i.yaml` pins 200 (deviation 6, user decision 2026-08-13), which
+        brings the censoring to 0.69 %. This asserts the pin is present and that
+        the population it admits is measurable — if the pin is dropped, RI stops
+        generating rather than silently producing truncation-biased T30.
         """
         cfg = Config.load(*_RI)
-        with pytest.raises(ValueError, match=r"40 of 720 scenes \(5\.556%\)"):
-            run_gen_scenes(cfg, tmp_path, QUIET)
+        assert cfg.simulator.params["diffuse_depth"] == 200, (
+            "research_i.yaml must PIN the reflection-order bound rather than "
+            "inherit an unstated upstream default"
+        )
+        run_gen_scenes(cfg, tmp_path, QUIET)
+        report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
+        censored = sum(e["record_decay_range"]["decay_range_below_iso_t30"]["count"]
+                       for e in report.values())
+        total = sum(e["n_scenes"] for e in report.values())
+        assert (censored, total) == (5, 720)
+        assert censored / total < cfg.scenes.max_t60_over_ir_duration_frac
 
     def test_exceeding_the_declared_tolerance_fails_loudly(self, tmp_path: Path) -> None:
         """A 0.1 s record against base's geometry: every scene is over."""

@@ -432,12 +432,19 @@ reshape its declared population around it. Consequences, all deliberate:
 - **`configs/base.yaml`: 23/600 = 3.83 %** censored (was reported as 2.8 % under the
   refuted law, which under-counted the censoring it exists to bound). Concentrated in
   the reverberant splits, zero in the near-anechoic `test_material_shift`.
-- **`configs/research_i.yaml`: 40/720 = 5.56 %, which EXCEEDS its own declared
-  `max_t60_over_ir_duration_frac` of 0.05, so `gen-scenes` now REFUSES it.** The
-  Research I population is not fully admissible on this backend. That is an open
-  research decision — raise the tolerance with a stated reason, or accept the
-  reproduction over a declared subpopulation — and it is deliberately not resolved by
-  tuning the number, because the gate exists to surface exactly this.
+- **`configs/research_i.yaml`: 5/720 = 0.69 %**, after pinning `diffuse_depth: 200`
+  (deviation 6, user decision 2026-08-13). At the value RI actually ran — pygsound's
+  unstated default of 100 — it was 40/720 = 5.56 %, above RI's own declared 0.05, and
+  `gen-scenes` refused the config outright. Since `diffuse_depth` appears nowhere in
+  RI's Figure 5 or its prose, RI inherited that default rather than choosing it; the
+  study pins 200 so the value is a recorded decision and E1's reverberant tail is
+  measurable. Cost: 2.5x render wall-clock (27.9 s -> 69.1 s per high-ray scene on
+  the largest declared room), roughly 6 -> 14 hours for the full dataset. Higher
+  buys nothing — at 200 the largest rooms already reach the compiled 3.0 s ceiling.
+  **E1's records are therefore LONGER than RI's were**, so absolutes over the
+  reverberant tail are measurable here and were partly truncation-biased in RI. The
+  paired improvement E1 actually claims is unaffected either way, because both legs
+  of a comparison share one record.
 - `scenes.max_t60_over_ir_duration_frac` is a **regression tripwire on the censoring
   rate**, not an admissibility gate: it trips if the rate roughly doubles.
 - Any E1/E2 claim over the reverberant end is a claim over a **censored

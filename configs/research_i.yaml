@@ -19,7 +19,7 @@
 #                   file 128 MB). Two of those config keys do not exist yet, so
 #                   they are NOT in this file — ledger RD-18.
 #
-# ── FIVE DELIBERATE DEVIATIONS — this config is NOT a verbatim RI clone ───────
+# ── SIX DELIBERATE DEVIATIONS — this config is NOT a verbatim RI clone ────────
 # Each is arbitrated and tracked; the E1 report must disclose them per split.
 #
 # 1. (RD-27) RI's test_geometry_shift is DUAL-axis — corridor AND
@@ -98,6 +98,17 @@
 # 5. Values RI never quantifies are inherited from base.yaml and flagged inline
 #    below: near_corner's corner_frac, and the absorption ranges of the `mixed`
 #    and `ceiling_absorptive` material regimes.
+#
+# 6. (AC-186, user decision 2026-08-13) `diffuse_depth` is pinned to 200, where RI
+#    inherited pygsound's unstated default of 100. It is the reflection-order
+#    bound, and measurement showed it is what actually sets the record length —
+#    at 100 it truncates 5.56 % of RI's own declared population below the decay
+#    range ISO 3382-1 requires for T30. RI never chose 100; it never named the
+#    parameter at all. Pinned at the simulator block below, with the cost.
+#    ⇒ E1's records are LONGER than RI's were. Absolutes over the reverberant
+#      tail are therefore measurable here and were partly truncation-biased in
+#      RI; the PAIRED improvement is unaffected either way, because both legs of
+#      a comparison share the record.
 
 run_id: E1
 
@@ -119,13 +130,33 @@ ambisonics_order: 3
 low_ray_budget: 5000
 high_ray_budget: 200000
 
-# ── Figure 5: retained-path policy ────────────────────────────────────────────
+# ── Figure 5: retained-path policy, and the one parameter RI never stated ─────
 simulator:
   name: gsound_sir
   params:
     path_retention:
       mode: top_k
       value: 5000
+    # PINNED HERE BECAUSE RESEARCH I NEVER STATED IT (deviation 6, user decision
+    # 2026-08-13). `diffuse_depth` is absent from Figure 5 and from RI's prose, so
+    # RI ran whatever pygsound defaults to — 100 — without choosing it. That
+    # inherited default is not a neutral choice: it is a TIME bound on the decay
+    # (measured, `experiments/support_law/`: realized record scales as
+    # depth**0.688 and does not depend on T60 at all), and at 100 it truncates
+    # 5.56 % of RI's declared population below the 45 dB ISO 3382-1 needs for a
+    # T30 fit — enough that `gen-scenes` refused the config outright.
+    #
+    # 200 is pinned rather than 100 so the value is a recorded decision instead of
+    # an unrecorded default, and so E1's reverberant tail is measurable: censoring
+    # falls to ~0.2 %. It costs 2.5x render wall-clock (27.9 s -> 69.1 s per
+    # high-ray scene on the largest declared room, measured), i.e. roughly 6 -> 14
+    # hours for the full 720-scene dataset.
+    #
+    # Going higher buys nothing: pygsound compiles `maxIRLength = 3.0 s` and does
+    # not expose it, and at depth 200 the largest rooms already reach that ceiling
+    # (native 146048 samples = 3.043 s, measured). RI's own `ir_duration` is 3.0 s,
+    # so the record is full.
+    diffuse_depth: 200
 
 scenes:
   # Count mode: each id-pool split declares its own count and seed below, so
