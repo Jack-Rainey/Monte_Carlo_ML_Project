@@ -54,6 +54,7 @@ from ..evaluation.room_acoustic import (
     channel_band_avg_metrics,
 )
 from ..representations import build_representation
+from ..simulators.base import simulator_models_early_reflections
 from ..runtime import Verbosity, emit
 
 # Per-metric JND tolerances (ISO 3382 difference limens) are config-declared —
@@ -181,6 +182,7 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
         }
 
     result_d0a = {
+        "backend_limitations": _backend_limitations(config),
         "per_scene_gap_db": per_scene,
         "per_split": per_split,
     }
@@ -222,6 +224,44 @@ def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None
 # ---------------------------------------------------------------------------
 # D0b — carrier ceiling test
 # ---------------------------------------------------------------------------
+
+#: The backend-limitation note both D0 artifacts carry (AC-43).
+#:
+#: EDT fits the FIRST 10 dB, which in a real room IS the early-reflection span — the
+#: reason EDT moves systematically with source-receiver distance. A backend whose
+#: diffuse tail begins at the direct arrival has no structure there, so its EDT is
+#: nearly inert on the placement axis while C50 stays live (AC-28 gave the scaffold a
+#: real 1/d direct term against a room-constant tail, which is what C50 integrates).
+#:
+#: In BOTH artifacts because both publish per-split EDT: D0a's headroom gap and D0b's
+#: oracle residual are each read as "how much EDT signal is there", and under such a
+#: backend the placement-axis answer is a property of the renderer, not of the room.
+_NO_EARLY_REFLECTIONS_NOTE = (
+    "The active backend renders no early-reflection cluster, so its diffuse tail "
+    "begins at the direct arrival and the first 10 dB — exactly what EDT fits — "
+    "carries no reflection structure. EDT is therefore nearly inert on the PLACEMENT "
+    "axis: measured 0.5517 / 0.7888 / 0.7994 / 0.7848 / 0.7853 s at "
+    "d = 0.5/1/2/4/8 m (10x8x3.5 m, alpha 0.2), non-monotone and flat to within 2 % "
+    "from 1 m out, against C50's monotone 9.90 dB swing over the same 16x range. Any "
+    "EDT figure here for a placement split is a plumbing result, not an acoustic one. "
+    "T30, C50 and the material/geometry axes are unaffected. Adding the cluster is "
+    "the real simulator's job, not a scaffold fix (AC-28/AC-43)."
+)
+
+
+def _backend_limitations(config) -> dict:
+    """Limitations of the ACTIVE backend that change how this artifact reads.
+
+    Emitted as a declared block rather than omitted when empty: an artifact with no
+    `backend_limitations` key is indistinguishable from one written before the block
+    existed, and "we checked and there are none" is a different fact from "nobody
+    checked".
+    """
+    limitations = {}
+    if not simulator_models_early_reflections(config):
+        limitations["edt_placement_axis"] = _NO_EARLY_REFLECTIONS_NOTE
+    return {"simulator": config.simulator.name, "limitations": limitations}
+
 
 def _band_intersected_pair(
     oracle_w: np.ndarray, reference_w: np.ndarray, *, config,
@@ -550,6 +590,7 @@ def _run_d0b(
         per_split_residuals[split_name] = split_summary
 
     result_d0b = {
+        "backend_limitations": _backend_limitations(config),
         "per_scene": per_scene_residuals,
         "per_split": per_split_residuals,
     }

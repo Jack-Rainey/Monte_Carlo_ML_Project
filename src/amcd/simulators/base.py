@@ -555,6 +555,51 @@ def _validate_min_separation_declared(SimClass, name: str, validated: dict) -> f
     return float(floor)
 
 
+def simulator_models_early_reflections(config) -> bool:
+    """Whether the active backend renders an early-reflection cluster.
+
+    EDT fits the FIRST 10 dB of the decay, and in a real room that span is early
+    reflections — which is why EDT moves systematically with source-receiver
+    distance. A backend whose diffuse tail begins at the direct arrival has no
+    reflection structure there at all, so its EDT is nearly inert on the placement
+    axis while C50, which integrates the whole early window against the late one,
+    stays live (AC-28/AC-43).
+
+    MEASURED on the scaffold at 10x8x3.5 m, alpha 0.2, over a 16x distance range
+    (d = 0.5/1/2/4/8 m): C50 falls monotonically across 9.90 dB while EDT reads
+    0.5517 / 0.7888 / 0.7994 / 0.7848 / 0.7853 s — NON-MONOTONE, and flat to within
+    2 % from 1 m out. `test_placement_shift`'s EDT column is therefore a plumbing
+    result under that backend, not an acoustic one.
+
+    A DECLARATION, not an inspection, for the scaffolding rule: no downstream code
+    may branch on the concrete backend class (`isinstance(sim, DryRunSimulator)`).
+    Adding the early-reflection cluster to the scaffold is explicitly NOT the fix —
+    that is the real simulator's job; disclosing which one produced a given EDT is.
+    """
+    from ..registry import simulator_registry
+
+    name = config.simulator.name
+    SimClass = simulator_registry.get(name)
+    validated = SimClass.Params(**config.simulator.params).model_dump()
+    getter = getattr(SimClass, "models_early_reflections", None)
+    if not callable(getter):
+        raise TypeError(
+            f"simulator {name!r} does not declare the required classmethod "
+            f"`models_early_reflections(params) -> bool`. EDT is fitted over the "
+            f"first 10 dB, which is the early-reflection span, so a backend that "
+            f"does not render one produces an EDT that cannot move with placement — "
+            f"and a reported EDT column that says nothing about the axis it is "
+            f"tabulated against (amcd.simulators.base.Simulator)."
+        )
+    models = getter(validated)
+    if not isinstance(models, bool):
+        raise ValueError(
+            f"simulator {name!r} declared models_early_reflections={models!r}; "
+            f"expected a bool."
+        )
+    return models
+
+
 def simulator_realized_absorption(config, alpha_nominal: float) -> float:
     """The absorption the active backend's room ACTUALLY has, given a nominal alpha.
 

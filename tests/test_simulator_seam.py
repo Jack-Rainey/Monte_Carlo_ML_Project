@@ -2131,3 +2131,85 @@ class TestTruncationDisclosureReachabilityPerConfig:
         d = self._disclosure(cfg)
         assert d["truncated"] is True and d["truncation_qc_flag"] is True
         assert d["discarded_tail_db"] is not None
+
+
+class TestEveryBackendDeclaresWhetherItModelsEarlyReflections:
+    """AC-43 — EDT fits the FIRST 10 dB, and in a real room that span IS the
+    early-reflection cluster, which is why EDT moves systematically with distance.
+
+    A backend whose diffuse tail begins at the direct arrival has no structure
+    there, so its EDT is nearly inert on the placement axis while C50 stays live
+    (AC-28 gave the scaffold a real 1/d direct term against a room-constant tail).
+    `test_placement_shift`'s EDT column is then a plumbing result, not an acoustic
+    one — an acceptable simplification, but not an invisible one.
+    """
+
+    def test_the_scaffold_says_it_does_not_and_gsound_says_it_does(self) -> None:
+        from amcd.simulators.base import simulator_models_early_reflections
+
+        assert simulator_models_early_reflections(
+            Config.load(*CANONICAL_DRY_RUN[:2])
+        ) is False
+        assert simulator_models_early_reflections(Config.load(CANONICAL_DRY_RUN[0])) is True
+
+    def test_a_backend_that_does_not_declare_it_is_refused(self) -> None:
+        """Left optional, a new backend would omit it and the reported EDT column
+        would silently inherit "this axis is live" — the silent-contract shape the
+        other three pre-render declarations are guarded against."""
+        from pydantic import BaseModel
+
+        from amcd.simulators.base import simulator_models_early_reflections
+
+        class _Silent:
+            class Params(BaseModel):
+                model_config = {"extra": "allow"}
+
+        with mock.patch.object(
+            simulator_registry, "get", return_value=_Silent
+        ), pytest.raises(TypeError, match="models_early_reflections"):
+            simulator_models_early_reflections(tiny_config())
+
+    def test_the_claim_is_TRUE_of_the_scaffold_it_is_made_about(self) -> None:
+        """The declaration has to match the backend's behaviour, or it is just a
+        constant. Measured through the reported metric path over a 16x distance
+        range: C50 falls monotonically while EDT does not."""
+        from amcd.evaluation.room_acoustic import channel_band_avg_metrics
+        from amcd.simulators.base import build_simulator
+
+        cfg = Config.load(*CANONICAL_DRY_RUN[:2])
+        sim = build_simulator(
+            cfg.simulator.name, cfg.simulator.params, n_channels=1,
+            n_samples=int(cfg.sample_rate * cfg.ir_duration),
+            sample_rate=cfg.sample_rate,
+        )
+        edt, c50 = [], []
+        for d in (1.0, 2.0, 4.0, 8.0):
+            scene = SceneSpec(
+                scene_id=f"ac43-{d}", seed=7, geometry_family="shoebox",
+                dims=(10.0, 8.0, 3.5), material_absorption=0.2,
+                source_pos=(1.0, 1.0, 1.5), receiver_pos=(1.0 + d, 1.0, 1.5),
+                sim_params={}, split_regime="id", regime_axes={},
+            )
+            vals, _ = channel_band_avg_metrics(
+                sim.render(scene, cfg.high_ray_budget).ir[0],
+                sample_rate=cfg.sample_rate,
+                iso_eval_freqs=[float(f) for f in cfg.iso_eval_freqs],
+                onset_rel_db=cfg.metric_onset_rel_db,
+                band_resolvability_margin=cfg.metric_band_resolvability_margin,
+                min_decay_range_db={"T30": 0.0, "EDT": 0.0},
+                octave_filter_order=cfg.metric_octave_filter.order,
+            )
+            edt.append(vals["EDT"])
+            c50.append(vals["C50"])
+
+        assert c50 == sorted(c50, reverse=True), (
+            f"C50 is no longer monotone in distance ({c50}) — AC-28's placement "
+            f"liveness has regressed, and the AC-43 contrast rests on it"
+        )
+        spread = (max(edt) - min(edt)) / float(np.mean(edt))
+        assert spread < 0.05, (
+            f"EDT now spreads {spread:.1%} over a 16x distance range ({edt}), i.e. it "
+            f"HAS become live on the placement axis. If the scaffold gained an "
+            f"early-reflection cluster, `models_early_reflections` must stop "
+            f"returning False (AC-43)."
+        )

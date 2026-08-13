@@ -95,6 +95,23 @@ class DryRunSimulator:
         return float(window_s)
 
     @classmethod
+    def models_early_reflections(cls, params: dict) -> bool:
+        """Required pre-render declaration (`Simulator`) — FALSE, and stated rather
+        than left to be discovered (AC-43).
+
+        This scaffold synthesizes a diffuse tail beginning AT the direct arrival, so
+        the first 10 dB carries no reflection structure and EDT is nearly inert on
+        the placement axis: measured 0.5517 / 0.7888 / 0.7994 / 0.7848 / 0.7853 s at
+        d = 0.5/1/2/4/8 m, non-monotone and flat to within 2 % from 1 m out, against
+        C50's monotone 9.90 dB swing over the same range.
+
+        An acceptable simplification — modelling early reflections is the real
+        simulator's job (AC-28) — but not an invisible one, which is why it is
+        declared here and rendered beside every EDT this backend produces.
+        """
+        return False
+
+    @classmethod
     def realized_absorption(cls, params: dict, alpha_nominal: float) -> float:
         """Required pre-render declaration (`Simulator`).
 

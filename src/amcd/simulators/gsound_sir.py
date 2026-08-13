@@ -413,6 +413,21 @@ class GsoundSirSimulator:
         return float(params["source_radius"]) + float(params["listener_radius"])
 
     @classmethod
+    def models_early_reflections(cls, params: dict) -> bool:
+        """Required pre-render declaration (`Simulator`) — TRUE (AC-43).
+
+        This backend traces specular paths (`specular_count`, `specular_depth`) and
+        synthesizes them individually up to `early_reflection_threshold` when
+        `precise_early_reflections` is set, so the first 10 dB carries real
+        reflection structure and EDT moves with placement the way ISO 3382-1 expects.
+
+        Not conditioned on `precise_early_reflections`: that switch decides how the
+        early paths are RENDERED (individually vs folded into the diffuse
+        synthesis), not whether they exist. Turning it off still traces them.
+        """
+        return True
+
+    @classmethod
     def realized_absorption(cls, params: dict, alpha_nominal: float) -> float:
         """Required pre-render declaration (`Simulator`) — AC-54/AC-50.
 

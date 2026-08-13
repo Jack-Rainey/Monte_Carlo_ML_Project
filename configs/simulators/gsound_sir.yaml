@@ -143,6 +143,26 @@ path_retention:
 # `as_is` renders the uncorrected room. Kept reachable, not as a fallback but
 # because every measurement taken before this fix was taken under it, and those
 # numbers must stay reproducible.
+#
+# THE CONFIRMING RENDER LEAVES A RESIDUAL, AND IT IS NOT EXPLAINED (AC-67). The
+# derivation above stands on the SOURCE, which is why it does not depend on that one
+# render — but the render's own numbers should not be read as clean. On a room with
+# a FREQUENCY-INDEPENDENT alpha, the measured T30 differs between the two evaluation
+# bands: 0.5660 s at 500 Hz against 0.5222 s at 1000 Hz, an 8.4 % spread, about
+# 1.7x this project's own `d0b_t30_jnd_frac`. Nothing in the declared physics
+# produces a frequency dependence there.
+#
+# Two candidates are RULED OUT as the cause: air absorption is <= 0.4 % on a room
+# this size (AC-66), and the adaptive energy trim is frequency-independent (it
+# closes the record on total energy, and the record is shared by both bands).
+# What remains is single-realization variance — the measurement is ONE draw of the
+# 5,000-ray leg, and pygsound's noise carrier is compiled at seed 42 with no way to
+# request another (RD-23), so the spread cannot be separated from it here.
+#
+# Recorded rather than resolved, because it is an UNBUDGETED T30 uncertainty: the
+# convergence tolerances in configs/base.yaml are stated against the high leg, and
+# this says the low leg carries a per-band spread of its own that no declared
+# quantity accounts for. RD-55's extrapolated-tail work will need the number.
 absorption_convention: pre_compensate
 
 # ── THE RECORD THIS BACKEND CAN ACTUALLY FILL (AC-186, AC-175, AC-56) ─────────

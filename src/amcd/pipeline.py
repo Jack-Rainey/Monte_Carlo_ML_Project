@@ -410,12 +410,21 @@ STAGE_CODE_SCOPE: dict[str, tuple[str, ...]] = {
     "eval": ("evaluation", "representations", "data"),
     # The probe measures through the metric path, so a change to the Schroeder
     # window or the octave filter moves its verdict without touching this package.
-    "diagnostics": ("diagnostics", "evaluation", "representations", "data"),
+    # `simulators` because both D0 artifacts publish the ACTIVE BACKEND's declared
+    # limitations (AC-43): a backend that stopped declaring "no early reflections"
+    # would change what d0a_gap.json and d0b_oracle.json say about their own EDT
+    # columns, with no config key moving.
+    "diagnostics": (
+        "diagnostics", "evaluation", "representations", "data", "simulators",
+    ),
     # Computes the reported CIs and MDES over `evaluation.metric_row`'s paired
     # improvements, which is why `evaluation` is in scope and not just `stats`.
     "stats": ("stats", "evaluation"),
-    # Formats the reported tables (F-63; see `_report_fingerprint`).
-    "report": ("reporting",),
+    # Formats the reported tables (F-63; see `_report_fingerprint`). `simulators`
+    # because the footer renders the ACTIVE BACKEND's declared limitations (AC-43) —
+    # a backend that changed its early-reflection declaration would change what the
+    # table says about its own EDT columns, with no config key moving.
+    "report": ("reporting", "simulators"),
 }
 
 

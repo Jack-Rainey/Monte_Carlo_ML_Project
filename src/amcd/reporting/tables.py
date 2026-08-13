@@ -9,6 +9,7 @@ import pandas as pd
 
 from ..config import Config
 from ..runtime import Verbosity, emit
+from ..simulators.base import simulator_models_early_reflections
 
 
 #: Metric → the unit `paired_improvement` returns it in (evaluation/metric_row.py).
@@ -108,6 +109,36 @@ def _stamped_value_domain(run_dir: Path, config=None) -> str:
                 f"config, or point at the run_dir that matches it."
             )
     return stamped
+
+
+def _early_reflection_footer(config: Config) -> list[str]:
+    """AC-43: EDT is nearly inert on the placement axis when the backend models no
+    early-reflection cluster.
+
+    EDT fits the FIRST 10 dB, and in a real room that span IS early reflections —
+    which is why EDT moves systematically with source-receiver distance. A backend
+    whose diffuse tail begins at the direct arrival has no structure there, so its
+    `test_placement_shift` EDT column is a plumbing result rather than an acoustic
+    one. C50 is unaffected: AC-28 made it live on the axis by giving the scaffold a
+    real 1/d direct term against a room-constant tail.
+
+    Empty for a backend that does render the cluster, so the shipped E1 table under
+    `gsound_sir` carries nothing about a scaffold limitation.
+    """
+    if simulator_models_early_reflections(config):
+        return []
+    return [
+        f"EARLY REFLECTIONS — the active backend ({config.simulator.name}) renders no",
+        "  early-reflection cluster, so its diffuse tail begins at the direct arrival",
+        "  and the first 10 dB — which is exactly what EDT fits — has no reflection",
+        "  structure. EDT is therefore nearly inert on the PLACEMENT axis here:",
+        "  measured 0.5517 / 0.7888 / 0.7994 / 0.7848 / 0.7853 s at d = 0.5/1/2/4/8 m,",
+        "  non-monotone and flat to within 2 % from 1 m out, against C50's monotone",
+        "  9.90 dB swing over the same 16x range. Read any EDT row of a placement",
+        "  split as plumbing, not acoustics. T30, C50 and the material/geometry axes",
+        "  are unaffected. Modelling the cluster is the real simulator's job, not a",
+        "  fix to be applied here (AC-28/AC-43).",
+    ]
 
 
 def _record_length_line(config: Config, run_dir: Path, split_name: str) -> str | None:
@@ -463,6 +494,7 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         "  value biases the survivors (AC-38) — but the absolute is the least",
         "  trustworthy in the table (F-M2).",
         *_unconverged_reference_footer(config, unapplied),
+        *_early_reflection_footer(config),
         "=" * 70,
     ]
     summary_txt = "\n".join(lines)
