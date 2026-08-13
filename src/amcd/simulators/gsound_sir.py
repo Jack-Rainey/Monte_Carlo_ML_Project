@@ -17,6 +17,7 @@ config-declared and typo-proof; `render()` drives the worker and returns an
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 import tempfile
@@ -127,33 +128,46 @@ _SH_CONDON_SHORTLEY_PHASE = True
 #: on the `commit_sha` pin.
 _SYNTHESIS_CARRIER_SEED = 42
 
-def _realized_absorption(alpha_nominal: float, convention: str) -> float:
-    """The alpha to hand `createbox` so the room realizes `alpha_nominal`.
+#: How this backend turns an alpha handed to `createbox` into the room it builds.
+#: Its per-bounce ENERGY factor is `sqrt(1-alpha)` where the declared physics wants
+#: `(1-alpha)` (AC-54, re-derived from pinned upstream), so the absorption it
+#: realizes is always LOWER than the one it is given.
+def _gsound_realizes(createbox_alpha: float) -> float:
+    return 1.0 - math.sqrt(1.0 - createbox_alpha)
 
-    This backend's per-bounce ENERGY factor is `sqrt(1-alpha)` where the declared
-    physics wants `(1-alpha)` (AC-54, re-derived from pinned upstream). So the
-    room it renders from a nominal alpha has
 
-        alpha_eff = 1 - sqrt(1 - alpha_nominal)
+def _check_convention(convention: str) -> str:
+    if convention not in ("pre_compensate", "as_is"):
+        raise ValueError(
+            f"absorption_convention {convention!r} is neither 'pre_compensate' nor "
+            "'as_is'. It decides which room is rendered from a scene's declared "
+            "alpha, so there is no default (AC-54, RD-144)."
+        )
+    return convention
 
-    which is 1.14-1.98x on T60 across `base.yaml`'s declared support. Passing
-    `1-(1-alpha)^2` instead makes the realized absorption equal the nominal one:
+
+def _createbox_absorption(alpha_nominal: float, convention: str) -> float:
+    """The alpha to HAND `createbox`, given the scene's nominal one.
+
+    Under `pre_compensate` that is `1-(1-alpha)^2`, chosen so what the room realizes
+    equals what the scene declared:
 
         1 - sqrt(1 - (1 - (1-a)^2)) = 1 - sqrt((1-a)^2) = a
 
-    `as_is` renders the uncorrected room. It is not a fallback — it is what every
-    measurement before this fix was taken under, and it must stay reachable so
-    those numbers remain reproducible.
+    `as_is` passes the nominal value straight through and renders the uncorrected
+    room, whose T60 runs 1.14-1.98x longer across `base.yaml`'s declared support. It
+    is not a fallback — it is what every measurement before AC-54 was taken under,
+    and it must stay reachable so those numbers remain reproducible.
+
+    NOT THE REALIZED ABSORPTION, and the two must not be confused (AC-50): under
+    `pre_compensate` this returns 0.5100 for a nominal 0.30 while the room realizes
+    0.30, and a closed form evaluated at the wrong one of the two describes a room
+    that was never rendered. `realized_absorption` below is the other quantity.
     """
+    _check_convention(convention)
     if convention == "pre_compensate":
         return 1.0 - (1.0 - alpha_nominal) ** 2
-    if convention == "as_is":
-        return alpha_nominal
-    raise ValueError(
-        f"absorption_convention {convention!r} is neither 'pre_compensate' nor "
-        "'as_is'. It decides which room is rendered from a scene's declared "
-        "alpha, so there is no default (AC-54, RD-144)."
-    )
+    return alpha_nominal
 
 
 #: The worker's SOURCE, read from the module beside this one. It is shipped as text
@@ -399,6 +413,27 @@ class GsoundSirSimulator:
         return float(params["source_radius"]) + float(params["listener_radius"])
 
     @classmethod
+    def realized_absorption(cls, params: dict, alpha_nominal: float) -> float:
+        """Required pre-render declaration (`Simulator`) — AC-54/AC-50.
+
+        What the ROOM ENDS UP WITH, which is not what `createbox` is handed: this
+        backend realizes `1 - sqrt(1 - x)` from an alpha `x`, so the two differ by
+        the very correction `pre_compensate` applies. Under that convention the
+        round trip is the identity and this returns the nominal value; under `as_is`
+        it returns `1 - sqrt(1 - alpha)`, and every closed form the scene report
+        publishes describes a room 1.14-1.98x more reverberant than declared.
+
+        Used by the scene report to say which room its ISO 3382-1 distances, T60s
+        and DRRs are about, and by this backend's own support falsification, which
+        must reason about the decay it actually rendered.
+        """
+        return _gsound_realizes(
+            _createbox_absorption(
+                alpha_nominal, _check_convention(str(params["absorption_convention"]))
+            )
+        )
+
+    @classmethod
     def realized_support_s(cls, params: dict, t60_s: float, volume_m3: float,
                            surface_m2: float, window_s: float) -> float:
         """Required pre-render declaration (`Simulator`) — AC-186, AC-175, AC-56.
@@ -629,8 +664,8 @@ class GsoundSirSimulator:
         (AC-54).
         """
         volume, surface = box_volume_and_surface(scene.dims)
-        alpha_realized = _realized_absorption(
-            float(scene.material_absorption), str(self.params["absorption_convention"])
+        alpha_realized = self.realized_absorption(
+            self.params, float(scene.material_absorption)
         )
         t60_s = sabine_rt60(volume, surface, alpha_realized)
         predicted_s = predicted_support_s(
@@ -681,7 +716,7 @@ class GsoundSirSimulator:
             # AC-54/RD-144: the scene declares NOMINAL alpha; this backend
             # realizes 1-sqrt(1-alpha), so pre-compensation is what makes the
             # rendered room the room the scene describes.
-            "absorption": _realized_absorption(
+            "absorption": _createbox_absorption(
                 float(scene.material_absorption),
                 str(self.params["absorption_convention"]),
             ),

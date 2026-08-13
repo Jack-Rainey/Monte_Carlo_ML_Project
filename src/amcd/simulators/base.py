@@ -555,6 +555,58 @@ def _validate_min_separation_declared(SimClass, name: str, validated: dict) -> f
     return float(floor)
 
 
+def simulator_realized_absorption(config, alpha_nominal: float) -> float:
+    """The absorption the active backend's room ACTUALLY has, given a nominal alpha.
+
+    A scene declares one NOMINAL alpha and stays backend-agnostic (RD-144), so every
+    closed form derived from it — T60, the room constant, r_c, the DRR, and the
+    ISO 3382-1 §5.3 minimum measurement distance — describes the DECLARED room. What
+    the renderer builds from that number is the backend's own convention, and on
+    gsound it is a live distinction: its per-bounce energy factor is sqrt(1-alpha)
+    where the physics wants (1-alpha), so an uncorrected room realizes
+    `1 - sqrt(1 - alpha)` and its T60 runs 1.14-1.98x the declared one (AC-54).
+
+    Recorded per scene in `placement_report.json` so its ISO flags say which room
+    they describe (AC-50). At the shipped `pre_compensate` convention this returns
+    `alpha_nominal` unchanged and the flags are the rendered room's; under `as_is`
+    it does not, and a reader who assumed the first would be reading the wrong
+    corners — a 5.712 m Sabine d_min corner against a 5.35 m one.
+
+    Same registry-lookup-without-instantiation shape as `simulator_min_separation`,
+    and for the same reason: gen-scenes calls it, and scene generation must stay
+    runnable on a host with no render environment (RD-60).
+    """
+    from ..registry import simulator_registry
+
+    name = config.simulator.name
+    SimClass = simulator_registry.get(name)
+    validated = SimClass.Params(**config.simulator.params).model_dump()
+    getter = getattr(SimClass, "realized_absorption", None)
+    if not callable(getter):
+        raise TypeError(
+            f"simulator {name!r} does not declare the required classmethod "
+            f"`realized_absorption(params, alpha_nominal) -> float`. Every backend "
+            f"must state what a declared absorption becomes in the room it builds, "
+            f"or the scene report's ISO 3382-1 distances, T60s and DRRs describe a "
+            f"room that was never rendered. A backend that realizes what it is "
+            f"given says so by returning `alpha_nominal` "
+            f"(amcd.simulators.base.Simulator)."
+        )
+    realized = getter(validated, alpha_nominal)
+    if (
+        not isinstance(realized, (int, float))
+        or isinstance(realized, bool)
+        or not 0.0 < realized < 1.0
+    ):
+        raise ValueError(
+            f"simulator {name!r} declared realized_absorption={realized!r} for "
+            f"alpha_nominal={alpha_nominal!r}; expected a coefficient in (0, 1). "
+            f"The endpoints are excluded because Sabine, Eyring, the room constant "
+            f"and the critical distance are all singular there."
+        )
+    return float(realized)
+
+
 def simulator_realized_support_s(config, t60_s: float, volume_m3: float,
                                  surface_m2: float, window_s: float) -> float:
     """Seconds of usable record the active backend will produce for this room.

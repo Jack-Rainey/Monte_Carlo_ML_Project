@@ -574,7 +574,7 @@ class TestUncharacterizedScenesLeaveTheRecordLengthGate:
     ) -> None:
         room = _room_acoustics(
             (10.0, 10.0, 3.5), 0.3, 4.0,
-            alpha_limit=0.5, realized_support_s=lambda _t60, _v, _s: 0.1, iso_t30_decay_range_db=45.0, characterization="none",
+            alpha_limit=0.5, realized_absorption=lambda a: a, realized_support_s=lambda _t60, _v, _s: 0.1, iso_t30_decay_range_db=45.0, characterization="none",
         )
         assert "decay_range_below_iso_t30" not in room, (
             "present-and-False reads as 'measured, and within the record' (F-71)"
@@ -757,7 +757,7 @@ class TestIsoMinimumDistanceDisclosure:
     def _d_min(dims, alpha) -> dict:
         return _room_acoustics(
             dims, alpha, 2.0,
-            alpha_limit=0.5, realized_support_s=lambda _t60, _v, _s: 10.0, iso_t30_decay_range_db=45.0, characterization="sabine",
+            alpha_limit=0.5, realized_absorption=lambda a: a, realized_support_s=lambda _t60, _v, _s: 10.0, iso_t30_decay_range_db=45.0, characterization="sabine",
         )
 
     @staticmethod
@@ -1152,7 +1152,7 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
     def test_the_scene_reason_names_record_length(self) -> None:
         room = _room_acoustics(
             (10.0, 10.0, 3.5), 0.3, 4.0,
-            alpha_limit=0.5, realized_support_s=lambda _t60, _v, _s: 0.1, iso_t30_decay_range_db=45.0, characterization="none",
+            alpha_limit=0.5, realized_absorption=lambda a: a, realized_support_s=lambda _t60, _v, _s: 0.1, iso_t30_decay_range_db=45.0, characterization="none",
         )
         reason = room["uncharacterized_reason"]
         assert "UNCHECKED" in reason and "record" in reason, (

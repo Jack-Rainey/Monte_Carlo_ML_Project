@@ -376,6 +376,71 @@ class ConvergenceTolerance(BaseModel):
     band_energy_frac: float
 
 
+class MetricOctaveFilter(BaseModel):
+    """The octave-band filter the reported ISO-3382 metrics are computed through.
+
+    ONE BLOCK, because the two fields are one design: the ORDER sets the realized
+    stopband rejection, and the rejection is the property that has to be pinned so
+    the declaration cannot rot the way the resolvability floors did (AC-65).
+    Declaring the order without the rejection would let a change to the first pass
+    the suite while silently invalidating every figure quoted for the second.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    #: Butterworth section order, per band, before `sosfiltfilt` doubles it.
+    #:
+    #: EXPERIMENT-GOVERNING, hence declared (F-143). It is not fixed by ISO 3382-1,
+    #: which asks for IEC 61260 class 1 — a conformance this filter does not meet at
+    #: any order it could reach here. It is a research TRADE: steeper skirts buy
+    #: out-of-band rejection at the cost of a longer ringing floor, and that floor
+    #: (`_band_resolvable_decay_s`) decides which bands carry the AC-38
+    #: resolvability caveat into reported metrics. A value that moves both sides of
+    #: that trade does not belong in a `butter(4, ...)` literal.
+    order: int
+
+    #: Worst tolerated in-band leakage of a pure tone N octaves outside the band,
+    #: in dB re the tone's total energy, keyed by N. MEASURED through `_band_energy`
+    #: at 48 kHz and rounded outward ~1 dB so a scipy point release does not fail
+    #: the suite; the bound at each offset is the worse of the two eval bands, and
+    #: is applied on BOTH sides (the skirts are not symmetric in Hz, so the worse of
+    #: the two holds either way).
+    #:
+    #: Declared here rather than pinned in the test file (RD-186) because it is the
+    #: measured consequence of `order`: the two are checked against each other by
+    #: `test_the_octave_filter_meets_its_declared_stopband_rejection`, which is what
+    #: makes changing the order a decision rather than an accident.
+    stopband_rejection_db: dict[int, float]
+
+    @model_validator(mode="after")
+    def _order_and_rejection_are_usable(self) -> "MetricOctaveFilter":
+        if self.order < 1:
+            raise ValueError(
+                f"metric_octave_filter.order must be >= 1; got {self.order}. "
+                f"A zero-order bandpass has no band."
+            )
+        if not self.stopband_rejection_db:
+            raise ValueError(
+                "metric_octave_filter.stopband_rejection_db is empty. The filter "
+                "fails IEC 61260 class 1, so its realized selectivity is a DECLARED "
+                "property of the design; declaring none leaves the conformance gap "
+                "unstated (AC-68/RD-186)."
+            )
+        for octaves, bound in self.stopband_rejection_db.items():
+            if octaves < 1:
+                raise ValueError(
+                    f"stopband_rejection_db is keyed by octaves OUTSIDE the band, so "
+                    f"every key must be >= 1; got {octaves}."
+                )
+            if bound >= 0.0:
+                raise ValueError(
+                    f"stopband_rejection_db[{octaves}] = {bound} is not a rejection. "
+                    f"It is dB re the tone's total energy, so a filter that rejects "
+                    f"anything at all reports a negative number."
+                )
+        return self
+
+
 class Margins(BaseModel):
     """Per-axis clearances (m) keeping sources/receivers off the surfaces.
 
@@ -739,6 +804,10 @@ class Config(BaseModel):
 
     # Direct-arrival onset threshold (dB below peak) for metric integration start (§3)
     metric_onset_rel_db: float
+
+    #: The octave-band filter every reported ISO-3382 metric is computed through:
+    #: its ORDER, and the out-of-band rejection that order realizes (F-143/RD-186).
+    metric_octave_filter: "MetricOctaveFilter"
 
     # How many times the octave filter's OWN decay a room's decay must exceed to be
     # resolvable in that band (dimensionless). The floor itself is measured per

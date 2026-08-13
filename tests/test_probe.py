@@ -272,6 +272,9 @@ class TestD0bComparesTheSameBands:
         metric_onset_rel_db = -20.0
         metric_band_resolvability_margin = 2.0
         metric_min_decay_range_db = {"T30": 45.0, "EDT": 20.0}
+        metric_octave_filter = Config.load(
+            Path("configs/base.yaml")
+        ).metric_octave_filter
 
     @staticmethod
     def _decay(t60: float, seed: int, n: int = 24000) -> np.ndarray:

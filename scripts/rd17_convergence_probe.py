@@ -145,6 +145,7 @@ def _iso(config: Config, ir_multichannel: np.ndarray) -> dict:
         onset_rel_db=config.metric_onset_rel_db,
         band_resolvability_margin=config.metric_band_resolvability_margin,
         min_decay_range_db=config.metric_min_decay_range_db,
+        octave_filter_order=config.metric_octave_filter.order,
     )
     # Returns a LIST, one triple per entry of `iso_eval_freqs`, in that order.
     out = {}

@@ -194,6 +194,7 @@ class TestDiffuseFieldValidityFlags:
             realized_support_s=kw.get(
                 "realized_support_s",
                 lambda _t60, _v, _s: kw.get("ir_duration_s", 3.0)),
+            realized_absorption=kw.get("realized_absorption", lambda a: a),
             iso_t30_decay_range_db=kw.get("iso_t30_decay_range_db", 45.0),
             characterization=kw.get("characterization", "sabine"),
         )
@@ -245,7 +246,7 @@ class TestReceiverInsideCriticalDistance:
         r_c = critical_distance(surface, alpha)
         return _room_acoustics(
             dims, alpha, d_over_rc * r_c,
-            alpha_limit=0.3, realized_support_s=lambda _t60, _v, _s: 3.0, iso_t30_decay_range_db=45.0, characterization="sabine",
+            alpha_limit=0.3, realized_absorption=lambda a: a, realized_support_s=lambda _t60, _v, _s: 3.0, iso_t30_decay_range_db=45.0, characterization="sabine",
         )
 
     def test_half_the_critical_distance_flags(self) -> None:
@@ -287,7 +288,7 @@ class TestNonEnclosureGeometryIsNotCharacterized:
     def test_a_non_enclosure_gets_a_reason_not_a_number(self) -> None:
         room = _room_acoustics(
             (10.0, 8.0, 3.5), 0.2, 3.0,
-            alpha_limit=0.3, realized_support_s=lambda _t60, _v, _s: 3.0, iso_t30_decay_range_db=45.0, characterization="none",
+            alpha_limit=0.3, realized_absorption=lambda a: a, realized_support_s=lambda _t60, _v, _s: 3.0, iso_t30_decay_range_db=45.0, characterization="none",
         )
         for key in ("t60_sabine_s", "critical_distance_m", "drr_db", "d_over_rc"):
             assert key not in room, (

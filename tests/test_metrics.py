@@ -31,6 +31,18 @@ _NO_SNR_BOUND = {"T30": 0.0, "EDT": 0.0}
 #: ISO 3382-1's own requirement: >= 45 dB of usable decay for T30, >= 20 for EDT.
 _ISO_SNR_BOUND = {"T30": 45.0, "EDT": 20.0}
 
+#: The shipped octave-filter order, read from the config that governs it (F-143).
+#: NOT a literal 4: `metric_octave_filter.order` is an experiment parameter, and a
+#: probe holding its own copy would keep asserting against the old filter while
+#: claiming to describe the shipped one — the `_base_scalar` precedent below.
+_ORDER = Config.load(Path("configs/base.yaml")).metric_octave_filter.order
+
+#: Realized out-of-band leakage bounds, likewise read rather than pinned (RD-186).
+#: Keyed by octaves outside the band.
+_STOPBAND_DB = Config.load(
+    Path("configs/base.yaml")
+).metric_octave_filter.stopband_rejection_db
+
 
 
 def _decaying_noise_ir(rt60: float, duration_s: float, seed: int) -> np.ndarray:
@@ -56,6 +68,7 @@ def _metrics(ir_w: np.ndarray) -> dict:
         ir_w, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=_NO_FLOOR,
         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
     )
     return values
 
@@ -114,6 +127,7 @@ def test_c50_nan_carries_lundeby_truncation_reason() -> None:
         ir, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=_NO_FLOOR,
         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
     )
     assert np.isnan(values["C50"]), "fixture must actually produce an unscored C50"
     assert "C50" in reasons
@@ -167,7 +181,8 @@ def test_paired_metrics_share_a_band_set_across_legs() -> None:
     # Fixture must bite: low's 1000 Hz band C50 is NaN, its 500 Hz band finite.
     low_bands = channel_per_band_metrics(
         low, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND)
+        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER)
     assert np.isfinite(low_bands[0][0]["C50"]) and np.isnan(low_bands[1][0]["C50"])
 
     triples, reasons, _window, _acct = compute_room_acoustic_metrics(
@@ -175,6 +190,7 @@ def test_paired_metrics_share_a_band_set_across_legs() -> None:
         sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=_NO_FLOOR,
         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
     )
     c50 = triples["C50"]
     # The drop is attributed to the causing leg and marked as affecting all legs.
@@ -195,14 +211,17 @@ def test_paired_metrics_share_a_band_set_across_legs() -> None:
     shared_500 = _shared_truncation_per_band(
         {"low": low, "high": high},
         sample_rate=_SR, iso_eval_freqs=[500.0], onset_rel_db=_ONSET_DB,
+        octave_filter_order=_ORDER,
     )
     high_500 = channel_band_avg_metrics(
         high, sample_rate=_SR, iso_eval_freqs=[500.0], onset_rel_db=_ONSET_DB,
         band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
         trunc_idx_per_band=shared_500)[0]["C50"]
     high_both = channel_band_avg_metrics(
         high, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND)[0]["C50"]
+        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER)[0]["C50"]
     assert c50.high == pytest.approx(high_500)
     assert high_500 != pytest.approx(high_both)
     assert np.isfinite(c50.pred) and np.isfinite(c50.low)  # still scored, same band set
@@ -261,12 +280,14 @@ def test_t30_invariant_to_leg_noise_floor() -> None:
                 }
                 shared = _shared_truncation_per_band(
                     legs, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
+                    octave_filter_order=_ORDER,
                 )
                 vals = {
                     leg: channel_band_avg_metrics(
                         ir, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
                         band_resolvability_margin=_NO_FLOOR, trunc_idx_per_band=shared,
                         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
                     )[0]["T30"]
                     for leg, ir in legs.items()
                 }
@@ -318,6 +339,7 @@ def test_prediction_cannot_set_the_integration_window() -> None:
             sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
             band_resolvability_margin=_NO_FLOOR,
             min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
         )
         out[label] = (triples, window)
 
@@ -395,6 +417,7 @@ def test_prediction_cannot_set_the_band_set() -> None:
             sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
             band_resolvability_margin=margin,
             min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
         )
         out[label] = (triples, reasons, acct)
 
@@ -476,8 +499,8 @@ def test_an_onset_impulse_keeps_the_band_energy_an_interior_one_gets(fc: float) 
     interior = np.zeros(n, dtype=np.float32)
     interior[n // 2] = 1.0
 
-    e_onset = float(_band_energy(at_onset, fc, _SR).sum())
-    e_interior = float(_band_energy(interior, fc, _SR).sum())
+    e_onset = float(_band_energy(at_onset, fc, _SR, _ORDER).sum())
+    e_interior = float(_band_energy(interior, fc, _SR, _ORDER).sum())
 
     assert e_onset == pytest.approx(e_interior, rel=1e-3), (
         f"an impulse AT the onset index yields {e_onset:.6f} of in-band energy at "
@@ -563,6 +586,7 @@ def test_the_placement_axis_moves_c50_through_the_iso_path() -> None:
             onset_rel_db=cfg.metric_onset_rel_db,
             band_resolvability_margin=cfg.metric_band_resolvability_margin,
             min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
         )
         c50.append(vals["C50"])
 
@@ -739,24 +763,6 @@ def test_the_headroom_guard_ignores_a_spectral_slope_outside_the_metric_bands() 
     rep.encode(sloped)  # must NOT raise
 
 
-#: Realized selectivity of `_butter_octave_filter`, MEASURED through `_band_energy`
-#: with a pure tone, in dB re the tone's total energy (48 kHz). AC-68: ISO 3382-1
-#: asks for IEC 61260 class 1 and this filter is not, so the realized figures are
-#: declared and pinned instead of the conformance being assumed. Keyed by octaves
-#: from the band centre; the bound is the WORST (least negative) of the two eval
-#: bands at that offset, rounded outward by ~1 dB so a scipy point release does not
-#: fail the suite. The SAME bound is applied on BOTH sides of the band — the skirts
-#: are not symmetric in Hz (one octave below is fc/2, above is 2*fc) but the bound is
-#: the worse of the two, so it holds either way.
-#:
-#: NOT a config value. Nothing in the pipeline reads it and it governs no
-#: experiment — it is a declared property of the filter design, the same class as
-#: `_MIN_FILTER_SAMPLES` and `_DECLARED_FLOORS_48K`. Making it config-declared, as
-#: AC-68's remedy text asks, needs a field in `src/amcd/config.py`, which lane M
-#: does not own (`extra: forbid`), so that half is filed as spanning row RD-186.
-_DECLARED_STOPBAND_DB = {1: -36.5, 2: -45.5}
-
-
 @pytest.mark.parametrize("octaves", [1, 2])
 @pytest.mark.parametrize("fc", _ISO)
 def test_the_octave_filter_meets_its_declared_stopband_rejection(
@@ -783,21 +789,22 @@ def test_the_octave_filter_meets_its_declared_stopband_rejection(
 
     n = _SR
     t = np.arange(n) / _SR
-    bound = _DECLARED_STOPBAND_DB[octaves]
+    bound = _STOPBAND_DB[octaves]
 
     for direction, f_tone in (("below", fc / 2 ** octaves), ("above", fc * 2 ** octaves)):
         if f_tone >= _SR / 2 * 0.9 or f_tone < 20.0:
             continue
         tone = np.sin(2.0 * np.pi * f_tone * t).astype(np.float32)
         total = float((tone.astype(np.float64) ** 2).sum())
-        in_band = float(_band_energy(tone, fc, _SR).astype(np.float64).sum())
+        in_band = float(_band_energy(tone, fc, _SR, _ORDER).astype(np.float64).sum())
         rejection_db = 10.0 * np.log10(in_band / total)
 
         assert rejection_db <= bound, (
             f"a {f_tone:g} Hz tone ({octaves} octave(s) {direction} the {fc:g} Hz "
             f"band) leaks {rejection_db:.2f} dB into it, against the declared "
             f"{bound:g} dB. The octave filter's selectivity has changed — update "
-            f"`_butter_octave_filter`'s measured table AND `_DECLARED_STOPBAND_DB` "
+            f"`_butter_octave_filter`'s measured table AND "
+            f"`metric_octave_filter.stopband_rejection_db` in configs/base.yaml "
             f"together, and re-check the AC-63 per-band-absorption case (AC-68)."
         )
 
@@ -832,7 +839,7 @@ def test_the_octave_filter_edges_are_minus_six_db_and_bands_are_NOT_complementar
         for edge in (fc / 2 ** 0.5, fc * 2 ** 0.5):
             tone = np.sin(2.0 * np.pi * edge * t).astype(np.float32)
             total = float((tone.astype(np.float64) ** 2).sum())
-            in_band = float(_band_energy(tone, fc, _SR).astype(np.float64).sum())
+            in_band = float(_band_energy(tone, fc, _SR, _ORDER).astype(np.float64).sum())
             db = 10.0 * np.log10(in_band / total)
             assert db == pytest.approx(-6.0, abs=0.3), (
                 f"the {fc:g} Hz band's {edge:.1f} Hz edge reads {db:.2f} dB, not "
@@ -922,6 +929,7 @@ def test_a_leg_that_both_excludes_a_band_and_is_floor_limited_keeps_both_reasons
         sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=2.0,
         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
     )
 
     high_t30 = reasons[("T30", "high")]
@@ -976,7 +984,7 @@ def test_the_band_resolvability_floors_are_the_declared_values(fc: float) -> Non
         f"The floors scale as 1/f and are sample-rate dependent — re-measure and "
         f"rename the constant, or key it by sample rate."
     )
-    measured = _band_resolvable_decay_s(fc, _SR)
+    measured = _band_resolvable_decay_s(fc, _SR, _ORDER)
     declared = _DECLARED_FLOORS_48K[fc]
     for metric, want in declared.items():
         assert measured[metric] == pytest.approx(want, rel=5e-3), (
@@ -997,7 +1005,7 @@ def test_the_resolvability_floors_scale_as_one_over_f() -> None:
     from amcd.evaluation.room_acoustic import _band_resolvable_decay_s
 
     products = [
-        fc * _band_resolvable_decay_s(fc, _SR)["T30"]
+        fc * _band_resolvable_decay_s(fc, _SR, _ORDER)["T30"]
         for fc in (125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0)
     ]
     assert max(products) - min(products) < 0.4, (
@@ -1056,8 +1064,8 @@ def test_the_energy_fold_conserves_energy_at_every_record_length(
     ir = np.zeros(n_record, dtype=np.float32)
     ir[n_record // 2] = 1.0
 
-    folded = float(_band_energy(ir, fc, _SR).astype(np.float64).sum())
-    filtered, _guard = _butter_octave_filter(ir, fc, _SR)
+    folded = float(_band_energy(ir, fc, _SR, _ORDER).astype(np.float64).sum())
+    filtered, _guard = _butter_octave_filter(ir, fc, _SR, _ORDER)
     full = float((filtered.astype(np.float64) ** 2).sum())
 
     assert folded == pytest.approx(full, rel=1e-6), (
@@ -1093,13 +1101,14 @@ def test_a_record_shorter_than_one_guard_width_is_unmeasurable_not_approximated(
         _filter_guard_samples, _iso3382_band_metrics,
     )
 
-    guard = _filter_guard_samples(fc, _SR)
+    guard = _filter_guard_samples(fc, _SR, _ORDER)
 
     short = np.zeros(guard - 1, dtype=np.float32)
     short[len(short) // 2] = 1.0
     values, reasons, _res = _iso3382_band_metrics(
         short, fc, _SR, band_resolvability_margin=2.0
-    , min_decay_range_db=_NO_SNR_BOUND)
+    , min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER)
     for metric in ("T30", "EDT", "C50"):
         assert np.isnan(values[metric]), (
             f"{metric} returned {values[metric]} for a {len(short)}-sample record at "
@@ -1118,7 +1127,8 @@ def test_a_record_shorter_than_one_guard_width_is_unmeasurable_not_approximated(
     ok[len(ok) // 2] = 1.0
     values_ok, _r, _res2 = _iso3382_band_metrics(
         ok, fc, _SR, band_resolvability_margin=2.0
-    , min_decay_range_db=_NO_SNR_BOUND)
+    , min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER)
     assert not np.isnan(values_ok["T30"]), (
         f"a {len(ok)}-sample record at {fc:g} Hz is at or above the {guard}-sample "
         f"guard width and must still be measurable"
@@ -1142,8 +1152,8 @@ def test_a_record_ending_at_full_scale_is_not_given_a_dc_tail() -> None:
     ends_high[-1] = 1.0
     padded_tail = np.concatenate([ends_high, np.zeros(_SR // 4, dtype=np.float32)])
 
-    e_abrupt = float(_band_energy(ends_high, 500.0, _SR).sum())
-    e_padded = float(_band_energy(padded_tail, 500.0, _SR).sum())
+    e_abrupt = float(_band_energy(ends_high, 500.0, _SR, _ORDER).sum())
+    e_padded = float(_band_energy(padded_tail, 500.0, _SR, _ORDER).sum())
     assert e_abrupt == pytest.approx(e_padded, rel=1e-3), (
         f"truncating the record changed its band energy ({e_abrupt:.6f} vs "
         f"{e_padded:.6f}) — the trailing pad is replicating the last sample again"
@@ -1258,6 +1268,7 @@ def _oracle_t30_error_frac(cfg, rep, sim, scene, gain_db: float):
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
     )
     t = triples["T30"]
     return t.high, t.pred, abs(t.pred - t.high) / t.high, headroom
@@ -1352,7 +1363,7 @@ def _fitted_t30(t60: float, fc: float, seed: int, duration_s: float = 0.5) -> fl
     n = int(_SR * duration_s)
     t = np.arange(n) / _SR
     ir = (rng.standard_normal(n) * 10.0 ** (-3.0 * t / t60)).astype(np.float32)
-    energy = _band_energy(ir, fc, _SR)
+    energy = _band_energy(ir, fc, _SR, _ORDER)
     energy = energy[: _lundeby_truncate(energy, _SR)]
     if len(energy) < 2:
         return float("nan")
@@ -1399,7 +1410,7 @@ def test_disclosing_the_floor_tracks_the_true_t60_better_than_suppressing(
             if np.isnan(t30):
                 continue
             fitted.append(t30)
-            if t30 >= margin * _band_resolvable_decay_s(fc, _SR)["T30"]:
+            if t30 >= margin * _band_resolvable_decay_s(fc, _SR, _ORDER)["T30"]:
                 survivors.append(t30)
 
     assert len(fitted) > len(survivors), (
@@ -1453,6 +1464,7 @@ def test_a_floor_limited_band_does_not_cost_a_scene_from_the_paired_comparison()
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
     )
     assert acct["T30"]["resolvability_limited_hz"], (
         "fixture does not bite: no band was floor-limited, so this asserts nothing"
@@ -1497,6 +1509,7 @@ def test_a_degenerate_pred_leaves_c50_unscored_not_at_plus_200_db() -> None:
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
     )
 
     assert np.isnan(triples["C50"].pred), (
@@ -1549,6 +1562,7 @@ def test_a_large_but_real_c50_is_not_unscored_by_the_guard() -> None:
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
     )
     assert np.isfinite(values["C50"]), (
         f"a direct-dominated scene's C50 was unscored ({reasons.get('C50')}) — the "
@@ -1595,6 +1609,7 @@ def test_a_physical_leg_is_never_censored_for_its_own_c50(true_t60: float) -> No
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
     )
     for leg in ("low", "high"):
         assert np.isfinite(getattr(triples["C50"], leg)), (
@@ -1702,7 +1717,8 @@ class TestTheTruncationIndexUnderAZeroPad:
             values = [
                 _iso3382_band_metrics(
                     ir * 10.0**e, fc, _SR, band_resolvability_margin=_NO_FLOOR
-                , min_decay_range_db=_NO_SNR_BOUND)[0]
+                , min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER)[0]
                 for e in (-6, -3, 0, 3)
             ]
             for metric in ("T30", "EDT", "C50"):
@@ -1732,7 +1748,7 @@ class TestTheTruncationIndexUnderAZeroPad:
         ir = _padded_decay(0.6, seed=0)
         for fc in _ISO:
             idx = {
-                _lundeby_truncate(_band_energy(ir * 10.0**e, fc, _SR), _SR)
+                _lundeby_truncate(_band_energy(ir * 10.0**e, fc, _SR, _ORDER), _SR)
                 for e in (-8, -6, -3, 0, 3, 8)
             }
             assert len(idx) == 1, (
@@ -1791,6 +1807,7 @@ class TestT30RecoversAKnownDecayInAPaddedRecord:
                         _padded_decay(rt60, seed=seed), fc, _SR,
                         band_resolvability_margin=_NO_FLOOR,
                         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
                     )
                     t30 = values["T30"]
                     assert np.isfinite(t30), (
@@ -1825,6 +1842,7 @@ class TestT30RecoversAKnownDecayInAPaddedRecord:
                         _padded_decay(rt60, seed=seed), fc, _SR,
                         band_resolvability_margin=_NO_FLOOR,
                         min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
                     )
                     if abs(values["T30"] - rt60) / rt60 > _base_scalar("d0b_t30_jnd_frac"):
                         n += 1
@@ -1880,6 +1898,7 @@ class TestARoomTooReverberantForItsRecord:
                 _padded_decay(2.000, seed=0), fc, _SR,
                 band_resolvability_margin=_NO_FLOOR,
                 min_decay_range_db=_ISO_SNR_BOUND,
+            octave_filter_order=_ORDER,
             )
             assert reasons.get("T30") is None, (
                 f"a decay that FITS its record was refused at {fc} Hz: "
@@ -1896,6 +1915,7 @@ class TestARoomTooReverberantForItsRecord:
                 _padded_decay(8.294, seed=0), fc, _SR,
                 band_resolvability_margin=_NO_FLOOR,
                 min_decay_range_db=_ISO_SNR_BOUND,
+            octave_filter_order=_ORDER,
             )
             assert np.isnan(values["T30"]), (
                 f"T30 = {values['T30']} at {fc} Hz for a room whose decay is twice "
@@ -1920,10 +1940,12 @@ class TestARoomTooReverberantForItsRecord:
         ir = _padded_decay(8.294, seed=0)
         strict, _, _ = _iso3382_band_metrics(
             ir, _ISO[0], _SR, band_resolvability_margin=_NO_FLOOR,
-            min_decay_range_db=_ISO_SNR_BOUND)
+            min_decay_range_db=_ISO_SNR_BOUND,
+            octave_filter_order=_ORDER)
         lax, _, _ = _iso3382_band_metrics(
             ir, _ISO[0], _SR, band_resolvability_margin=_NO_FLOOR,
-            min_decay_range_db={"T30": 15.0, "EDT": 10.0})
+            min_decay_range_db={"T30": 15.0, "EDT": 10.0},
+            octave_filter_order=_ORDER)
         assert np.isnan(strict["T30"]) and np.isfinite(lax["T30"]), (
             "the declared bound did not change the outcome on an identical "
             "record, so it is not the thing deciding admissibility"
@@ -1938,6 +1960,7 @@ class TestARoomTooReverberantForItsRecord:
                 _padded_decay(1.0, seed=0), _ISO[0], _SR,
                 band_resolvability_margin=_NO_FLOOR,
                 min_decay_range_db={"EDT": 20.0},   # T30 missing
+                octave_filter_order=_ORDER,
             )
 
 
@@ -2001,7 +2024,7 @@ class TestTheHeadroomFloorIsPinnedAgainstBandLeakage:
         in_band = np.sin(2 * np.pi * 1000.0 * t).astype(np.float64)
 
         def band_power(x):
-            e = _band_energy(x, 1000.0, sr)
+            e = _band_energy(x, 1000.0, sr, _ORDER)
             e = e[0] if isinstance(e, tuple) else e
             return float(np.sum(e))
 

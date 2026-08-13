@@ -94,6 +94,17 @@ class DryRunSimulator:
         """
         return float(window_s)
 
+    @classmethod
+    def realized_absorption(cls, params: dict, alpha_nominal: float) -> float:
+        """Required pre-render declaration (`Simulator`).
+
+        The scaffold synthesizes its decay from Sabine at the declared alpha, using
+        the same `amcd.acoustics` formula the scene report characterizes the room
+        with (AC-24), so the room it renders IS the room declared. `params` does not
+        enter — this backend has no absorption convention to choose.
+        """
+        return float(alpha_nominal)
+
     def render(self, scene: SceneSpec, ray_budget: int) -> IRResult:
         # Separate RNG for scene structure vs noise — structure fixed, noise varies with budget
         rng_scene = np.random.default_rng(scene.seed)

@@ -117,6 +117,7 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 onset_rel_db=config.metric_onset_rel_db,
                 band_resolvability_margin=config.metric_band_resolvability_margin,
                 min_decay_range_db=config.metric_min_decay_range_db,
+                octave_filter_order=config.metric_octave_filter.order,
             )
             all_metrics.update(room_triples)
             nan_reasons.update(room_reasons)

@@ -26,26 +26,29 @@ decided it.
 Public API
 ----------
 compute_room_acoustic_metrics(pred_ir, high_ref_ir, low_ref_ir, *, sample_rate,
-                               iso_eval_freqs, onset_rel_db, band_resolvability_margin)
+                               iso_eval_freqs, onset_rel_db, band_resolvability_margin,
+                               min_decay_range_db, octave_filter_order)
     Standard ISO-3382 waveform path for the eval stage (pred/high/low in one
     call) → (metric triples, NaN reasons, shared integration window, band
     accounting); legs band-averaged over the band set the PHYSICAL legs resolve
     (AC-08/AC-25) and integrated over the cross-leg-shared Schroeder window
     (AC-17). Neither the band set nor the window is ever set by `pred` (RD-43).
 channel_band_avg_metrics(ir_w, *, sample_rate, iso_eval_freqs, onset_rel_db,
-                         band_resolvability_margin, trunc_idx_per_band=None)
+                         band_resolvability_margin, min_decay_range_db,
+                         octave_filter_order, trunc_idx_per_band=None)
     Single-IR onset-aligned band-averaged metrics → (values, NaN reasons); the
     D0b oracle probe's unit. Pass `trunc_idx_per_band` to join a paired
     comparison's shared window.
 channel_per_band_metrics(ir_w, *, sample_rate, iso_eval_freqs, onset_rel_db,
-                         band_resolvability_margin, trunc_idx_per_band=None)
+                         band_resolvability_margin, min_decay_range_db,
+                         octave_filter_order, trunc_idx_per_band=None)
     Per-band (values, reasons) — the shared unit under both of the above
     (identical alignment + truncation).
 
 Internal, but load-bearing to the paired path (private — do not import)
 ----------------------------------------------------------------------
 _shared_truncation_per_band(reference_legs, *, sample_rate, iso_eval_freqs,
-                            onset_rel_db)
+                            onset_rel_db, octave_filter_order)
     Per band, the one Schroeder integration limit every leg of a paired
     comparison must use (AC-17). Reference legs are PHYSICAL legs only — never a
     model output (RD-43).
@@ -72,16 +75,27 @@ from .metric_row import MetricTriple
 _MIN_FILTER_SAMPLES = 32
 
 
-def _filter_guard_samples(fc: float, sample_rate: int) -> int:
+#: The filter order the guard width below was calibrated against. The guard scales
+#: off it rather than hardcoding it, so a config that changes `order` moves the
+#: guard with it instead of silently under-padding.
+_GUARD_CALIBRATED_ORDER = 4
+
+
+def _filter_guard_samples(fc: float, sample_rate: int, order: int) -> int:
     """Zero-pad width for the `fc` octave band, in samples.
 
-    ~4x the filter's own T30 in this band, so it exceeds the ringing rather than
-    matching it; scales as 1/fc because the ringing does. ONE definition, shared by
-    `_butter_octave_filter` (which applies it) and `_iso3382_band_metrics` (which
-    refuses records shorter than it) — two expressions of one constant is the AC-24
-    shape, and this is exactly the kind of value that drifts.
+    ~4x the filter's own T30 in this band at the calibrated order, so it exceeds the
+    ringing rather than matching it; scales as 1/fc because the ringing does, and
+    linearly in `order` because a Butterworth section's decay time does too. At
+    `order = _GUARD_CALIBRATED_ORDER` this is exactly the measured 48/fc seconds —
+    the scaling generalizes the bound without moving the shipped value.
+
+    ONE definition, shared by `_butter_octave_filter` (which applies it) and
+    `_iso3382_band_metrics` (which refuses records shorter than it) — two
+    expressions of one constant is the AC-24 shape, and this is exactly the kind of
+    value that drifts.
     """
-    return int(np.ceil(48.0 / fc * sample_rate))
+    return int(np.ceil(48.0 / fc * sample_rate * order / _GUARD_CALIBRATED_ORDER))
 
 
 # ---------------------------------------------------------------------------
@@ -155,10 +169,10 @@ def _lundeby_truncate(energy_samples: np.ndarray, sample_rate: int) -> int:
 
 
 def _butter_octave_filter(
-    ir_w: np.ndarray, fc: float, sample_rate: int
+    ir_w: np.ndarray, fc: float, sample_rate: int, order: int
 ) -> tuple[np.ndarray, int]:
     """
-    Zero-phase 4th-order Butterworth octave-band filter centered at fc Hz.
+    Zero-phase Butterworth octave-band filter centered at fc Hz, `order` per section.
     Passband: [fc / sqrt(2), fc * sqrt(2)]. `sosfiltfilt` gives the zero-phase
     response (no group-delay offset in EDT). Returns (filtered, guard), the guard
     still attached — `_band_energy` owns what happens to it.
@@ -179,17 +193,21 @@ def _butter_octave_filter(
     those values are written down (RR-39) — change both together.
 
     REALIZED SELECTIVITY — DECLARED, AND IT MEETS NO IEC 61260 CLASS (AC-68/AC-107).
-    ISO 3382-1 specifies IEC 61260 class 1. MEASURED through `_band_energy` with a
-    pure tone, dB re the tone's total energy:
+    ISO 3382-1 specifies IEC 61260 class 1. MEASURED at the shipped order 4 through
+    `_band_energy` with a pure tone, dB re the tone's total energy:
 
         fc        -2 oct   -1 oct   lo edge   centre   hi edge   +1 oct   +2 oct
         500 Hz    -46.59   -37.43    -6.00     -0.00    -6.01    -38.49   -47.33
         1000 Hz   -49.59   -40.29    -6.01     -0.00    -6.01    -41.36   -50.48
 
     Class 1 wants ~70 dB in the far stopband and class 2 ~60 dB, so at one octave out
-    this filter meets NEITHER. The order is not raised because it also sets the
-    ringing `_band_resolvable_decay_s` measures — steeper skirts buy selectivity with
-    a longer unresolvable floor, a research trade rather than a cleanup (F-143).
+    this filter meets NEITHER. The order is not raised to close that gap because it
+    also sets the ringing `_band_resolvable_decay_s` measures — steeper skirts buy
+    selectivity with a longer unresolvable floor, a research trade rather than a
+    cleanup — so it is a DECLARED experiment parameter,
+    `configs/base.yaml` `metric_octave_filter.order`, and the table above is
+    declared beside it as `stopband_rejection_db` (F-143/RD-186). Both figures move
+    together if the order does; neither is a literal here.
 
     Two further realized properties, neither what a reader would assume: the -6 dB
     band EDGES are correct (`sosfiltfilt` squares |H|², so -3 dB presents as -6 dB),
@@ -225,10 +243,10 @@ def _butter_octave_filter(
     f_hi = fc * 2.0 ** 0.5
     f_lo = max(f_lo, 10.0)      # stay well above DC
     f_hi = min(f_hi, nyq * 0.99)  # stay below Nyquist
-    sos = butter(4, [f_lo, f_hi], btype="bandpass", fs=sample_rate, output="sos")
+    sos = butter(order, [f_lo, f_hi], btype="bandpass", fs=sample_rate, output="sos")
     # ~4x the filter's own T30 in this band; zeros are cheap and the bound only has
     # to exceed the ringing, not match it. Both ends, for the reason in the docstring.
-    guard = _filter_guard_samples(fc, sample_rate)
+    guard = _filter_guard_samples(fc, sample_rate, order)
     zeros = np.zeros(guard, dtype=np.float64)
     padded = np.concatenate([zeros, np.asarray(ir_w, dtype=np.float64), zeros])
     return sosfiltfilt(sos, padded, padtype="constant").astype(np.float32), guard
@@ -258,11 +276,11 @@ def _find_onset(ir_w: np.ndarray, rel_db: float) -> int:
     return int(above[0]) if above.size else 0
 
 
-def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int) -> np.ndarray:
+def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int, order: int) -> np.ndarray:
     """Octave-band energy envelope (squared band-filtered samples) — the input both
     to Lundeby truncation and to Schroeder integration. Factored out so a truncation
     index can be derived WITHOUT computing metrics (AC-17)."""
-    filtered, guard = _butter_octave_filter(ir_w, fc, sample_rate)
+    filtered, guard = _butter_octave_filter(ir_w, fc, sample_rate, order)
     energy = filtered.astype(np.float64) ** 2
     n_record = len(energy) - 2 * guard
 
@@ -398,7 +416,7 @@ def _decay_times_from_energy(
 
 
 @lru_cache(maxsize=None)
-def _band_resolvable_decay_s(fc: float, sample_rate: int) -> dict[str, float]:
+def _band_resolvable_decay_s(fc: float, sample_rate: int, order: int) -> dict[str, float]:
     """The shortest decay the `fc` octave band can resolve: the filter's OWN.
 
     A unit impulse carries no decay at all, so whatever T30/EDT this returns is
@@ -406,8 +424,10 @@ def _band_resolvable_decay_s(fc: float, sample_rate: int) -> dict[str, float]:
     this is not being measured — the filter is.
 
     MEASURED here rather than asserted, and the numbers scale exactly as 1/f
-    (48 kHz): **500 Hz → T30 20.360 ms, EDT 9.556 ms; 1000 Hz → T30 10.162 ms,
-    EDT 4.802 ms**.
+    (48 kHz, at the shipped `metric_octave_filter.order` of 4): **500 Hz → T30
+    20.360 ms, EDT 9.556 ms; 1000 Hz → T30 10.162 ms, EDT 4.802 ms**. They are a
+    function of the order too — that is the trade F-143 makes explicit — so the
+    order is part of this cache key and of the figures quoted here.
     THESE VALUES ARE WRITTEN DOWN IN EXACTLY TWO PLACES (RR-39, RR-119) — they
     have moved twice as the filter path was corrected (AC-36's energy fold last),
     and every restatement elsewhere became a contradiction. Cite this function.
@@ -432,7 +452,7 @@ def _band_resolvable_decay_s(fc: float, sample_rate: int) -> dict[str, float]:
     n = max(int(0.5 * sample_rate), _MIN_FILTER_SAMPLES * 4)
     impulse = np.zeros(n, dtype=np.float32)
     impulse[0] = 1.0
-    energy = _band_energy(impulse, fc, sample_rate)
+    energy = _band_energy(impulse, fc, sample_rate, order)
     # Floors of 0.0 ON PURPOSE: this measures the FILTER's own ringing from a unit
     # impulse, which carries no room decay by construction, so ISO 3382-1's SNR
     # admissibility (AC-176) must not apply here. Refusing it would make the floor
@@ -451,6 +471,7 @@ def _shared_truncation_per_band(
     sample_rate: int,
     iso_eval_freqs: list[float],
     onset_rel_db: float,
+    octave_filter_order: int,
 ) -> list[tuple[int, str]]:
     """Per eval band, the truncation index SHARED by every leg of a paired
     comparison, plus the name of the leg that set it (AC-17).
@@ -505,7 +526,9 @@ def _shared_truncation_per_band(
     out: list[tuple[int, str]] = []
     for fc in iso_eval_freqs:
         per_leg = {
-            leg: _lundeby_truncate(_band_energy(ir, float(fc), sample_rate), sample_rate)
+            leg: _lundeby_truncate(
+                _band_energy(ir, float(fc), sample_rate, octave_filter_order), sample_rate
+            )
             if ir.shape[0] >= _MIN_FILTER_SAMPLES else 0
             for leg, ir in aligned.items()
         }
@@ -521,6 +544,7 @@ def _iso3382_band_metrics(
     *,
     band_resolvability_margin: float,
     min_decay_range_db: dict[str, float],
+    octave_filter_order: int,
     trunc_idx: int | None = None,
     trunc_source: str | None = None,
 ) -> tuple[dict[str, float], dict[str, str], dict[str, str]]:
@@ -573,7 +597,7 @@ def _iso3382_band_metrics(
     # canonical dry run's 58 scene-legs is 10981 samples against guards of 4608
     # (500 Hz) and 2304 (1000 Hz), and base.yaml's ir_duration 4.25 s is 17x larger
     # again. It bounds a path that was reachable in principle, not one that fires.
-    guard_samples = _filter_guard_samples(fc, sample_rate)
+    guard_samples = _filter_guard_samples(fc, sample_rate, octave_filter_order)
     if ir_w.shape[0] < max(_MIN_FILTER_SAMPLES, guard_samples):
         reason = (
             f"record is {ir_w.shape[0]} samples, shorter than the {guard_samples}-sample "
@@ -589,7 +613,7 @@ def _iso3382_band_metrics(
             {m: reason for m in all_metrics},
             {},
         )
-    energy = _band_energy(ir_w, fc, sample_rate)  # (T,)
+    energy = _band_energy(ir_w, fc, sample_rate, octave_filter_order)  # (T,)
 
     # Lundeby truncation before Schroeder. `trunc_idx` is supplied by a paired
     # caller so every leg integrates over the SAME limit (AC-17); a single-IR caller
@@ -697,7 +721,7 @@ def _iso3382_band_metrics(
                "ISO-3382-real quantity and not a filter artifact",
     }
     resolvability: dict[str, str] = {}
-    floors = _band_resolvable_decay_s(float(fc), sample_rate)
+    floors = _band_resolvable_decay_s(float(fc), sample_rate, octave_filter_order)
     for _name, _val in (("T30", t30), ("EDT", edt)):
         floor = band_resolvability_margin * floors[_name]
         if not np.isnan(_val) and _val < floor:
@@ -763,6 +787,7 @@ def channel_band_avg_metrics(
     onset_rel_db: float,          # config.metric_onset_rel_db (§3 metric path)
     band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-26/AC-27)
     min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db (ISO 3382-1 SNR, AC-176)
+    octave_filter_order: int,  # config.metric_octave_filter.order (§3, F-143)
     trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> tuple[dict[str, float], dict[str, str]]:
     """Onset-align a W-channel IR to its direct arrival, then average ISO-3382 band
@@ -801,6 +826,7 @@ def channel_band_avg_metrics(
         iso_eval_freqs=iso_eval_freqs, onset_rel_db=onset_rel_db,
         band_resolvability_margin=band_resolvability_margin,
         min_decay_range_db=min_decay_range_db,
+        octave_filter_order=octave_filter_order,
         trunc_idx_per_band=trunc_idx_per_band,
     )
     # Apply the floor here, so this unit's contract is exactly what it always was.
@@ -833,6 +859,7 @@ def channel_per_band_metrics(
     onset_rel_db: float,          # config.metric_onset_rel_db (§3 metric path)
     band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-26/AC-27)
     min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db (ISO 3382-1 SNR, AC-176)
+    octave_filter_order: int,  # config.metric_octave_filter.order (§3, F-143)
     trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> list[tuple[dict[str, float], dict[str, str], dict[str, str]]]:
     """Onset-align a W-channel IR (AC-02), then compute per-eval-band ISO-3382
@@ -858,7 +885,8 @@ def channel_per_band_metrics(
         _iso3382_band_metrics(
             ir_w, float(fc), sample_rate,
             band_resolvability_margin=band_resolvability_margin,
-        min_decay_range_db=min_decay_range_db,
+            min_decay_range_db=min_decay_range_db,
+            octave_filter_order=octave_filter_order,
             trunc_idx=None if trunc_idx_per_band is None else trunc_idx_per_band[b][0],
             trunc_source=None if trunc_idx_per_band is None else trunc_idx_per_band[b][1],
         )
@@ -876,6 +904,7 @@ def compute_room_acoustic_metrics(
     onset_rel_db: float,          # from config.metric_onset_rel_db (§3 metric path)
     band_resolvability_margin: float,  # from config.metric_band_resolvability_margin (§3, AC-26/AC-27)
     min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db (ISO 3382-1 SNR, AC-176)
+    octave_filter_order: int,  # from config.metric_octave_filter.order (§3, F-143)
 ) -> tuple[
     dict[str, MetricTriple],
     dict[tuple[str, str], str],
@@ -941,13 +970,15 @@ def compute_room_acoustic_metrics(
         sample_rate=sample_rate,
         iso_eval_freqs=iso_eval_freqs,
         onset_rel_db=onset_rel_db,
+        octave_filter_order=octave_filter_order,
     )
     per_leg = {
         leg: channel_per_band_metrics(
             ir[0], sample_rate=sample_rate,
             iso_eval_freqs=iso_eval_freqs, onset_rel_db=onset_rel_db,
             band_resolvability_margin=band_resolvability_margin,
-        min_decay_range_db=min_decay_range_db,
+            min_decay_range_db=min_decay_range_db,
+            octave_filter_order=octave_filter_order,
             trunc_idx_per_band=shared_trunc,
         )
         for leg, ir in [("pred", pred_ir), ("high", high_ref_ir), ("low", low_ref_ir)]

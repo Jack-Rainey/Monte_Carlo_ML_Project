@@ -41,6 +41,7 @@ from ..simulators.base import (
     SceneSpec,
     simulator_max_eval_freq_hz,
     simulator_min_separation,
+    simulator_realized_absorption,
     simulator_realized_support_s,
 )
 
@@ -306,6 +307,7 @@ def _room_acoustics(
     *,
     alpha_limit: float,
     realized_support_s,
+    realized_absorption,
     iso_t30_decay_range_db: float,
     characterization: str,
 ) -> dict:
@@ -384,11 +386,18 @@ def _room_acoustics(
     volume, surface = box_volume_and_surface(dims)
     # NOMINAL α, as configured — and it governs EVERY quantity below, not only the
     # d_min pair: t60_*, critical_distance_m, drr_db and the record-length flag all
-    # scale with it. Pending AC-54, which holds that the backend realizes
-    # α_eff = 1−sqrt(1−α); at that α_eff every T60 here is 1.45-1.98× longer. Stated
-    # at function scope because the flag it matters most for is the record-length
-    # one, ~60 lines below (AC-54/AC-55/AC-56).
+    # scale with it (AC-54/AC-55/AC-56). Stated at function scope because the flag
+    # it matters most for is the record-length one, ~60 lines below.
+    #
+    # WHETHER THAT IS ALSO THE RENDERED ROOM IS THE BACKEND'S ANSWER, NOT OURS
+    # (AC-50). This module names no backend (RD-144), so it asks through the same
+    # seam it asks about record length, and RECORDS the reply: `absorption_realized`
+    # below, with `absorption_is_as_declared` beside it. On gsound the two agree
+    # under `pre_compensate` and diverge by 1.14-1.98x on T60 under `as_is`, and a
+    # reader checking a d_min or a DRR against the wrong one of them is checking a
+    # room that was never rendered.
     alpha, _alpha_clipped = clip_absorption(absorption)
+    alpha_realized = realized_absorption(alpha)
 
     # Shared declarations (amcd.acoustics) — the scaffold renders from the same
     # constant and the same formula, so the described room and the rendered room
@@ -437,6 +446,14 @@ def _room_acoustics(
         "volume_m3": volume,
         "surface_m2": surface,
         "absorption": alpha,
+        # What the ACTIVE BACKEND builds from the nominal α above (AC-50/AC-54).
+        # Equal to it whenever the backend realizes what it is given; when it is
+        # not, every closed form in this record describes the declared room and
+        # this is the one that was rendered.
+        "absorption_realized": float(alpha_realized),
+        "absorption_is_as_declared": bool(
+            abs(alpha_realized - alpha) <= 1e-12 * max(1.0, alpha)
+        ),
         "t60_sabine_s": float(t60_sabine),
         "t60_eyring_s": float(t60_eyring),
         # Hopkins–Stryker: r_c = sqrt(R/16π) with R = Sα/(1−α). See the
@@ -861,6 +878,11 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         return simulator_realized_support_s(
             config, t60_s, volume_m3, surface_m2, config.ir_duration)
 
+    # The other backend fact this module must record without naming a backend
+    # (AC-50): what the renderer's room actually absorbs, given a nominal alpha.
+    def realized_alpha_of(alpha_nominal: float) -> float:
+        return simulator_realized_absorption(config, alpha_nominal)
+
     scenes_cfg = config.scenes
     id_axes = dict(scenes_cfg.id_regime)  # {geometry, placement, material}
     plan = _generation_plan(config)
@@ -919,6 +941,7 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 dims, absorption, distance,
                 alpha_limit=scenes_cfg.diffuse_field_alpha_limit,
                 realized_support_s=support_of,
+                realized_absorption=realized_alpha_of,
                 iso_t30_decay_range_db=config.scenes.iso_t30_decay_range_db,
                 characterization=(
                     scenes_cfg.geometry_families[axes["geometry"]].characterization
@@ -983,11 +1006,26 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                     _summarize([r[key] for r in room_stats if key in r])
                     if any(key in r for r in room_stats) else None
                 )
-                for key in ("volume_m3", "t60_sabine_s", "t60_eyring_s",
+                for key in ("volume_m3", "absorption", "absorption_realized",
+                            "t60_sabine_s", "t60_eyring_s",
                             "critical_distance_m", "d_over_rc", "drr_db",
                             "sabine_eyring_ratio", "iso_min_distance_sabine_m",
                             "iso_min_distance_eyring_m")
             },
+            # WHICH ROOM THE BLOCK ABOVE DESCRIBES (AC-50/AC-54). Every quantity in
+            # it — T60, r_c, DRR, both d_min variants — is a closed form in the
+            # NOMINAL absorption, and whether the renderer builds that room is the
+            # backend's convention, not this module's. Counted rather than asserted
+            # so a split that is partly rendered under a different absorption than it
+            # declares cannot read as fully faithful.
+            "absorption_as_declared": _flag_counts(
+                room_stats, ("absorption_is_as_declared",),
+                uncharacterized_consequence=(
+                    "A non-enclosure carries no closed-form estimate for the "
+                    "convention to invalidate, so nothing is lost here — but the "
+                    "backend still renders it under whatever convention it declares."
+                ),
+            ),
             # Validity of the estimates directly above (AC-21) and of the record
             # length against them (AC-22). Counts, not just a flag, so the reader
             # sees HOW MUCH of a split is outside the diffuse-field domain rather

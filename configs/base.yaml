@@ -170,13 +170,23 @@ scenes:
     #      on the SAME shoebox family, which is what `test_material_shift` selects:
     #
     #          Sabine  d_min in [0.412, 5.712] m
-    #          Eyring  d_min in [0.417, 11.413] m     (max at 12x10x5 m, alpha 0.98)
+    #          Eyring  d_min in [0.417, 11.413] m
     #
-    #      NOMINAL ALPHA AS CONFIGURED; PENDING AC-54. These are computed from the
-    #      declared alpha, and AC-54 has shown the backend's effective absorption is
-    #      1-sqrt(1-alpha), so the ROOM ACTUALLY RENDERED has different corners
-    #      (~5.35 m Sabine / ~8.07 m Eyring at that same corner). This range is
-    #      therefore provisional until AC-54 resolves.
+    #      Both extremes are the same two corners: the minimum at the smallest
+    #      shoebox (3x3x2.4 m) at alpha 0.05, the maximum at the largest
+    #      (12x10x5 m) at alpha 0.98. `corridor` sits inside both ends despite its
+    #      length, because d_min follows SURFACE, not extent.
+    #
+    #      THESE ARE THE RENDERED CORNERS, not merely the configured ones (AC-50).
+    #      They are computed from the declared nominal alpha, and that is correct
+    #      for the shipped backend because `absorption_convention: pre_compensate`
+    #      passes 1-(1-alpha)^2 to `createbox`, which makes the realized absorption
+    #      equal the declared one (AC-54, configs/simulators/gsound_sir.yaml). Under
+    #      the `as_is` convention — reachable, and what every pre-AC-54 measurement
+    #      was taken under — the rendered room has alpha_eff = 1-sqrt(1-alpha) and
+    #      the same corner gives ~5.35 m Sabine / ~8.07 m Eyring instead. The
+    #      convention decides which of the two a reader should apply, so a run's
+    #      provenance records it.
     #
     #      1.0 m sits near the BOTTOM of that range, not "inside the band" as this
     #      comment previously claimed. A single global constant cannot satisfy a
@@ -300,6 +310,39 @@ iso_eval_freqs: [500, 1000]
 # start-of-response convention (not an arbitrary gate). (RD-05/AC-08 provenance)
 metric_onset_rel_db: -20.0
 
+# ── The octave-band filter the reported metrics are computed through ──────────
+#
+# The ORDER is an experiment parameter, not an implementation detail (F-143). It
+# is not fixed by ISO 3382-1: the standard asks for IEC 61260 class 1, which this
+# filter fails at any order reachable here. What the order actually buys is a
+# TRADE — steeper skirts give better out-of-band rejection and a LONGER ringing
+# floor, and that floor (`_band_resolvable_decay_s`) decides which bands carry the
+# AC-38 resolvability caveat into a reported number. 4 is shipped because the
+# floors it produces (T30 20.36 / 10.16 ms, EDT 9.56 / 4.80 ms at 500 / 1000 Hz)
+# sit below the decays base.yaml's declared support admits, while the rejection it
+# gives is enough for one scalar absorption across all simulated bands. Both halves
+# of that sentence move if the order does, which is why neither is a literal.
+#
+# `stopband_rejection_db` is the MEASURED consequence, declared so it cannot rot
+# the way the resolvability floors did (AC-65/RD-186). Keyed by octaves outside the
+# band; each bound is the worse of the two eval bands at that offset, rounded
+# outward ~1 dB against scipy point releases, and applied on both sides. Measured
+# through `_band_energy` with a pure tone at 48 kHz:
+#
+#     fc        -2 oct   -1 oct    +1 oct   +2 oct
+#     500 Hz    -46.59   -37.43    -38.49   -47.33
+#     1000 Hz   -49.59   -40.29    -41.36   -50.48
+#
+# Class 1 wants ~70 dB and class 2 ~60 dB in the far stopband, so at one octave out
+# this meets NEITHER. Pinned by
+# `test_the_octave_filter_meets_its_declared_stopband_rejection`, which reads these
+# values rather than holding its own copy.
+metric_octave_filter:
+  order: 4
+  stopband_rejection_db:
+    1: -36.5
+    2: -45.5
+
 # How many times the octave filter's OWN decay a room's decay must exceed to be
 # resolvable in that band. The floor is MEASURED per (metric, band) from the
 # filter's impulse response and scales as 1/f; the values live in ONE place,
@@ -310,11 +353,26 @@ metric_onset_rel_db: -20.0
 # the FILTER'S OWN measured decay times this margin — defensible, and measured
 # through the very path it governs — but a reader will take "what the band can
 # resolve" for the standard's rule, and it is not. ISO 3382-2:2008 expresses the
-# same concern as a bandwidth-time product, BT > 16, which at the 500 Hz octave
-# (B = 354 Hz) requires T > 45 ms. The shipped floor at margin 2.0 is 40.7 ms, so
-# it is MORE PERMISSIVE than the standard's guidance by ~4 ms at 500 Hz. Stated so
-# the two are not conflated; the standard's form is not adopted because it takes no
-# account of this filter's realized ringing, which is what actually limits us.
+# same concern as a bandwidth-time product, BT > 16.
+#
+# B IS THE REALIZED BANDWIDTH, NOT THE NOMINAL ONE (AC-108). `sosfiltfilt` runs the
+# section forwards and backwards, so the power response is |H|⁴ rather than |H|²
+# and the equivalent noise bandwidth is NARROWER than the octave's nominal
+# fc·(√2 − 1/√2). Measured by integrating |H|⁴: **317.46 Hz at 500 Hz and 634.96 Hz
+# at 1000 Hz**, against nominals of 353.55 and 707.11 — 10.2 % narrower at both.
+# A narrower B needs a LONGER T for the same BT, so the comparison below moves in
+# the permissive direction and had understated itself:
+#
+#     band      B nominal   B realized   BT>16 needs T   floor at margin 2.0
+#     500 Hz     353.55       317.46        50.40 ms          40.72 ms
+#     1000 Hz    707.11       634.96        25.20 ms          20.32 ms
+#
+# So the shipped floor is **9.68 ms more permissive** than ISO 3382-2's guidance at
+# 500 Hz (4.88 ms at 1000 Hz) — not the ~4.5 ms a nominal-B reading gives. Stated
+# so the two criteria are not conflated; the standard's form is not adopted because
+# it takes no account of this filter's realized ringing, which is what actually
+# limits us. The floor's VALUE is ratified on the AC-38 grounds below and does not
+# move with this correction.
 #
 # THE MARGIN'S CALIBRATION DID NOT REPRODUCE, AND HAS BEEN RESTATED (AC-101).
 # superseded wording is in git history and docs/ledger_inbox/M.md (RR-115).

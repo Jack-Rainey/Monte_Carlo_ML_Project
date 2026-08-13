@@ -244,6 +244,7 @@ def _band_intersected_pair(
             onset_rel_db=config.metric_onset_rel_db,
             band_resolvability_margin=config.metric_band_resolvability_margin,
             min_decay_range_db=config.metric_min_decay_range_db,
+            octave_filter_order=config.metric_octave_filter.order,
             trunc_idx_per_band=shared_trunc,
         )
         for leg, ir in (("oracle", oracle_w), ("reference", reference_w))
@@ -380,6 +381,7 @@ def _run_d0b(
                 sample_rate=config.sample_rate,
                 iso_eval_freqs=iso_eval_freqs,
                 onset_rel_db=config.metric_onset_rel_db,
+                octave_filter_order=config.metric_octave_filter.order,
             )
             # BAND-INTERSECTED ACROSS LEGS, as eval does (AC-08 / F-101).
             #

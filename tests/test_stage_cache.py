@@ -867,6 +867,10 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         # AC-176: governs whether T30/EDT is scored at all, so a change to it
         # must invalidate eval. Probed, not exempted.
         "metric_min_decay_range_db": {"T30": 41.0, "EDT": 19.0},
+        # F-143: the filter order sets both the out-of-band rejection and the
+        # ringing floor every reported ISO metric is measured against, so a change
+        # to it changes the numbers eval produces. Probed, not exempted.
+        "metric_octave_filter": {"order": 6, "stopband_rejection_db": {1: -50.0}},
         "metric_edt_variance_limited_s": 0.3,
         # The D0a/D0b thresholds ARE the verdict `diagnostics` publishes — "signal
         # to learn at this ray budget", "carrier ceiling clears" — so a change to

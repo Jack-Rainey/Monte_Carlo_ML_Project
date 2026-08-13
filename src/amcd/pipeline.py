@@ -188,6 +188,12 @@ def _diagnostics_fingerprint(config: Config) -> dict:
         "metric_band_resolvability_margin": config.metric_band_resolvability_margin,
         "metric_edt_variance_limited_s": config.metric_edt_variance_limited_s,
         "metric_min_decay_range_db": dict(config.metric_min_decay_range_db),
+        # THE FILTER IS THE INSTRUMENT (F-143). `order` sets both the out-of-band
+        # rejection and the ringing floor every reported ISO metric is measured
+        # against, so a run under a different order reports different numbers from
+        # the same waveforms. `stopband_rejection_db` is the declared consequence
+        # and moves with it.
+        "metric_octave_filter": config.metric_octave_filter.model_dump(mode="json"),
         "sample_rate": config.sample_rate,
         "n_samples": config.n_samples,
         "ambisonics_order": config.ambisonics_order,
@@ -266,6 +272,12 @@ def _eval_fingerprint(config: Config) -> dict:
         "metric_min_decay_range_db": dict(sorted(config.metric_min_decay_range_db.items())),
         # Governs a REPORTED disclosure column (F-65); the class-level guard
         # against the next such key is FINGERPRINT_EXEMPT_FIELDS below.
+        # THE FILTER IS THE INSTRUMENT (F-143). `order` sets both the out-of-band
+        # rejection and the ringing floor every reported ISO metric is measured
+        # against, so a run under a different order reports different numbers from
+        # the same waveforms. `stopband_rejection_db` is the declared consequence
+        # and moves with it.
+        "metric_octave_filter": config.metric_octave_filter.model_dump(mode="json"),
         "metric_edt_variance_limited_s": config.metric_edt_variance_limited_s,
         "representation": {
             "name": config.representation.name,

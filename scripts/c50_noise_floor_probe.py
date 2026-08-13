@@ -69,6 +69,7 @@ def _c50(config: Config, ir: np.ndarray) -> dict:
         onset_rel_db=config.metric_onset_rel_db,
         band_resolvability_margin=config.metric_band_resolvability_margin,
         min_decay_range_db=config.metric_min_decay_range_db,
+        octave_filter_order=config.metric_octave_filter.order,
     )
     return {str(fc): values.get("C50") for fc, (values, _r, _v) in
             zip(config.iso_eval_freqs, per_band)}

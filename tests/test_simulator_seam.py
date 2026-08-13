@@ -436,6 +436,9 @@ class TestPlacementAxisIsAcousticallyLive:
             iso_eval_freqs=[500.0, 1000.0], onset_rel_db=-20.0,
             band_resolvability_margin=0.0,
             min_decay_range_db={"T30": 0.0, "EDT": 0.0},
+            octave_filter_order=Config.load(
+                Path("configs/base.yaml")
+            ).metric_octave_filter.order,
         )
         return values["C50"]
 
@@ -1904,10 +1907,10 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
     """
 
     def test_pre_compensation_makes_the_realized_alpha_the_declared_one(self) -> None:
-        from amcd.simulators.gsound_sir import _realized_absorption
+        from amcd.simulators.gsound_sir import _createbox_absorption
 
         for nominal in (0.02, 0.05, 0.10, 0.30, 0.50, 0.80, 0.98):
-            passed = _realized_absorption(nominal, "pre_compensate")
+            passed = _createbox_absorption(nominal, "pre_compensate")
             realized = 1.0 - np.sqrt(1.0 - passed)   # what upstream does to it
             assert realized == pytest.approx(nominal, abs=1e-12), (
                 f"pre-compensated alpha {passed} realizes {realized}, not the "
@@ -1920,10 +1923,10 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
         AC-54's own render (5x4x3 m, alpha 0.30, T30 0.5441 s against 0.343 s
         nominal) was taken under it, and those numbers must stay reproducible.
         """
-        from amcd.simulators.gsound_sir import _realized_absorption
+        from amcd.simulators.gsound_sir import _createbox_absorption
 
         for nominal, expected_ratio in ((0.05, 1.975), (0.30, 1.837), (0.80, 1.447)):
-            realized = 1.0 - np.sqrt(1.0 - _realized_absorption(nominal, "as_is"))
+            realized = 1.0 - np.sqrt(1.0 - _createbox_absorption(nominal, "as_is"))
             assert nominal / realized == pytest.approx(expected_ratio, rel=1e-3), (
                 f"the uncorrected room at alpha {nominal} no longer realizes "
                 f"{expected_ratio}x on T60 — AC-54's evidence stops reproducing."
@@ -1931,10 +1934,71 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
 
     def test_an_undeclared_convention_raises(self) -> None:
         """No default: it decides which room is rendered (CLAUDE.md)."""
-        from amcd.simulators.gsound_sir import _realized_absorption
+        from amcd.simulators.gsound_sir import _createbox_absorption
 
         with pytest.raises(ValueError, match="neither 'pre_compensate' nor 'as_is'"):
-            _realized_absorption(0.3, "")
+            _createbox_absorption(0.3, "")
+
+    def test_the_declared_realized_alpha_is_not_the_createbox_alpha(self) -> None:
+        """AC-50 — the two quantities are DIFFERENT numbers, and the scene report
+        needs the second one.
+
+        `_createbox_absorption` answers "what do I hand the renderer"; the backend's
+        `realized_absorption` classmethod answers "what does the room then have".
+        Under `pre_compensate` a nominal 0.30 is passed as 0.5100 and realized as
+        0.30, so a closed form evaluated on the first describes a room 1.8x more
+        absorptive than the one rendered. `support_t60_s` in the render provenance
+        was computed that way until this separation existed.
+        """
+        from amcd.simulators.gsound_sir import (
+            GsoundSirSimulator, _createbox_absorption,
+        )
+
+        for convention, expect in (("pre_compensate", lambda a: a),
+                                   ("as_is", lambda a: 1.0 - np.sqrt(1.0 - a))):
+            params = {"absorption_convention": convention}
+            for nominal in (0.05, 0.30, 0.80, 0.98):
+                realized = GsoundSirSimulator.realized_absorption(params, nominal)
+                assert realized == pytest.approx(expect(nominal), abs=1e-12)
+                if convention == "pre_compensate":
+                    assert _createbox_absorption(nominal, convention) != pytest.approx(
+                        realized, rel=1e-6
+                    ), (
+                        f"at alpha {nominal} the createbox value and the realized "
+                        f"value coincide, so this test can no longer catch the two "
+                        f"being confused"
+                    )
+
+    def test_every_backend_declares_what_it_realizes(self) -> None:
+        """The scaffold answers too, and answers the identity (AC-50).
+
+        Left optional, a backend would omit it and the scene report would silently
+        describe the declared room as though it were the rendered one — the
+        silent-contract shape `realized_support_s` and `min_source_receiver_distance_m`
+        are both guarded against.
+        """
+        from amcd.simulators.base import simulator_realized_absorption
+
+        cfg = tiny_config()
+        for nominal in (0.05, 0.30, 0.80):
+            assert simulator_realized_absorption(cfg, nominal) == pytest.approx(nominal)
+
+    def test_a_backend_that_does_not_declare_it_is_refused(self) -> None:
+        from pydantic import BaseModel
+
+        from amcd.simulators.base import simulator_realized_absorption
+
+        class _Silent:
+            class Params(BaseModel):
+                # Permissive on purpose: the subject is the MISSING classmethod,
+                # so param validation must not be what raises.
+                model_config = {"extra": "allow"}
+
+        cfg = tiny_config()
+        with mock.patch.object(
+            simulator_registry, "get", return_value=_Silent
+        ), pytest.raises(TypeError, match="realized_absorption"):
+            simulator_realized_absorption(cfg, 0.3)
 
     def test_the_backend_config_declares_it(self) -> None:
         params = yaml.safe_load(
