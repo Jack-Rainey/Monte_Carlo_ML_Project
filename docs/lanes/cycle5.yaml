@@ -28,7 +28,7 @@
 # lanes, and the fixed-seed ci_table.csv A/B moved exactly one row.
 #
 # ROW COUNT IS NOT A WORK ESTIMATE. The ledger's OPEN rows collapse into twelve
-# clusters (see "FINDING CLUSTERS" in docs/review_ledger.md): ~30-40 independent
+# clusters: ~30-40 independent
 # work items. Rows in one cluster must close together or not at all.
 
 cycle: cycle5
