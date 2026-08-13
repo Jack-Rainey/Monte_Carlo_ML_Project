@@ -442,22 +442,42 @@ def _run_d0b(
         c50_n = summary["C50"]["n"]
 
         # JND thresholds scale from the independent reference metric (not self-referential)
-        scene_ids_sp = [sid for sid, sp in splits.items() if sp == split_name]
-        ref_t30 = float(np.nanmean([
-            per_scene_residuals[sid]["reference"]["T30"]
-            for sid in scene_ids_sp if sid in per_scene_residuals
-        ]))
-        ref_edt = float(np.nanmean([
-            per_scene_residuals[sid]["reference"]["EDT"]
-            for sid in scene_ids_sp if sid in per_scene_residuals
-        ]))
+        # The threshold's reference must be averaged over the SAME scenes the
+        # residual is (S-F1). `nanmean` here silently spanned every scene in the
+        # split while the residual spans only the scored ones, so a split with
+        # attrition compared a residual from one population against a JND scaled by
+        # another — and the two populations differ by exactly the scenes whose
+        # decay the estimator could not resolve.
+        def _reference(metric: str) -> float:
+            vals = [
+                per_scene_residuals[sid]["reference"][metric]
+                for sid, sp in splits.items()
+                if sp == split_name and sid in per_scene_residuals
+                and not np.isnan(per_scene_residuals[sid]["residual"][metric])
+            ]
+            return float(np.mean(vals)) if vals else float("nan")
+
+        ref_t30 = _reference("T30")
+        ref_edt = _reference("EDT")
 
         t30_thresh = config.d0b_t30_jnd_frac * ref_t30 if not np.isnan(ref_t30) else float("nan")
         edt_thresh = config.d0b_edt_jnd_frac * ref_edt if not np.isnan(ref_edt) else float("nan")
         c50_thresh = config.d0b_c50_jnd_db
 
+        # COVERAGE IS PART OF THE VERDICT (S-F1). This degraded to N/A only at
+        # n == 0, so a split that lost most of its scenes to unresolvable bands or
+        # failed loads could still print PASS on whatever survived. The survivors
+        # are not a random subset: a scene drops when the estimator cannot resolve
+        # its decay, which correlates with absorption — an axis the shift splits
+        # vary on purpose. Clearing a split on its most-measurable scenes is
+        # exactly the false clearance D0b exists to prevent.
+        n_declared = summary["n_scenes"]
+        min_scored = config.d0b_min_scored_frac * n_declared
+
         def _verdict(r: float, thresh: float, n: int) -> str:
             if n == 0 or np.isnan(r) or np.isnan(thresh):
+                return "N/A"
+            if n < min_scored:
                 return "N/A"
             return "PASS" if r <= thresh else "FAIL"
 

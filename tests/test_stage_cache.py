@@ -868,6 +868,7 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         "d0b_t30_jnd_frac": 0.07,
         "d0b_edt_jnd_frac": 0.07,
         "d0b_c50_jnd_db": 1.5,
+        "d0b_min_scored_frac": 0.5,
         "bootstrap_n_resamples": 500,
         "bootstrap_alpha": 0.1,
         "bootstrap_power": 0.9,

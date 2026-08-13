@@ -720,6 +720,12 @@ class Config(BaseModel):
     d0b_t30_jnd_frac: float
     d0b_edt_jnd_frac: float
     d0b_c50_jnd_db: float
+    #: Smallest fraction of a split's scenes that must be SCORED for D0b to return
+    #: a verdict on it rather than INDETERMINATE (S-F1). Without it the verdict
+    #: degraded only at n == 0, so a split whose scenes almost all failed to score
+    #: could still read PASS — a clearance resting on the handful that survived,
+    #: and the survivors are not a random subset.
+    d0b_min_scored_frac: float
 
     #: What "the high leg is a CONVERGED REFERENCE" means, declared rather than
     #: eyeballed (RD-17, RD-263). Every paired-improvement metric, D0a's headroom

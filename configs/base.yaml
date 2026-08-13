@@ -249,6 +249,20 @@ d0b_t30_jnd_frac: 0.05      # 5% of reference T30
 d0b_edt_jnd_frac: 0.05      # 5% of reference EDT (ISO 3382-1 Annex A: EDT limen == T limen)
 d0b_c50_jnd_db: 1.0         # 1 dB absolute
 
+# Coverage D0b needs before it will clear a split at all (S-F1). The verdict used
+# to degrade to INDETERMINATE only when a split scored NOTHING, so a split that
+# lost most of its scenes to unresolvable bands or failed loads could still print
+# PASS on the remainder — and that remainder is a selected subset, not a sample:
+# the scenes that drop are the ones whose decay the estimator could not resolve,
+# which correlates with absorption, which is an axis the shift splits vary
+# deliberately.
+#
+# 0.8 is a coverage floor, not a statistical criterion: it says "most of the split
+# was measured", and anything below it means the verdict describes a different
+# population than the split it is named after. It is NOT a substitute for the
+# per-metric scored-vs-attempted counts, which are reported either way.
+d0b_min_scored_frac: 0.8
+
 # ── Ray-budget convergence tolerance (RD-17, RD-263) ──────────────────────────
 # The high leg (`high_ray_budget`) is treated as a CONVERGED REFERENCE by every
 # paired-improvement metric, by D0a's headroom and by D0b's carrier test, and until

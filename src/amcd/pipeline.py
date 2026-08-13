@@ -182,6 +182,7 @@ def _diagnostics_fingerprint(config: Config) -> dict:
         "d0b_t30_jnd_frac": config.d0b_t30_jnd_frac,
         "d0b_edt_jnd_frac": config.d0b_edt_jnd_frac,
         "d0b_c50_jnd_db": config.d0b_c50_jnd_db,
+        "d0b_min_scored_frac": config.d0b_min_scored_frac,
         "iso_eval_freqs": list(config.iso_eval_freqs),
         "metric_onset_rel_db": config.metric_onset_rel_db,
         "metric_band_resolvability_margin": config.metric_band_resolvability_margin,
