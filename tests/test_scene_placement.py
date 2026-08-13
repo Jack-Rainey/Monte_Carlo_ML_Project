@@ -30,7 +30,7 @@ import numpy as np
 import pytest
 
 from amcd.config import Config, PlacementRegime
-from amcd.acoustics import SABINE_K
+from amcd.acoustics import SPEED_OF_SOUND_M_S, SABINE_K
 from amcd.scenes.generator import (
     _C_TIMES_SABINE_K,
     _disclose_and_gate_record_length,
@@ -848,14 +848,22 @@ class TestIsoMinimumDistanceDisclosure:
     def test_d_min_reproduces_the_iso_form_from_the_reported_t60(self) -> None:
         """AC-52: the reduction is only trustworthy if it agrees with ISO 3382-1
         §5.3 as written — d_min = 2*sqrt(V/(c*T60)) — recomputed from the SAME
-        call's published T60. c is not free: the reduction folds it into
-        24*ln10 = c*SABINE_K, so the consistent speed of sound is
-        24*ln10/SABINE_K = 343.24 m/s, not 343 (AC-49). At that c the two routes
-        agree exactly; at c = 343 they differ by the constant -0.035 % AC-49
-        records, which is asserted here so the rounding cannot drift unnoticed.
+        call's published T60.
+
+        c is not free: the reduction folds it into 24*ln10 = c*SABINE_K, so the
+        speed the reduction implies must equal the one the module declares. It did
+        not, while `SABINE_K` shipped as the rounded literal 0.161 — that implies
+        343.2425 m/s against a declared 343.0, and the 0.07 % gap propagated into
+        every d_min corner as a constant -0.035 % offset which had to be documented
+        rather than removed (AC-109/AC-150). `SABINE_K` is now computed from
+        `SPEED_OF_SOUND_M_S`, so the two routes agree exactly and there is no
+        offset left to document.
         """
         c = _C_TIMES_SABINE_K / SABINE_K
-        assert c == pytest.approx(343.24, abs=0.01)
+        assert c == pytest.approx(SPEED_OF_SOUND_M_S, rel=1e-12), (
+            "the speed implied by the d_min reduction has drifted from the one "
+            "amcd.acoustics declares — the AC-24 divergence shape, on a constant"
+        )
 
         for dims, alpha in (((12.0, 10.0, 5.0), 0.80), ((3.0, 3.0, 2.4), 0.05)):
             room = self._d_min(dims, alpha)
@@ -865,9 +873,14 @@ class TestIsoMinimumDistanceDisclosure:
                 assert room[f"iso_min_distance_{variant}_m"] == \
                     pytest.approx(iso, rel=1e-12), (dims, alpha, variant)
 
-                at_343 = 2.0 * np.sqrt(room["volume_m3"] / (343.0 * room[t60_key]))
-                assert room[f"iso_min_distance_{variant}_m"] / at_343 - 1.0 == \
-                    pytest.approx(-0.000353, abs=1e-6), "the AC-49 rounding moved"
+                at_declared = 2.0 * np.sqrt(
+                    room["volume_m3"] / (SPEED_OF_SOUND_M_S * room[t60_key])
+                )
+                assert room[f"iso_min_distance_{variant}_m"] == \
+                    pytest.approx(at_declared, rel=1e-12), (
+                        "d_min disagrees with the declared speed of sound — the "
+                        "rounding offset AC-109 removed has come back"
+                    )
 
     def test_eyring_is_the_stricter_criterion_at_every_absorption(self) -> None:
         """-ln(1-a) > a for all a in (0, 1), so Eyring's shorter T60 always gives the

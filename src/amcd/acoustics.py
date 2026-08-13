@@ -14,9 +14,24 @@ from __future__ import annotations
 
 import math
 
-#: Sabine's constant, 24 ln(10) / c ≈ 0.161 s·m⁻¹ at 20 °C (c = 343 m/s).
-#: Verified: 24 * ln(10) / 343 = 0.161114.
-SABINE_K = 0.161
+#: Speed of sound in air at 20 °C, in m/s. DECLARED HERE and derived from, never
+#: alongside, `SABINE_K` — three different speeds used to coexist in this project
+#: (343.24 implied by a rounded Sabine constant, 343.0 in the scaffold, 344.0
+#: declared by the gsound backend) and only one pair was ever disclosed
+#: (AC-109/AC-150).
+#:
+#: A backend may realize a DIFFERENT speed — gsound computes
+#: `getAirSpeedOfSound(20 °C, 101.325 kPa, 50 % RH)` = 344.0 and declares it in its
+#: own config, where it is cross-checked against the rendered paths. That is a
+#: property of the renderer. This constant is the one the STUDY's closed forms use,
+#: and the two are allowed to differ as long as both are stated.
+SPEED_OF_SOUND_M_S = 343.0
+
+#: Sabine's constant, exactly 24·ln(10)/c. COMPUTED, not rounded: the shipped
+#: literal was 0.161, which implies c = 343.2425 rather than the 343.0 declared
+#: above, and that 0.07 % discrepancy then propagated into every d_min corner as a
+#: constant −0.035 % offset that had to be documented instead of removed.
+SABINE_K = 24.0 * math.log(10.0) / SPEED_OF_SOUND_M_S
 
 
 def box_volume_and_surface(dims: tuple[float, float, float]) -> tuple[float, float]:

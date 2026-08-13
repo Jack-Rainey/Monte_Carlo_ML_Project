@@ -46,10 +46,12 @@ from ..simulators.base import (
 #: both inside this product and cancels the volume, so d_min needs neither
 #: separately (AC-30).
 #:
-#: Sabine's constant is exactly 24·ln10/c, but `acoustics.SABINE_K` ships the
-#: rounded 0.161 — so this assumes c = 343.24 m/s rather than being independent of
-#: c, and d_min runs a constant −0.035 % against one recomputed from this module's
-#: own published `t60_sabine_s` at c = 343. Stated, not claimed away (AC-49).
+#: Sabine's constant is exactly 24·ln10/c, so this product is c-independent BY
+#: CONSTRUCTION — but only while `acoustics.SABINE_K` is computed from the declared
+#: speed rather than shipped rounded. It used to ship as 0.161, which implies
+#: 343.2425 m/s against a declared 343.0 and left d_min a constant −0.035 % off
+#: one recomputed from this module's own published `t60_sabine_s`. Both are now
+#: derived from `acoustics.SPEED_OF_SOUND_M_S` and agree exactly (AC-109/AC-150).
 _C_TIMES_SABINE_K = 24.0 * math.log(10.0)
 
 #: Why excluding a non-enclosure from the record-length fractions is not the same
