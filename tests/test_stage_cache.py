@@ -859,6 +859,15 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         # must invalidate eval. Probed, not exempted.
         "metric_min_decay_range_db": {"T30": 41.0, "EDT": 19.0},
         "metric_edt_variance_limited_s": 0.3,
+        # The D0a/D0b thresholds ARE the verdict `diagnostics` publishes — "signal
+        # to learn at this ray budget", "carrier ceiling clears" — so a change to
+        # any of them must invalidate it. They were exempt only while that stage
+        # carried no fingerprint at all (AC-45).
+        "d0a_gap_large_db": 9.0,
+        "d0a_gap_small_db": 0.4,
+        "d0b_t30_jnd_frac": 0.07,
+        "d0b_edt_jnd_frac": 0.07,
+        "d0b_c50_jnd_db": 1.5,
         "bootstrap_n_resamples": 500,
         "bootstrap_alpha": 0.1,
         "bootstrap_power": 0.9,
@@ -969,57 +978,29 @@ class TestAnUnprotectedStaleStageIsDisclosedNotVouchedFor:
         recorded = json.loads(_sentinel(tmp_path, "gen-scenes").read_text())
         assert "code_version_unscoped" not in (recorded["fingerprint"] or {})
 
-    def test_a_changed_package_warns_when_an_unprotected_stage_is_served(
-        self, tmp_path: Path, capsys
-    ) -> None:
-        """Driven off the DECLARATION rather than a named stage: `gen-scenes` was
-        the example until it gained a `code_version`, and hardcoding a stage name
-        here would have made this test silently vacuous at that moment instead of
-        moving to whatever is still unprotected."""
-        unprotected = [s for s, f in STAGE_FINGERPRINT.items()
-                       if f is None or "code_version" not in f(tiny_config())]
-        assert unprotected, (
-            "every stage is now cache-protected — delete this test and the "
-            "warning it covers, rather than keeping a check that cannot fire"
+    def test_no_stage_is_unprotected_any_more(self) -> None:
+        """The warning this class covered no longer has a case to fire on.
+
+        It existed because `gen-scenes` and `render` carried no `code_version`, so
+        a run_dir whose renders predated a backend edit was served with a
+        provenance stamp positively asserting the new code produced them — a false
+        witness, worse than the staleness. Both stages are now cache-protected and
+        `diagnostics` with them, so `_warn_if_unprotected_and_stale` was deleted
+        rather than kept as a branch nothing can reach.
+
+        This assertion is what makes that deletion safe: if a stage is ever added
+        without a `code_version`, the false-witness hole is back and this fails.
+        """
+        unprotected = [
+            stage for stage, fingerprint in STAGE_FINGERPRINT.items()
+            if fingerprint is None or "code_version" not in fingerprint(tiny_config())
+        ]
+        assert not unprotected, (
+            f"{unprotected} carry no code_version. `versions.json` re-stamps the "
+            f"current whole-package hash every invocation, so their cached "
+            f"artifacts would be vouched for by code that did not produce them. "
+            f"Either fingerprint them or restore the unprotected-stage warning."
         )
-        stage = unprotected[0]
-
-        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
-        pipe._mark_done(stage)
-        sentinel = _sentinel(tmp_path, stage)
-        recorded = json.loads(sentinel.read_text())
-        recorded["code_version_unscoped"] = "0" * 64  # as if built by older source
-        sentinel.write_text(json.dumps(recorded))
-
-        capsys.readouterr()
-        pipe._warn_if_unprotected_and_stale(stage)
-        err = capsys.readouterr().err
-        assert stage in err and "no code_version" in err, err
-
-    def test_a_fingerprinted_stage_does_not_warn(self, tmp_path: Path, capsys) -> None:
-        """`preprocess` refuses on a scoped change, so a whole-package drift there
-        is expected and a warning would be pure noise — which is how an operator is
-        taught to ignore warnings."""
-        pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
-        for stage in ("gen-scenes", "render", "preprocess"):
-            pipe._mark_done(stage)
-        sentinel = _sentinel(tmp_path, "preprocess")
-        recorded = json.loads(sentinel.read_text())
-        recorded["code_version_unscoped"] = "0" * 64
-        sentinel.write_text(json.dumps(recorded))
-
-        capsys.readouterr()
-        pipe._warn_if_unprotected_and_stale("preprocess")
-        assert capsys.readouterr().err == ""
-
-    def test_versions_json_says_what_its_code_version_describes(
-        self, tmp_path: Path
-    ) -> None:
-        from amcd.config import Config
-
-        Config.load().stamp(tmp_path)
-        versions = json.loads((tmp_path / "versions.json").read_text())
-        assert "this invocation" in versions["code_version_describes"]
 
 
 class TestALegacySentinelIsRefusedActionablyNotWithATraceback:

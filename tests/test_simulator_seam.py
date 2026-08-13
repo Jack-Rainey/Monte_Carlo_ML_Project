@@ -39,6 +39,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from unittest import mock
 import yaml
 
 from amcd.config import Config, _BASE_YAML, _merge_layer
@@ -301,18 +302,25 @@ class TestStageFingerprint:
         with pytest.raises(RuntimeError, match="no fingerprint"):
             self._pipeline(cfg, tmp_path).run_stage("gen-scenes")
 
-    def test_undeclared_stage_still_caches_on_bare_sentinel(self, tmp_path: Path) -> None:
-        """The remaining `None` entries are a declared gap, not a silent one: they
-        must keep working exactly as before until they are wired (RD-41)."""
-        # Every stage is listed, so an unwired one is declared rather than absent.
+    def test_an_unwired_stage_would_still_cache_on_a_bare_sentinel(
+        self, tmp_path: Path
+    ) -> None:
+        """Every stage is DECLARED in `STAGE_FINGERPRINT`, so an unwired one is a
+        stated gap rather than a silent absence.
+
+        There is no unwired stage left to use as the example — `diagnostics` was
+        the last, and citing it here is what made this test read as sanctioning the
+        hole rather than recording it. The `None` path is exercised through a
+        stubbed entry instead, so the behaviour stays pinned without needing a real
+        stage to be broken for it.
+        """
         assert set(STAGE_FINGERPRINT) == set(STAGES)
-        # `eval`/`stats` were promoted out of the gap by RD-54 and `report` by F-63,
-        # so `diagnostics` is now the standing example of the unwired path.
-        assert STAGE_FINGERPRINT["diagnostics"] is None
+
         cfg = tiny_config(scenes={"n_id": 4})
         pipe = self._pipeline(cfg, tmp_path)
-        pipe._mark_done("diagnostics")
-        assert pipe._is_done("diagnostics")
+        with mock.patch.dict(STAGE_FINGERPRINT, {"diagnostics": None}):
+            pipe._mark_done("diagnostics")
+            assert pipe._is_done("diagnostics")
 
 
 class TestDryRunTailIsUnbiased:

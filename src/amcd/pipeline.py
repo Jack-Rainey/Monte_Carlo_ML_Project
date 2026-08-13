@@ -158,6 +158,43 @@ def _preprocess_fingerprint(config: Config) -> dict:
     }
 
 
+def _diagnostics_fingerprint(config: Config) -> dict:
+    """Config inputs — and the code version — that determine the D0a/D0b verdicts.
+
+    D0b's output is not a threshold report, it is a PHYSICAL VERDICT: "CARRIER
+    CEILING CLEARS ... proceed to E1" against "CARRIER BOTTLENECK", produced by
+    comparing measured T30/EDT/C50 residuals with JND tolerances. With no
+    fingerprint, `_is_done` returned True on the bare sentinel, so NOTHING
+    invalidated it — measured on a complete run_dir, `diagnostics` was served from
+    cache under doubled `ir_duration`, changed `ambisonics_order`, changed
+    low/high ray budgets and changed `sample_rate`, every one of which moves the
+    residuals being compared. A stale clearance is a false clearance of the
+    project's own premise, which is worse than no clearance at all.
+
+    The scope reaches past `diagnostics/` because the probe measures through the
+    metric path: a change to the Schroeder window or the octave filter moves the
+    verdict without touching this package.
+    """
+    return {
+        "code_version": _code_version("diagnostics"),
+        "d0a_gap_large_db": config.d0a_gap_large_db,
+        "d0a_gap_small_db": config.d0a_gap_small_db,
+        "d0b_t30_jnd_frac": config.d0b_t30_jnd_frac,
+        "d0b_edt_jnd_frac": config.d0b_edt_jnd_frac,
+        "d0b_c50_jnd_db": config.d0b_c50_jnd_db,
+        "iso_eval_freqs": list(config.iso_eval_freqs),
+        "metric_onset_rel_db": config.metric_onset_rel_db,
+        "metric_band_resolvability_margin": config.metric_band_resolvability_margin,
+        "metric_edt_variance_limited_s": config.metric_edt_variance_limited_s,
+        "metric_min_decay_range_db": dict(config.metric_min_decay_range_db),
+        "sample_rate": config.sample_rate,
+        "n_samples": config.n_samples,
+        "ambisonics_order": config.ambisonics_order,
+        "low_ray_budget": config.low_ray_budget,
+        "high_ray_budget": config.high_ray_budget,
+    }
+
+
 def _train_fingerprint(config: Config) -> dict:
     """Config inputs that determine the trained weights.
 
@@ -330,6 +367,9 @@ STAGE_CODE_SCOPE: dict[str, tuple[str, ...]] = {
     # is resolved by NAME through the registry, which the closure test cannot see
     # (AC-47 corrected an earlier claim here that "eval decodes before measuring").
     "eval": ("evaluation", "representations", "data"),
+    # The probe measures through the metric path, so a change to the Schroeder
+    # window or the octave filter moves its verdict without touching this package.
+    "diagnostics": ("diagnostics", "evaluation", "representations", "data"),
     # Computes the reported CIs and MDES over `evaluation.metric_row`'s paired
     # improvements, which is why `evaluation` is in scope and not just `stats`.
     "stats": ("stats", "evaluation"),
@@ -381,7 +421,7 @@ STAGE_FINGERPRINT: dict[str, Callable[[Config], dict] | None] = {
     "gen-scenes": _gen_scenes_fingerprint,
     "render": _render_fingerprint,
     "preprocess": _preprocess_fingerprint,
-    "diagnostics": None,
+    "diagnostics": _diagnostics_fingerprint,
     "train": _train_fingerprint,
     "infer": _infer_fingerprint,
     "eval": _eval_fingerprint,
@@ -417,7 +457,7 @@ STAGE_UPSTREAM: dict[str, str | None] = {
     "gen-scenes": None,
     "render": "gen-scenes",
     "preprocess": "render",
-    "diagnostics": None,
+    "diagnostics": "preprocess",
     "train": "preprocess",
     "infer": "train",
     "eval": "infer",
@@ -436,13 +476,6 @@ STAGE_UPSTREAM: dict[str, str | None] = {
 #: when perturbed, or be named here — so the next added key cannot repeat it.
 #:
 #: Shared reason for the five D0a/D0b thresholds in the table below.
-_DIAGNOSTICS_EXEMPTION = (
-    "Consumed only by `diagnostics`, which declares no fingerprint at all "
-    "(STAGE_FINGERPRINT). The exemption is a pointer to that open hole, not a "
-    "judgement that the field is unimportant — the D0a verdict is a research gate "
-    "on the ray-count question. Non-exempt as soon as `diagnostics` is wired, and "
-    "these belong in its fingerprint."
-)
 
 #: An entry states why the field is absent TODAY and what makes it non-exempt,
 #: because a present-tense fact ("nothing consumes it") reads to a later editor as
@@ -484,18 +517,6 @@ FINGERPRINT_EXEMPT_FIELDS: dict[str, str] = {
         "`_render_fingerprint` for the same reason: it decides which renders are "
         "ADMITTED."
     ),
-    "d0a_gap_large_db": _DIAGNOSTICS_EXEMPTION,
-    "d0a_gap_small_db": _DIAGNOSTICS_EXEMPTION,
-    "d0b_t30_jnd_frac": _DIAGNOSTICS_EXEMPTION + (
-        " ALSO: this JND is the calibration criterion behind "
-        "`metric_band_resolvability_margin`, which IS an eval fingerprint key — "
-        "base.yaml derives the margin from where the 500 Hz T30 estimator's bias "
-        "crosses 0.05. No code path, so no cache hole, but moving this without "
-        "re-deriving the margin leaves a fingerprinted constant justified by a "
-        "number that no longer exists (AC-46)."
-    ),
-    "d0b_edt_jnd_frac": _DIAGNOSTICS_EXEMPTION,
-    "d0b_c50_jnd_db": _DIAGNOSTICS_EXEMPTION,
 }
 
 
@@ -717,67 +738,13 @@ class Pipeline:
             # the whole-package hash of the code that actually produced these
             # artifacts. For `gen-scenes` and `render` — which carry no scoped
             # `code_version` — it is the ONLY record on disk of which code made
-            # them, and it is what lets `_warn_if_unprotected_and_stale` tell the
+            # them, and it is what tells the
             # operator that a cached artifact predates the current source (F-75).
             "code_version_unscoped": provenance.code_version(provenance.ALL_SOURCES),
         }
         s = _sentinel(self.run_dir, stage)
         s.parent.mkdir(parents=True, exist_ok=True)
         s.write_text(json.dumps(payload, indent=2, default=str))
-
-    def _warn_if_unprotected_and_stale(self, stage: str) -> None:
-        """Say so when a stage the cache CANNOT protect is served under newer code.
-
-        `gen-scenes` and `render` declare no `code_version` (RD-107), deliberately:
-        scoping `render` to `simulators/` would force a full re-render — the
-        multi-hour artifact under x86 emulation — on any backend edit. The cost of
-        that decision is that a code change to the IR synthesis, the placement
-        sampling or the render QC gates leaves these stages cached with no refusal.
-
-        What is NOT acceptable is that being invisible. `versions.json` is
-        re-stamped every invocation with the CURRENT whole-package hash, so a
-        run_dir whose renders predate an edit to `simulators/dry_run.py` carried a
-        provenance stamp positively asserting the new code produced them — a false
-        witness, and worse than the staleness itself (F-75).
-
-        So: for stages with no scoped `code_version`, compare the whole-package
-        hash recorded when the artifacts were WRITTEN against the current one, and
-        warn on stderr when they differ. Deliberately a warning, not a refusal —
-        the refusal is the policy call in RD-107, and this must not quietly make it.
-
-        Fingerprinted stages are skipped: a scoped code change already refuses
-        them, so a whole-package drift there is expected and would be pure noise.
-        """
-        fingerprint = STAGE_FINGERPRINT[stage]
-        if fingerprint is not None and "code_version" in fingerprint(self.config):
-            return
-        try:
-            recorded = json.loads(_sentinel(self.run_dir, stage).read_text())
-        except (json.JSONDecodeError, OSError):
-            return
-        was_built_with = recorded.get("code_version_unscoped")
-        if was_built_with is None:
-            # Written before this key existed. Absence is not evidence of a match,
-            # so say that rather than implying agreement.
-            emit(
-                self.verbosity, "warning",
-                f"[warn ] {stage} is cached and carries no code_version. Its "
-                f"sentinel predates provenance recording for unprotected stages, "
-                f"so which code produced its artifacts is UNKNOWN."
-            )
-            return
-        current = provenance.code_version(provenance.ALL_SOURCES)
-        if was_built_with != current:
-            emit(
-                self.verbosity, "warning",
-                f"[warn ] {stage} is cached and the package source has CHANGED "
-                f"since its artifacts were written "
-                f"({was_built_with[:12]} → {current[:12]}), but {stage!r} declares "
-                f"no code_version, so nothing refuses it (RD-107). Its artifacts may "
-                f"predate the current code; versions.json describes THIS "
-                f"invocation, not what produced them. Use --force or a fresh "
-                f"--run-dir if the change affects {stage!r}."
-            )
 
     def _record_timing(self, stage: str, seconds: float) -> None:
         # Per-stage wall time is provenance (RD-09): written from save level 1.
@@ -802,7 +769,6 @@ class Pipeline:
                 self._effective_fingerprint(stage)
 
             if self._is_done(stage):
-                self._warn_if_unprotected_and_stale(stage)
                 emit(self.verbosity, "progress", f"[skip] {stage} (cached)")
                 return
 
