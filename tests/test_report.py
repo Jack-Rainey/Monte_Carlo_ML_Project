@@ -32,6 +32,12 @@ _PRODUCER_UNITS = {
 
 def _summary_row(metric: str, **overrides) -> dict:
     row = {
+        # F-70's attempted-population bound. Defaults match the scored columns with
+        # nothing imputed, which is what a fully-scored split produces.
+        "n_attempted_scorable": 3, "n_pred_unscored_imputed": 0,
+        "improvement_mean_attempted": 0.1234,
+        "improvement_ci_lower_attempted": 0.05,
+        "improvement_ci_upper_attempted": 0.20,
         "split": "test_id", "metric": metric, "kind": "match_reference",
         "unit": _PRODUCER_UNITS.get(metric, ""),
         "n_attempted": 3, "n_pred": 3,
@@ -274,3 +280,131 @@ class TestTheUnconvergedReferenceReachesTheReader:
             txt = (run_dir / "report" / "summary.txt").read_text()
         assert "REFERENCE CONVERGENCE" not in txt
         assert "reference unconverged" not in txt
+
+
+class TestTheModelsOwnFailuresAreBoundedNotDropped:
+    """F-70 — a scene where the model produced nothing measurable leaves the scored
+    population, so the CI beside it is conditioned on the model having WORKED.
+
+    That is optimistic, and the loss is not uniform: the censoring probability
+    correlates with room absorption, which is `test_material_shift`'s own declared
+    axis. AC-25 traded a ground-truth contamination for this selection and only the
+    first was discussed. The bound is the same bootstrap with those scenes imputed
+    at ZERO improvement — the honest floor for a failure, since the model did not
+    make the metric worse than the baseline, it produced nothing.
+    """
+
+    def test_a_run_with_a_model_failure_shows_BOTH_populations(self) -> None:
+        txt = _render([_summary_row(
+            "T30", n_scored=3, n_attempted=4,
+            n_attempted_scorable=4, n_pred_unscored_imputed=1,
+            improvement_mean_attempted=0.0926,
+            improvement_ci_lower_attempted=0.0100,
+            improvement_ci_upper_attempted=0.1700,
+        )])
+        t30 = next(l for l in txt.splitlines() if l.startswith("T30"))
+        assert "0.1234" in t30 and "3/4" in t30, t30
+        assert "1 model-failed" in t30, t30
+
+        bound = next(l for l in txt.splitlines() if "attempted-population bound" in l)
+        assert "0.0926" in bound, bound
+        assert "[0.0100, 0.1700]" in bound, bound
+        assert "1 imputed at 0" in bound, bound
+
+    def test_a_fully_scored_row_gets_no_second_line(self) -> None:
+        """The bound is a second ESTIMATE of the same quantity over a different
+        population. Where the populations coincide, printing it twice would invite
+        reading one as a correction of the other."""
+        txt = _render([_summary_row("T30")])
+        assert "attempted-population bound" not in txt
+        # The footer LEGEND explains `model-failed` unconditionally; what must be
+        # absent is the caveat on the row.
+        t30 = next(l for l in txt.splitlines() if l.startswith("T30"))
+        assert "model-failed" not in t30, t30
+
+    def test_the_footer_says_which_scenes_are_in_neither_population(self) -> None:
+        """A scene whose PHYSICAL legs failed has no ground truth to have improved
+        on, so imputing zero for it would invent a datum rather than bound one."""
+        txt = _render([_summary_row(
+            "T30", n_pred_unscored_imputed=1, n_attempted_scorable=4
+        )])
+        assert "imputed at ZERO improvement" in txt
+        assert "PHYSICAL legs failed are in neither population" in txt
+
+
+class TestTheAttemptedBoundIsComputedOverTheRightScenes:
+    """The aggregation half of F-70, asserted through `run_stats` rather than
+    through a fixture: which scenes are imputed is the load-bearing decision."""
+
+    def _metrics_frame(self, rows: list[dict]):
+        import pandas as pd
+
+        return pd.DataFrame(rows)
+
+    def _row(self, scene: str, low, pred, high, improved=None):
+        return {
+            "scene_id": scene, "split": "test_id", "metric": "T30",
+            "kind": "match_reference", "unit": "s",
+            "low_val": low, "pred_val": pred, "high_ref": high,
+            "improved": improved,
+        }
+
+    def _summary(self, tmp_path: Path, rows: list[dict]) -> dict:
+        from amcd.stats.aggregate import run_stats
+
+        cfg = tiny_config()
+        (tmp_path / "metrics").mkdir(parents=True, exist_ok=True)
+        self._metrics_frame(rows).to_parquet(tmp_path / "metrics" / "metrics.parquet")
+        run_stats(cfg, tmp_path, QUIET)
+        summary = json.loads((tmp_path / "stats" / "summary.json").read_text())
+        return next(r for r in summary if r["split"] == "test_id" and r["metric"] == "T30")
+
+    def test_a_pred_failure_is_imputed_and_a_physical_failure_is_not(
+        self, tmp_path: Path
+    ) -> None:
+        nan = float("nan")
+        row = self._summary(tmp_path, [
+            # Three scored scenes, all improving.
+            self._row("s0", 1.0, 0.55, 0.5, True),
+            self._row("s1", 1.0, 0.55, 0.5, True),
+            self._row("s2", 1.0, 0.55, 0.5, True),
+            # pred failed, physics fine → imputed at zero improvement.
+            self._row("s3", 1.0, nan, 0.5, None),
+            # physics failed → in NEITHER population; nothing to have improved on.
+            self._row("s4", 1.0, 0.55, nan, None),
+        ])
+        assert row["n_scored"] == 3, row
+        assert row["n_attempted"] == 5, row
+        assert row["n_pred_unscored_imputed"] == 1, row
+        assert row["n_attempted_scorable"] == 4, (
+            "the physically-unscorable scene must not enter the bound's population"
+        )
+
+    def test_the_bound_is_lower_than_the_conditioned_estimate(
+        self, tmp_path: Path
+    ) -> None:
+        """The whole point: dropping model failures inflates the reported help."""
+        nan = float("nan")
+        row = self._summary(tmp_path, [
+            self._row("s0", 1.0, 0.55, 0.5, True),
+            self._row("s1", 1.0, 0.55, 0.5, True),
+            self._row("s2", 1.0, 0.55, 0.5, True),
+            self._row("s3", 1.0, nan, 0.5, None),
+        ])
+        assert row["improvement_mean_attempted"] < row["improvement_mean"], row
+        assert row["improvement_mean_attempted"] == pytest.approx(
+            row["improvement_mean"] * 3 / 4
+        ), "a zero imputed into n=3 must move the mean by exactly 3/4"
+
+    def test_with_no_failures_the_two_populations_agree_exactly(
+        self, tmp_path: Path
+    ) -> None:
+        row = self._summary(tmp_path, [
+            self._row("s0", 1.0, 0.55, 0.5, True),
+            self._row("s1", 1.0, 0.60, 0.5, True),
+            self._row("s2", 1.0, 0.52, 0.5, True),
+        ])
+        assert row["n_pred_unscored_imputed"] == 0
+        assert row["improvement_mean_attempted"] == pytest.approx(
+            row["improvement_mean"]
+        )

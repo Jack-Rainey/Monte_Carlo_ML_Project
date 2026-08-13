@@ -222,6 +222,11 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             parts.append(f"{row['n_partial_band']} partial-band")
         if row.get("n_pred_band_unresolved"):
             parts.append(f"{row['n_pred_band_unresolved']} pred-unresolved")
+        if row.get("n_pred_unscored_imputed"):
+            # F-70: those scenes are OUT of the CI beside this, so the interval is
+            # conditioned on the model having produced something measurable. The
+            # bound over the attempted population is rendered below the row.
+            parts.append(f"{row['n_pred_unscored_imputed']} model-failed")
         if row.get("n_estimator_variance_limited"):
             # Not a drop: the value is scored, but its ESTIMATOR carries 24-31 %
             # sd in this range, which a bare point estimate does not convey.
@@ -264,7 +269,7 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         improved_str = f"{row['pct_improved']:.1f}% ({row['n_improved']}/{row['n_scored']})"
         mdes_val = row["improvement_mdes"]
         mdes_str = f"{mdes_val:.4f}" if mdes_val == mdes_val else "N/A"
-        return (
+        line = (
             f"{row['metric']:<{col_w['metric']}} "
             f"{n_str:>{col_w['n']}} "
             f"{row['pred_mean']:>{col_w['pred']}.4f} "
@@ -281,6 +286,31 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             f"{row.get('kind', '?'):<{col_w['kind']}} "
             f"{improved_str:<{col_w['improved']}} "
             f"{_caveats(row):<{col_w['caveat']}}"
+        ).rstrip()
+        if not row.get("n_pred_unscored_imputed"):
+            return line
+        # ── The same improvement over the ATTEMPTED population (F-70) ───────────
+        #
+        # A second line rather than a column, because it is a second ESTIMATE of the
+        # same quantity over a different population — putting it beside the first
+        # would invite reading one as a correction of the other. Shown only when the
+        # two can differ, so a fully-scored split's table is unchanged.
+        att_ci = (
+            f"[{row['improvement_ci_lower_attempted']:.4f}, "
+            f"{row['improvement_ci_upper_attempted']:.4f}]"
+        )
+        return (
+            f"{line}\n"
+            f"{'  └ attempted-population bound':<{col_w['metric']}} "
+            f"{row['n_attempted_scorable']:>{col_w['n']}} "
+            f"{'':>{col_w['pred']}} "
+            f"{row['improvement_mean_attempted']:>{col_w['imp']}.4f} "
+            f"{att_ci:<{col_w['ci']}} "
+            f"{'':>{col_w['mdes']}} "
+            f"{units[row['metric']]:<{col_w['unit']}} "
+            f"{row.get('kind', '?'):<{col_w['kind']}} "
+            f"{'':<{col_w['improved']}} "
+            f"{row['n_pred_unscored_imputed']} imputed at 0"
         ).rstrip()
 
     # CI level from config, not hardcoded in the label (RR-17, same rule as RR-11).
@@ -349,6 +379,14 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         "  this split's CI pools improvements computed over DIFFERENT band sets (F-62).",
         "  pred-unresolved: the model produced no measurable value in a band the physical",
         "  legs resolve; the physical legs keep their own values (AC-25).",
+        "  model-failed: the model produced nothing measurable at all, so the scene left",
+        "  the CI above — which therefore conditions on the model having WORKED, an",
+        "  optimistic direction, and one whose probability correlates with absorption and",
+        "  so with test_material_shift's own axis (F-70). The `attempted-population",
+        "  bound` line under such a row re-runs the same bootstrap with those scenes",
+        "  imputed at ZERO improvement: a lower bound, not a correction. Scenes whose",
+        "  PHYSICAL legs failed are in neither population — there is no ground truth",
+        "  there to have improved on, so a zero would invent a datum rather than bound one.",
         # The VALUE, not just the key name (AC-48). A reader seeing "3 high-variance"
         # cannot judge it without the bound, and F-65's own evidence is that this
         # key was served at 0.15 while config.yaml stamped 5.0. The CI label above

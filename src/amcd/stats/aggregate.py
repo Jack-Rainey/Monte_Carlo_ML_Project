@@ -20,7 +20,7 @@ import scipy.integrate
 import scipy.stats
 
 from ..config import Config
-from ..evaluation.metric_row import MetricTriple, paired_improvement
+from ..evaluation.metric_row import KIND_LEGS, MetricTriple, paired_improvement
 from ..runtime import Verbosity, emit
 
 
@@ -238,6 +238,46 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             rng=_substream_rng(bootstrap_seed, split_name, metric_name, "improvement"),
             min_n_for_calibrated_ci=config.bootstrap_min_n_for_calibrated_ci,
         )
+
+        # ── THE SAME IMPROVEMENT OVER THE ATTEMPTED POPULATION (F-70) ────────────
+        #
+        # `paired` above is the SCORED population, and a scene leaves it when the
+        # model produced nothing measurable. So the CI beside it is conditioned on
+        # the model having worked, i.e. model failures are removed from the estimate
+        # of how much the model helps — and the direction is optimistic. The loss is
+        # not uniform across splits either: the censoring probability correlates with
+        # room absorption, which is `test_material_shift`'s own declared axis.
+        #
+        # BOUNDED, NOT FIXED. The honest lower bound on a failure is zero
+        # improvement: the model did not make the metric worse than the low-ray
+        # baseline, it simply produced nothing. Imputing that for every
+        # pred-unscored scene and re-running the same bootstrap gives an interval
+        # over the population the run ATTEMPTED, and reporting both is what lets a
+        # reader see the size of the conditioning rather than infer it from a count.
+        #
+        # ONLY scenes whose PHYSICAL legs scored are imputed. Where the physics
+        # itself produced nothing there is no ground truth to have improved on, so a
+        # zero would be inventing a datum rather than bounding one; those scenes stay
+        # out of both populations and are counted by `n_attempted` as always.
+        physical_legs = [leg for leg in KIND_LEGS[kind] if leg != "pred"]
+        _leg_col = {"low": "low_val", "pred": "pred_val", "high": "high_ref"}
+        physical_ok = np.ones(len(group), dtype=bool)
+        for leg in physical_legs:
+            physical_ok &= np.isfinite(group[_leg_col[leg]].to_numpy(dtype=float))
+        pred_missing = physical_ok & ~np.isfinite(
+            group["pred_val"].to_numpy(dtype=float)
+        )
+        n_imputed = int(pred_missing.sum())
+        attempted_paired = np.concatenate([paired, np.zeros(n_imputed)])
+        attempted_ci = bootstrap_ci(
+            attempted_paired,
+            n_resamples=config.bootstrap_n_resamples,
+            alpha=config.bootstrap_alpha,
+            rng=_substream_rng(
+                bootstrap_seed, split_name, metric_name, "improvement_attempted"
+            ),
+            min_n_for_calibrated_ci=config.bootstrap_min_n_for_calibrated_ci,
+        )
         mdes_val = mdes(
             imp_ci["std"], len(paired),
             power=config.bootstrap_power, alpha=config.bootstrap_alpha,
@@ -280,6 +320,14 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             "improvement_ci_upper": imp_ci["ci_upper"],
             "improvement_std": imp_ci["std"],
             "improvement_mdes": mdes_val,
+            # F-70's bound. Identical to the scored columns whenever no scene was
+            # pred-unscored, which is the common case — the two diverging is the
+            # signal, and `n_pred_unscored_imputed` says by how many scenes.
+            "n_attempted_scorable": len(attempted_paired),
+            "n_pred_unscored_imputed": n_imputed,
+            "improvement_mean_attempted": attempted_ci["mean"],
+            "improvement_ci_lower_attempted": attempted_ci["ci_lower"],
+            "improvement_ci_upper_attempted": attempted_ci["ci_upper"],
             "n_improved": n_improved,
             "pct_improved": float(n_improved) / n_scored * 100 if n_scored > 0 else float("nan"),
             # ── Composition of the scored population (F-62 / AC-25 / RD-78) ──
@@ -349,6 +397,11 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 "improvement_ci_upper": float("nan"),
                 "improvement_std": float("nan"),
                 "improvement_mdes": float("nan"),
+                "n_attempted_scorable": 0,
+                "n_pred_unscored_imputed": 0,
+                "improvement_mean_attempted": float("nan"),
+                "improvement_ci_lower_attempted": float("nan"),
+                "improvement_ci_upper_attempted": float("nan"),
                 "n_improved": 0,
                 "pct_improved": float("nan"),
                 "n_partial_band": 0,
