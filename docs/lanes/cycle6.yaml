@@ -1,95 +1,89 @@
-# Cycle 6 — serial. The work that matters cannot be partitioned.
+# Cycle 6 — serial, no lanes. THIS FILE IS THE RESUME STATE.
 #
-# ITEM 0 spans simulators/, scenes/, evaluation/ and configs/ at once, so no
-# partition can host it (protocol rule 4). Two cycles deferred it for that reason
-# and both moved the gate by zero. It is `pre_lane:` here, which is the queue that
-# now exists so spanning work runs FIRST instead of last.
+# `groups:` is ordered; whatever is still listed is what happens next. There is no
+# separate resume note — docs/next_session.md was a third declaration of this and
+# drifted from both files it duplicated.
 #
-# THIS FILE IS THE RESUME STATE. `pre_lane:` and `serial_queue:` are ordered;
-# whatever is still listed is what happens next. No separate resume note exists —
-# docs/next_session.md was a third declaration of this and drifted from both the
-# files it duplicated.
+# The objective is ONE thing: reach a state where the 720-scene render can run.
+# RD-33a lifts at zero OPEN rows on its path list (src/amcd/scenes/**,
+# src/amcd/evaluation/**, config.py split handling, configs/*.yaml split
+# declarations) plus a validated reference leg. That count, not a finding total,
+# is how this cycle is measured.
 
 cycle: cycle6
 base_branch: v3-rebuild
 exit_gate: not_required   # no lanes, so no lane can report
 
 gate:
-  lifts: []
-  unblocks: [RD-33a-i, RD-33a-ii]
+  lifts: [RD-33a-i]
+  unblocks: [RD-33a-ii]
   deliverable:
     what: >-
-      RD-33a condition (ii) LIFTED — the 200,000-ray high leg validated as a
-      converged reference against a config-declared tolerance, through the ISO
-      path, driven via build_simulator. Every paired-improvement number in the
-      project already treats that leg as ground truth and nothing has ever
-      checked it.
+      Zero OPEN rows on RD-33a condition (i)'s path list, and condition (ii)
+      measured on all three quantities it names (per-band energy, T30, C50)
+      rather than two.
     evidence: >-
-      A 3-scene tolerance check at alpha_eff extremes, recorded as a tolerance
-      check and NOT as a CI-backed convergence claim (RD-263), reporting per-band
-      energy / T30 / C50 against the new config-declared convergence key. Plus
-      per-scene render wall-clock, which nothing in the repo has ever recorded.
+      The on-path OPEN count printed before and after each group; a clean pass
+      from all four reviewers over the tree that ships; and the retained-artifact
+      render batch's falsification of the shipped support law.
   exception: >-
-    Condition (i) does not lift this cycle and is not claimed to. Under the
-    2026-08-12 decision it lifts at ZERO OPEN rows on its path list, not zero
-    blocker/major, and that set is larger than one session. Cycle 6 unblocks it by
-    closing the C6/C5 blockers that hold its most expensive rows.
+    Condition (ii) may not LIFT: AC-187 measures the 200k leg unconverged for C50
+    (8/20 cells over the 1.0 dB ISO JND, worst 3.24 dB) and closing that by ray
+    budget costs 35x per 4x rays. If it does not lift it becomes a declared
+    research limitation, decided by the user, not a carried row.
 
 lanes: []
 
-# ── LANDED THIS CYCLE ─────────────────────────────────────────────────────────
-# AC-176  the ISO 3382-1 SNR admissibility bound at the estimator. Was recorded
-#         OPEN and was in fact already implemented and fully wired — config key,
-#         fingerprint, every call site, regression tests. Row deleted, not fixed.
-# AC-54   absorption convention declared on the backend and confirmed by render.
-# AC-184  realized record support declared as a power law fitted to the retained
-#         renders (a constant T60-multiple was refuted by that same data: the
-#         measured multiples span 21x), and FALSIFIED per render against
-#         native_ir_samples. AC-56 and AC-66 declared at the same site.
+# ── The one render batch (~20 scenes, under the 30-scene threshold, §11.1) ─────
+# IRs are RETAINED to disk. Every prior probe discarded them, so each physics
+# question cost another render; retention makes C5, the onset/direct-sound rows
+# and the convergence rows render-free from here on.
+render_batch:
+  scenes: 20
+  retains_irs: true
+  answers: [AC-186, AC-55, AC-187, AC-64, AC-58, F-89, RD-55, AC-185, AC-182,
+            AC-181, AC-180, AC-36, AC-104, RD-52, RD-23]
 
-# ── pre_lane: must land on v3-rebuild before any partition is drawn ───────────
-# scripts/new_lane.py refuses to create worktrees while this list is non-empty.
-pre_lane:
-  - {id: AC-175, reason: "gen-scenes gate must consume the declared support via a simulator-interface seam; generator.py stays backend-agnostic per RD-144"}
-  - {id: F-186, reason: "gate is evaluated at nominal alpha; falls out of AC-175's wiring"}
-  - {id: AC-55, reason: "diffuse_depth is physically a time bound; declare it as one and gate on coverage"}
-  - {id: AC-64, reason: "C5 blocker — Lundeby is not finding a real crossing"}
-  - {id: AC-58, reason: "C5 — Schroeder integration limit is not gain-invariant on gsound IRs"}
-  - {id: F-89, reason: "C5 — shared truncation index tracks the ray budget"}
-  - {id: RD-55, reason: "C5 — extrapolated-tail compensation, the candidate fix for all four"}
-  - {id: AC-185, reason: "C5 — trim length moves with the ray budget, the axis E4 sweeps"}
-  - {id: RD-17, reason: "the convergence probe itself — the ONLY row that can lift condition (ii). Promoted DEFERRED -> OPEN: its declared gate (Steps 2/3 exist) arrived three cycles ago"}
-  - {id: RD-263, reason: "the config-declared convergence tolerance RD-17 measures against does not exist yet"}
+groups:
+  - {id: 0, name: "ledger purge",        state: done,    detail: "40 bookkeeping rows deleted; header and cluster table rebuilt"}
+  - {id: 1, name: "recover lane-archive substance", state: pending,
+     detail: "74 rows carry no finding text; substance is in docs/ledger_inbox/archive/cycle4-{M,P,R,S}.md"}
+  - {id: 2, name: "probe fixes + retained render batch", state: pending,
+     detail: "per-band energy in _iso (convergence.band_energy_frac is declared and never evaluated); scene-id/seed collision; record surface_area_m2, 4V/S, diffuse_depth"}
+  - {id: 3, name: "evaluation/room_acoustic.py",  state: pending}
+  - {id: 4, name: "scenes/generator.py + acoustics.py + base.yaml", state: pending}
+  - {id: 5, name: "simulators/ + configs/simulators/", state: pending}
+  - {id: 6, name: "pipeline.py + provenance.py + config.py", state: pending}
+  - {id: 7, name: "reporting/ + representations/ + stats/", state: pending}
+  - {id: 8, name: "tests/ + docs/ + design_spec 11.2 re-derivation", state: pending}
+  - {id: 9, name: "DEFERRED sweep",      state: pending}
+  - {id: 10, name: "reviewer loop to a clean pass, then the render request", state: pending}
 
-serial_queue:
-  - {id: F-75, reason: "render/gen-scenes not cache-protected; off condition (i)'s path list"}
-  - {id: F-81, reason: "render fingerprint is host-dependent — a cross-platform violation"}
-  - {id: F-218, reason: "gate step 4's detector has measured-zero power over the gsound surface"}
-
-# Renders: the standing threshold is 30 scenes (design_spec.md 11.1). RD-17 needs
-# ~3, C5 closure ~2. No grant, no allocation table, no permission clause.
+# Renders: the standing threshold is 30 scenes (design_spec.md 11.1). No grant, no
+# allocation table, no permission clause on any ledger row.
 
 unassigned: [
-  AC-186, AC-187, AC-26, AC-28, AC-30, AC-36, AC-37, AC-38, AC-39, AC-41, AC-42, AC-43,
-  AC-44, AC-45, AC-46, AC-47, AC-48, AC-49, AC-50, AC-51, AC-52, AC-53,
-  AC-56, AC-57, AC-59, AC-60, AC-61, AC-62, AC-63, AC-65, AC-66, AC-67,
-  AC-68, AC-69,
-  AC-70, AC-75, AC-78, AC-81, AC-83, AC-85, AC-101, AC-104, AC-105, AC-108,
-  AC-109, AC-127, AC-128, AC-129, AC-131, AC-132, AC-150, AC-178, AC-180,
-  AC-181, AC-182, AC-183, AC-19-R7, AC-26-R6, AC-37-R4, F-M2, F-M3, F-M4,
-  F-M5, F-M6, F-M7, F-M8, F-M9, F-M10, F-M11, F-60, F-63, F-64, F-65, F-66,
-  F-68, F-69, F-70, F-71, F-72, F-73, F-74, F-76, F-77, F-78, F-79, F-80,
-  F-82, F-83, F-84, F-85, F-86, F-87, F-88, F-90, F-91, F-92, F-93, F-94,
-  F-95, F-96, F-97, F-98, F-99, F-100, F-101, F-102, F-105, F-106, F-110,
-  F-116, F-117, F-118, F-122, F-123, F-143, F-160, F-161, F-162, F-166,
-  F-167, F-185, F-211, F-215, F-216, F-217, F-219, F-220, F-221, F-68-R2,
-  F-68-R3, F-69-B4, RD-08, RD-18, RD-20, RD-21, RD-24, RD-33a, RD-65, RD-66,
-  RD-67, RD-69, RD-93, RD-96, RD-98, RD-99, RD-101, RD-102, RD-103, RD-104,
-  RD-105, RD-106, RD-107, RD-108, RD-109, RD-111, RD-112, RD-113, RD-114,
-  RD-115, RD-116, RD-117, RD-118, RD-119, RD-120, RD-121, RD-122, RD-123,
-  RD-124, RD-125, RD-126, RD-127, RD-128, RD-129, RD-130, RD-131, RD-132,
-  RD-133, RD-142, RD-148, RD-151, RD-152, RD-153, RD-158, RD-186, RD-187,
-  RD-188, RD-189, RD-190, RD-200, RD-201, RD-207, RD-227, RD-250, RD-251,
-  RD-252, RD-253, RD-254, RD-255, RD-257, RD-265, RD-267, RR-81,
-  RR-200, RR-201, RR-202, RR-203, RR-88, RR-89, RR-90, RR-91, RR-92, RR-93, RR-94, RR-95, RR-96, S-F1, S-1, S-2, S-F4, S-F5, S-F6, S-F7
+  RD-18, RD-33a, RD-65, RD-66, RD-67, RD-08, RD-21, RD-24, RD-20, RD-69, RD-55, RD-107, RD-129,
+  RD-93, RD-96, RD-98, RD-99, RD-101, RD-102, RD-103, RD-104, RD-105, RD-106, RD-108, RD-109,
+  RD-112, RD-113, RD-114, RD-116, RD-117, RD-118, RD-119, RD-120, RD-121, RD-122, RD-123, RD-124,
+  RD-125, RD-153, RD-186, RD-187, RD-188, RD-189, RD-190, RD-200, RD-201, RD-207, RD-227, F-60,
+  F-63, F-64, F-65, F-66, F-68, F-69, F-70, F-72, F-73, F-74, F-81, F-75, S-F1, F-M2, F-89, F-M3,
+  F-M4, F-M5, F-M8, F-M9, F-M10, F-M11, F-68-R2, F-68-R3, F-69-B4, F-76, F-77, F-78, F-79, F-80,
+  S-1, S-2, S-F4, S-F5, S-F6, S-F7, F-82, F-83, F-84, F-85, F-86, F-87, F-88, F-90, F-91, F-92,
+  F-93, F-94, F-95, F-96, F-97, F-98, F-99, F-100, F-101, F-102, F-105, F-M6, F-M7, F-110, F-116,
+  F-117, F-118, F-122, F-123, F-143, F-161, F-162, F-166, F-167, F-185, F-186, F-215, F-216,
+  F-217, F-219, F-220, F-106, AC-187, AC-186, AC-26, AC-28, AC-30, AC-37, AC-38, AC-39, AC-41,
+  AC-42, AC-43, AC-36, AC-64, AC-65, AC-66, AC-67, AC-68, AC-45, AC-50, AC-37-R4, AC-26-R6,
+  AC-19-R7, AC-44, AC-46, AC-47, AC-48, AC-49, AC-51, AC-52, AC-53, AC-55, AC-56, AC-57, AC-59,
+  AC-60, AC-61, AC-62, AC-63, AC-58, AC-75, AC-78, AC-81, AC-83, AC-85, AC-101, AC-104, AC-105,
+  AC-108, AC-109, AC-127, AC-128, AC-129, AC-131, AC-132, AC-150, AC-185, AC-175, AC-178, AC-180,
+  AC-181, AC-182, AC-183, AC-69, AC-70, RR-203, RR-94, RR-95, RR-96
+]
+
+# Group 9 re-checks every one of these for whether its declared gate has arrived.
+# A row deferred to a gate that has already passed is not deferred — that is how
+# RD-17 sat for three cycles after Steps 2/3 landed.
+deferred_sweep: [
+  AC-09, AC-15, AC-16, AC-19-value, F-06, RD-04, RD-12, RD-14, RD-15, RD-23,
+  RD-27, RD-28, RD-29, RD-38, RD-41, RD-46, RD-52
 ]
