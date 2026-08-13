@@ -601,12 +601,17 @@ class TestPathDataIsSelfDescribing:
         with pytest.raises(ValueError, match="band edges"):
             validate_path_descriptor(paths, simulator_name="gsound_sir", scene_id="s0")
 
-    def test_the_declared_dtype_is_the_dtype_that_gets_written(self, tmp_path: Path) -> None:
+    def test_a_wider_array_is_accepted_when_the_cast_is_exact(self, tmp_path: Path) -> None:
         """F-95: the round trip cast on READ only, so float64 in gave float32 back
-        with no error and no logged reason. The declared dtype is the contract."""
+        with no error. The declared dtype is the contract, enforced at construction.
+
+        A wider input whose values ARE representable is narrowed and round-trips
+        unchanged — the check is value-based, so a Python list of ints or an
+        incidental float64 is not rejected for its dtype alone.
+        """
         wide = dataclasses.replace(
             _fake_paths(),
-            distances=np.linspace(1.0, 9.0, 6).astype("float64"),
+            distances=np.array([1.0, 2.5, 4.25, 5.5, 7.0, 9.0], dtype="float64"),
             intensities=np.arange(48, dtype="float64").reshape(6, 8),
         )
         assert wide.distances.dtype == np.dtype(PATH_ARRAY_DTYPES["distances"])
@@ -618,6 +623,18 @@ class TestPathDataIsSelfDescribing:
         for name, dtype in PATH_ARRAY_DTYPES.items():
             assert getattr(back, name).dtype == np.dtype(dtype), name
             np.testing.assert_array_equal(getattr(back, name), getattr(wide, name))
+
+    def test_a_lossy_cast_raises_instead_of_narrowing_in_silence(self) -> None:
+        """F-110/F-122: `np.asarray(x, dtype=...)` quietly turns float64 into
+        float32, so a second raytracer's higher-precision distances would be
+        truncated on the way in with nothing recorded — the silent exclusion the
+        drop log exists to prevent, one layer down. 2.6 is not representable in
+        float32, so this input cannot survive the declared dtype."""
+        with pytest.raises(ValueError, match="LOSSY"):
+            dataclasses.replace(
+                _fake_paths(),
+                distances=np.linspace(1.0, 9.0, 6).astype("float64"),
+            )
 
     def test_an_undefined_kept_share_round_trips_as_none_not_zero(self, tmp_path: Path) -> None:
         """F-85: 0.0 would read as 'we retained almost nothing' for a subset that in

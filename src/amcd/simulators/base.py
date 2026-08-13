@@ -208,9 +208,26 @@ class PathData:
         for name, dtype in PATH_ARRAY_DTYPES.items():
             # The declared dtype is enforced at construction, not only on read
             # (F-95), so written == declared == read-back. A backend needing more
-            # precision widens PATH_ARRAY_DTYPES rather than passing a wider array;
-            # a lossy cast here is currently silent (F-110/F-122).
-            arr = np.asarray(getattr(self, name), dtype=dtype)
+            # precision widens PATH_ARRAY_DTYPES rather than passing a wider array.
+            #
+            # A NARROWING CAST RAISES rather than silently losing precision
+            # (F-110/F-122): `np.asarray(x, dtype=...)` will quietly turn float64
+            # into float32 and a negative int into a huge unsigned one, so a second
+            # raytracer's float64 distances would have been truncated on the way in
+            # with nothing recorded. The check is value-based, not dtype-based —
+            # float64 that happens to be exactly representable is fine, which keeps
+            # a Python list of ints from being rejected for its default dtype.
+            given = np.asarray(getattr(self, name))
+            arr = given.astype(dtype, copy=False)
+            if given.size and not np.array_equal(given, arr.astype(given.dtype)):
+                raise ValueError(
+                    f"PathData.{name} was given {given.dtype} and the declared "
+                    f"dtype is {dtype}; the cast is LOSSY, so the stored array "
+                    f"would not be the one this backend produced. Widen "
+                    f"PATH_ARRAY_DTYPES for this field if the extra precision is "
+                    f"real, or narrow the array at the producer and record that "
+                    f"you did."
+                )
             if arr.shape[0] != n:
                 raise ValueError(
                     f"PathData.{name} has {arr.shape[0]} rows but num_paths is {n}; "
@@ -339,6 +356,22 @@ def validate_path_descriptor(paths: "PathData", *, simulator_name: str, scene_id
             f"without the config that produced it "
             f"(amcd.simulators.base.REQUIRED_PATH_DESCRIPTOR_KEYS)."
         )
+    # BAND NAMES MUST BE NUMBERS, NOT MERELY THE RIGHT LENGTH (F-216). The count
+    # check below is satisfied by any sized object, so `band_centres_hz` given as
+    # the string "12345678" passes against 8 intensity columns and writes a file
+    # naming eight bands with no frequencies in it — the uninterpretable path file
+    # this validation exists to prevent.
+    for key in ("band_centres_hz", "band_edges_hz"):
+        values = paths.descriptor.get(key)
+        if isinstance(values, (str, bytes)) or not all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) for v in values
+        ):
+            raise ValueError(
+                f"simulator {simulator_name!r} declared descriptor[{key!r}] = "
+                f"{values!r} for scene {scene_id!r}; it must be a sequence of "
+                f"NUMBERS in Hz. A sized object of the right length passes a count "
+                f"check while naming no frequencies at all."
+            )
 
     # Presence is not interpretability (F-88). `__post_init__` only compares
     # num_bands against `intensities`, both from the same producer and so
