@@ -63,27 +63,26 @@ groups:
 # allocation table, no permission clause on any ledger row.
 
 unassigned: [
-  RD-18, RD-33a, RD-65, RD-66, RD-67, RD-08, RD-21, RD-24, RD-20, RD-69, RD-55, RD-107, RD-129,
-  RD-93, RD-96, RD-98, RD-99, RD-101, RD-102, RD-103, RD-104, RD-105, RD-106, RD-108, RD-109,
-  RD-112, RD-113, RD-114, RD-116, RD-117, RD-118, RD-119, RD-120, RD-121, RD-122, RD-123, RD-124,
-  RD-125, RD-153, RD-186, RD-187, RD-188, RD-189, RD-190, RD-200, RD-201, RD-207, RD-227, F-60,
-  F-63, F-64, F-65, F-66, F-68, F-69, F-70, F-72, F-73, F-74, F-81, F-75, S-F1, F-M2, F-89, F-M3,
-  F-M4, F-M5, F-M8, F-M9, F-M10, F-M11, F-68-R2, F-68-R3, F-69-B4, F-76, F-77, F-78, F-79, F-80,
-  S-1, S-2, S-F4, S-F5, S-F6, S-F7, F-82, F-83, F-84, F-85, F-86, F-87, F-88, F-90, F-91, F-92,
-  F-93, F-94, F-95, F-96, F-97, F-98, F-99, F-100, F-101, F-102, F-105, F-M6, F-M7, F-110, F-116,
-  F-117, F-118, F-122, F-123, F-143, F-161, F-162, F-166, F-167, F-185, F-186, F-215, F-216,
-  F-217, F-219, F-220, F-106, AC-187, AC-186, AC-26, AC-28, AC-30, AC-37, AC-38, AC-39, AC-41,
-  AC-42, AC-43, AC-36, AC-64, AC-65, AC-66, AC-67, AC-68, AC-45, AC-50, AC-37-R4, AC-26-R6,
-  AC-19-R7, AC-44, AC-46, AC-47, AC-48, AC-49, AC-51, AC-52, AC-53, AC-55, AC-56, AC-57, AC-59,
-  AC-60, AC-61, AC-62, AC-63, AC-58, AC-75, AC-78, AC-81, AC-83, AC-85, AC-101, AC-104, AC-105,
-  AC-108, AC-109, AC-127, AC-128, AC-129, AC-131, AC-132, AC-150, AC-185, AC-175, AC-178, AC-180,
-  AC-181, AC-182, AC-183, AC-69, AC-70, RR-203, RR-94, RR-95, RR-96
+  RD-18, RD-65, RD-20, RD-69, RD-55, RD-107, RD-129, RD-104, RD-108, RD-109, RD-118, RD-119,
+  RD-121, RD-124, RD-125, RD-153, RD-186, RD-187, RD-188, RD-190, RD-200, RD-201, F-60, F-63,
+  F-64, F-65, F-66, F-68, F-69, F-70, F-72, F-73, F-74, F-81, F-75, S-F1, F-M2, F-89, F-M3,
+  F-M4, F-M5, F-M8, F-M9, F-M10, F-M11, F-68-R2, F-68-R3, F-69-B4, F-76, F-77, F-78, F-79,
+  F-80, S-1, S-2, S-F4, S-F5, S-F6, S-F7, F-82, F-83, F-84, F-85, F-86, F-87, F-88, F-90,
+  F-91, F-92, F-93, F-94, F-95, F-96, F-97, F-98, F-99, F-100, F-101, F-102, F-105, F-M6,
+  F-M7, F-110, F-116, F-117, F-118, F-122, F-123, F-143, F-161, F-162, F-166, F-167, F-185,
+  F-186, F-215, F-216, F-217, F-219, F-220, F-106, AC-187, AC-186, AC-26, AC-28, AC-30, AC-37,
+  AC-38, AC-39, AC-41, AC-42, AC-43, AC-36, AC-64, AC-65, AC-66, AC-67, AC-68, AC-45, AC-50,
+  AC-37-R4, AC-26-R6, AC-19-R7, AC-44, AC-46, AC-47, AC-48, AC-49, AC-51, AC-52, AC-53, AC-55,
+  AC-56, AC-57, AC-59, AC-60, AC-61, AC-62, AC-63, AC-58, AC-75, AC-78, AC-81, AC-83, AC-85,
+  AC-101, AC-104, AC-105, AC-108, AC-109, AC-127, AC-128, AC-129, AC-131, AC-132, AC-150,
+  AC-185, AC-175, AC-178, AC-180, AC-181, AC-182, AC-183, AC-69, AC-70, RR-203, RR-94, RR-95,
+  RR-96
 ]
 
 # Group 9 re-checks every one of these for whether its declared gate has arrived.
 # A row deferred to a gate that has already passed is not deferred — that is how
 # RD-17 sat for three cycles after Steps 2/3 landed.
 deferred_sweep: [
-  AC-09, AC-15, AC-16, AC-19-value, F-06, RD-04, RD-12, RD-14, RD-15, RD-23,
-  RD-27, RD-28, RD-29, RD-38, RD-41, RD-46, RD-52
+  AC-09, AC-15, AC-16, RD-46, F-06, RD-12, RD-14, RD-15, RD-23, RD-27, RD-28, RD-29, RD-38,
+  RD-52, AC-19-value
 ]

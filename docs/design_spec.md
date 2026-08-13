@@ -379,6 +379,28 @@ grant:
 30 is also the smallest count at which a probe starts to say anything about
 statistical significance; the superseded ≤4/≤6 grants could not.
 
+**The dataset-render gate.** No full-dataset (720-scene) `gsound_sir` render until
+BOTH conditions hold. This lives here rather than in the review ledger because it
+is a standing rule of the study, not an unsolved defect — a gate carried as a
+ledger row drifted its own lift condition three times.
+
+- **(i)** Zero OPEN ledger rows anchored on this explicit path list:
+  `src/amcd/scenes/**`, `src/amcd/evaluation/**`, `config.py` split handling,
+  `configs/*.yaml` split declarations. The list is explicit because the earlier
+  free-text version ("the metric path") admitted whatever reading was convenient.
+  Severity is not a criterion: the gate lifts at zero OPEN, not at zero
+  blocker/major.
+- **(ii)** The ray-budget probe has validated the high leg
+  (`high_ray_budget`) as a converged reference against the config-declared
+  `convergence:` tolerances, on **all three** declared quantities — per-band
+  energy, T30 and C50 — through the production ISO path, driven via
+  `build_simulator`.
+
+Condition (ii) exists because every paired-improvement number in the project, D0a's
+headroom and D0b's carrier test all treat that leg as ground truth, and nothing had
+ever checked it. It is a tolerance check over a handful of scenes, never a
+CI-backed convergence claim, and must be reported as such.
+
 ### 11.2 GSound-SIR's T30 ceiling is a renderer limitation (user decision, 2026-08-12)
 
 **T30 stops being ISO-3382-1-admissible above Sabine T60 ≈ 1.85 s on this

@@ -66,12 +66,47 @@ amcd <stage> -c configs/base.yaml \
 amcd all -c configs/base.yaml -c configs/research_i.yaml \
          -c configs/overlays/simulator_dry_run.yaml \
          -c configs/overlays/research_i_smoke.yaml
+
+# the REAL renderer: drop the simulator_dry_run overlay and `simulator` falls back
+# to base.yaml's gsound_sir. On a native x86_64 host that is all you need. On
+# Apple Silicon the render step is emulated, so it needs its own interpreter,
+# supplied by a host-local layer kept OUT of the repo (it is a machine fact, not a
+# dataset one — `configs/simulators/gsound_sir.yaml` declares it host-scoped and
+# defaults it to null, meaning "use sys.executable"):
+#
+#     # host.yaml — not committed
+#     simulator:
+#       params:
+#         render_python: /path/to/envs/amcd-render-x86/bin/python
+#
+amcd all -c configs/base.yaml -c host.yaml
 ```
+
+Setting that env up on each platform: `docs/gsound_sir_setup.md`.
 
 **Stage DAG** (`src/amcd/pipeline.py`):
 
 ```
 gen-scenes → render → preprocess → diagnostics → train → infer → eval → stats → report
+```
+
+**What a run directory holds** — each stage's output, in DAG order:
+
+```
+experiments/<run_id>/
+  config.yaml resolved.yaml versions.json timings.json   provenance (see below)
+  stages/                       one sentinel per completed stage; presence = cached
+  scenes/scene_NNNN.json        gen-scenes  + placement_report.json
+  renders/scene_NNNN/           render      low.npy high.npy meta.json
+                                            paths_{low,high}.parquet (gsound only)
+  preprocessed/                 preprocess  <split>/ carrier/ splits.json meta.json
+  diagnostics/                  diagnostics d0a_gap.json d0b_oracle.json
+  checkpoints/best.pt           train
+  predictions/                  infer       <scene>_pred.pt <scene>_decoded_ir.npy
+  metrics/                      eval        metrics.parquet drops.csv
+                                            iso_integration_windows.json
+  stats/                        stats       ci_table.csv summary.json
+  report/                       report      summary.txt metrics_table.csv
 ```
 
 - Each stage writes a sentinel under `experiments/<run_id>/stages/`; a cached stage

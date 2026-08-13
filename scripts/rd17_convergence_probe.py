@@ -32,14 +32,47 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import zlib
 from pathlib import Path
 
 import numpy as np
 
 from amcd.acoustics import box_volume_and_surface, sabine_rt60
 from amcd.config import Config
-from amcd.evaluation.room_acoustic import channel_per_band_metrics
+from amcd.evaluation.room_acoustic import (
+    _band_energy,
+    _find_onset,
+    channel_per_band_metrics,
+)
 from amcd.simulators.base import SceneSpec, build_simulator
+
+
+def _room_key(dims: tuple[float, float, float], alpha: float) -> str:
+    """Stable digest of the ROOM, so an id and a seed name a geometry rather than a
+    position in some sweep.
+
+    `zlib.crc32` over a fixed-precision rendering, not `hash()`: the builtin is
+    salted per process, so seeds would differ between runs of the same probe.
+    """
+    return f"{zlib.crc32(f'{dims[0]:.6f},{dims[1]:.6f},{dims[2]:.6f},{alpha:.6f}'.encode()):08x}"
+
+
+def _scene_id(n: int, i: int, dims: tuple[float, float, float], alpha: float) -> str:
+    """Scene id carrying the population it was drawn from AND the room itself.
+
+    The bare `rd17_{i:02d}` this replaced was a function of the sweep index alone,
+    so the same id named a different room at a different `--scenes` count: `rd17_04`
+    is 8.000 x 6.889 x 3.844 m in a 10-scene run and 8.727 x 7.455 x 4.055 m in a
+    12-scene run, and they shared seed 1004. A later probe asked to re-render "the
+    scene that failed" by id silently rendered a different room, and any fit that
+    pooled two artifacts on `scene_id` merged two geometries.
+    """
+    return f"rd17_n{n:02d}_{i:02d}_{_room_key(dims, alpha)}"
+
+
+def _scene_seed(dims: tuple[float, float, float], alpha: float) -> int:
+    """Seed derived from the room, so two different rooms cannot share one."""
+    return int(_room_key(dims, alpha), 16)
 
 
 def _probe_scenes(config: Config, n: int) -> list[SceneSpec]:
@@ -62,11 +95,41 @@ def _probe_scenes(config: Config, n: int) -> list[SceneSpec]:
         src = (m.wall, m.wall, min(1.5, lz - m.ceiling))
         rcv = (lx - m.wall, ly - m.wall, min(1.5, lz - m.ceiling))
         scenes.append(SceneSpec(
-            scene_id=f"rd17_{i:02d}", seed=1000 + i, geometry_family="shoebox",
+            scene_id=_scene_id(n, i, dims, alpha), seed=_scene_seed(dims, alpha),
+            geometry_family="shoebox",
             dims=dims, material_absorption=alpha, source_pos=src, receiver_pos=rcv,
         ))
     return sorted(scenes, key=lambda s: -sabine_rt60(*box_volume_and_surface(s.dims),
                                                      s.material_absorption))
+
+
+def _band_energy_totals(config: Config, ir_multichannel: np.ndarray, n_limit: int) -> dict:
+    """Total in-band energy per eval band, over the first `n_limit` post-onset
+    samples — RD-33a condition (ii)'s THIRD declared quantity.
+
+    `convergence.band_energy_frac` has been declared in `configs/base.yaml` since
+    the tolerance block was written and nothing had ever evaluated it, so the
+    probe answered two of the three quantities the gate condition names. It is the
+    quantity that matters most downstream: the model's output domain is per-band
+    log power, so band energy is what it is ultimately scored against.
+
+    WHY A COMMON SAMPLE LIMIT rather than each leg's own integration window: the
+    record length itself moves with the ray budget (AC-185), and the shared
+    Lundeby window tracks it too (F-89) — so integrating each leg to its own end
+    would fold a record-length difference into what is meant to be an energy
+    comparison. `n_limit` is the SHORTER of the two legs' native records, which
+    asks the convergence question and only that one.
+
+    Uses the metric path's own onset alignment and octave filter rather than a
+    second implementation, for the AC-24 reason the T60 formulas are shared.
+    """
+    ir_w = ir_multichannel[0]
+    onset = _find_onset(ir_w, config.metric_onset_rel_db)
+    aligned = ir_w[onset:onset + n_limit]
+    return {
+        str(fc): float(_band_energy(aligned, float(fc), config.sample_rate).sum())
+        for fc in config.iso_eval_freqs
+    }
 
 
 def _iso(config: Config, ir_multichannel: np.ndarray) -> dict:
@@ -120,8 +183,19 @@ def main() -> int:
     for scene in _probe_scenes(config, args.scenes):
         volume, surface = box_volume_and_surface(scene.dims)
         t60 = sabine_rt60(volume, surface, scene.material_absorption)
+        # Geometry recorded alongside the measurement, because the candidate models
+        # for realized record support disagree about which of these is the
+        # independent variable and the existing artifacts cannot tell them apart:
+        # every probe room so far was produced by scaling all three dims by one
+        # factor, which makes the rooms geometrically SIMILAR and
+        # corr(log V, log 4V/S) exactly 1.0000. Storing surface, mean free path and
+        # the depth bound means the next refit needs no re-render.
         row = {"scene_id": scene.scene_id, "dims": list(scene.dims),
-               "alpha": scene.material_absorption, "t60_sabine_s": t60, "legs": {}}
+               "alpha": scene.material_absorption, "t60_sabine_s": t60,
+               "volume_m3": volume, "surface_area_m2": surface,
+               "mean_free_path_m": 4.0 * volume / surface,
+               "diffuse_depth": config.simulator.params.get("diffuse_depth"),
+               "legs": {}}
         for leg, budget in (("high", config.high_ray_budget),
                             ("reference", int(args.reference_multiple * config.high_ray_budget))):
             t0 = time.time()
@@ -136,6 +210,9 @@ def main() -> int:
                 "predicted_support_s": meta.get("predicted_support_s"),
                 "support_realized_over_predicted": meta.get("support_realized_over_predicted"),
                 "iso": _iso(config, res.ir),
+                # Kept so band energy can be integrated over a window common to both
+                # legs once the pair is complete (see `_band_energy_totals`).
+                "_ir": res.ir,
             }
             print(f"  {scene.scene_id} {leg:4} T60={t60:6.3f}s  {wall:6.1f}s  "
                   f"support={meta.get('realized_support_s'):.4f}s "
@@ -146,6 +223,15 @@ def main() -> int:
         # against LOW would measure the low-high gap -- D0a headroom, the thing the
         # model is trained to close -- and would call the reference unconverged
         # precisely when the denoising problem is hardest.
+        # Band energy over a window BOTH legs cover, so the comparison is about
+        # energy and not about the record-length difference the budget also causes.
+        n_common = min(int(row["legs"][leg]["native_ir_samples"] or 0)
+                       for leg in ("high", "reference"))
+        for leg in ("high", "reference"):
+            row["legs"][leg]["band_energy"] = _band_energy_totals(
+                config, row["legs"][leg].pop("_ir"), n_common)
+        row["band_energy_window_samples"] = n_common
+
         verdict = {}
         for fc in row["legs"]["reference"]["iso"]:
             hi, lo = row["legs"]["reference"]["iso"][fc], row["legs"]["high"]["iso"][fc]
@@ -159,6 +245,18 @@ def main() -> int:
                     continue
                 d = abs(l - h) / abs(h) if rel else abs(l - h)
                 band[metric] = {"delta": d, "tolerance": thresh, "within": bool(d <= thresh)}
+            e_ref = row["legs"]["reference"]["band_energy"][fc]
+            e_hi = row["legs"]["high"]["band_energy"][fc]
+            if e_ref > 0.0:
+                d = abs(e_hi - e_ref) / e_ref
+                band["band_energy"] = {"delta": d, "tolerance": tol.band_energy_frac,
+                                       "within": bool(d <= tol.band_energy_frac)}
+            else:
+                band["band_energy"] = {
+                    "delta": None,
+                    "reason": "reference leg carries zero energy in this band, so a "
+                              "relative difference is undefined",
+                }
             verdict[fc] = band
         row["verdict"] = verdict
         results.append(row)
@@ -167,8 +265,9 @@ def main() -> int:
 
     # Summary — scored vs attempted per metric, never a bare pass/fail.
     print("\n=== RD-17 tolerance check (NOT a CI-backed convergence claim) ===")
-    print(f"tolerances: T30 {tol.t30_frac:.0%} rel, C50 {tol.c50_db} dB abs")
-    for metric in ("T30", "C50"):
+    print(f"tolerances: T30 {tol.t30_frac:.0%} rel, C50 {tol.c50_db} dB abs, "
+          f"band energy {tol.band_energy_frac:.0%} rel")
+    for metric in ("T30", "C50", "band_energy"):
         cells = [(r["scene_id"], fc, b[metric])
                  for r in results for fc, b in r["verdict"].items()]
         scored = [c for c in cells if c[2].get("delta") is not None]
