@@ -241,7 +241,7 @@ class TestConfigRootIsNotAssumedToBeASourceCheckout:
         # and what would fix it.
         assert "configs/base.yaml" in message
         assert str(missing / "base.yaml") in message
-        assert "package data" in message
+        assert "pip install -e ." in message
 
     def test_resolution_never_raises_so_import_cannot_fail_on_layout(
         self, monkeypatch
@@ -258,14 +258,29 @@ class TestConfigRootIsNotAssumedToBeASourceCheckout:
         resolved = config_mod._resolve_configs_dir()
         assert isinstance(resolved, Path)
 
-    def test_the_packaged_location_is_preferred_over_the_checkout(self) -> None:
-        """Listed first so shipping `configs/` as package data later needs no code
-        change here (the packaging half is on the integrator's queue)."""
-        import amcd
+    def test_no_candidate_points_somewhere_nothing_ships(self) -> None:
+        """RD-109: a search path that can never match is not a provision.
+
+        `amcd/configs/` was listed FIRST as a place a future packaged build might
+        put `configs/`. No build ever did — `pyproject.toml` declares no package
+        data and `configs/` sits outside the package directory — so its only effect
+        was to head the "Tried:" list with a directory that cannot exist, while the
+        error text told the operator to install a wheel that would not have worked.
+
+        Asserted as a PROPERTY, not against the current list: every candidate must
+        be somewhere `configs/` is actually delivered. If package data is ever
+        shipped, this test passes with the entry restored.
+        """
         import amcd.config as config_mod
 
-        packaged = Path(amcd.__file__).resolve().parent / "configs"
-        assert config_mod._CONFIG_ROOT_CANDIDATES[0] == packaged
+        unshippable = [
+            c for c in config_mod._CONFIG_ROOT_CANDIDATES if not (c / "base.yaml").is_file()
+        ]
+        assert unshippable == [], (
+            f"config root candidate(s) {unshippable} hold no base.yaml in this "
+            f"installation. A candidate no build populates makes the resolver "
+            f"claim support for a layout that does not work (RD-109)."
+        )
 
     def test_the_resolved_root_actually_holds_base_yaml(self) -> None:
         import amcd.config as config_mod

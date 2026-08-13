@@ -1064,6 +1064,50 @@ class TestALegacySentinelIsRefusedActionablyNotWithATraceback:
         with pytest.raises(RuntimeError, match="predates fingerprinted caching"):
             pipe._is_done("report")
 
+    def test_the_UPSTREAM_leg_says_the_same_thing_about_the_same_run_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """F-167: F-75's guard was applied to one of the two legs.
+
+        `_is_done` and `_effective_fingerprint` both ask whether a sentinel's
+        fingerprint can be established, and they answered differently: the upstream
+        leg reported that `stats` "has not completed ... running would record a
+        provenance chain for artifacts that do not exist" for a run_dir whose
+        `stats/` was fully populated and whose stage HAD completed. Both claims were
+        false. Any run_dir predating F-63 is in exactly this state, so the operator
+        it misdirects is the one most likely to hit it.
+        """
+        pipe = self._run_dir_with_a_legacy_report_sentinel(
+            tmp_path, {"completed_at": 1.0, "fingerprint": None}
+        )
+        # Forge the same legacy shape onto `report`'s UPSTREAM instead.
+        _sentinel(tmp_path, "stats").write_text(
+            json.dumps({"completed_at": 1.0, "fingerprint": None})
+        )
+        with pytest.raises(RuntimeError) as exc:
+            pipe._effective_fingerprint("report")
+        message = str(exc.value)
+        assert "predates fingerprinted caching" in message, message
+        assert "has not completed" not in message, (
+            "the upstream leg still claims a populated, completed stage never ran"
+        )
+        assert "do not exist" not in message, (
+            "the upstream leg still claims the artifacts are missing when they are "
+            "on disk — only the sentinel's provenance is unestablishable"
+        )
+
+    def test_a_genuinely_absent_upstream_sentinel_still_says_so(
+        self, tmp_path: Path
+    ) -> None:
+        """The other half of F-167: distinguishing the two states must not lose
+        the one that was already right."""
+        pipe = self._run_dir_with_a_legacy_report_sentinel(
+            tmp_path, {"completed_at": 1.0, "fingerprint": None}
+        )
+        _sentinel(tmp_path, "stats").unlink()
+        with pytest.raises(RuntimeError, match="has not completed"):
+            pipe._effective_fingerprint("report")
+
 
 class TestTheCacheKeyDescribesTheSourceNotTheHost:
     """F-69: `rglob("*.py")` hashed macOS AppleDouble `._*.py` sidecars.

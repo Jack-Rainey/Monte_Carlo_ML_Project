@@ -535,20 +535,23 @@ FINGERPRINT_EXEMPT_FIELDS: dict[str, str] = {
         "describes are fingerprinted through the fields themselves, and `splits` "
         "is dumped in full by `_preprocess_fingerprint`."
     ),
-    "max_onset_ms": (
-        "Render-stage QC gate (configs/base.yaml §QC thresholds) that the real "
-        "gsound_sir backend will enforce; the dry_run scaffold's synthetic IRs "
-        "are clean by construction so nothing reads it yet. Non-exempt the "
-        "moment the real backend enforces it — it belongs in "
-        "`_render_fingerprint`, because it decides which renders are ADMITTED."
-    ),
-    "min_energy_db": (
-        "Render-stage QC gate like `max_onset_ms`, declared in configs/base.yaml "
-        "for the real gsound_sir backend and unread by the dry_run scaffold. "
-        "Non-exempt when that backend enforces it, and it belongs in "
-        "`_render_fingerprint` for the same reason: it decides which renders are "
-        "ADMITTED."
-    ),
+    **{
+        name: (
+            "Render-stage QC gate (configs/base.yaml §QC thresholds) that the real "
+            "gsound_sir backend will enforce; the dry_run scaffold's synthetic IRs "
+            "are clean by construction so nothing reads it yet. Non-exempt the "
+            "moment the real backend enforces it — all four belong in "
+            "`_render_fingerprint`, because they decide which renders are ADMITTED "
+            "(RD-18)."
+        )
+        for name in (
+            "onset_mismatch_tolerance_ms",
+            "min_energy_db",
+            "min_energy_reference",
+            "max_path_file_mb",
+            "require_non_empty_path_file",
+        )
+    },
 }
 
 
@@ -644,15 +647,48 @@ class Pipeline:
         self.verbosity = verbosity
         self.force = force
 
-    def _recorded_fingerprint(self, stage: str) -> dict | None:
-        """The fingerprint stored in `stage`'s sentinel, or None if it has not run."""
+    def _recorded_fingerprint(self, stage: str) -> tuple[str, dict | None]:
+        """`stage`'s sentinel state and the fingerprint in it, if any.
+
+        THREE STATES, NOT TWO (F-167). A bare `None` conflated them, and the two
+        callers then disagreed about what it meant: `_is_done` told an operator
+        their sentinel "predates fingerprinted caching", while `_effective_
+        fingerprint` told the same operator about the same run_dir that the stage
+        "has not completed ... running would record a provenance chain for artifacts
+        that do not exist". Both claims were false — `stats/` was fully populated —
+        and only the second was reachable from an upstream leg. Any run_dir
+        predating F-63 is in that state.
+
+        * `"absent"`   — no sentinel. The stage genuinely never ran here.
+        * `"stale"`    — a sentinel with `fingerprint: null`, or one that will not
+                         parse. It RAN; what it ran under cannot be established.
+                         `null` is the legacy shape `_mark_done` wrote for a stage
+                         that declared no fingerprint at the time, so this recurs
+                         for every stage that gains one later.
+        * `"present"`  — a fingerprint to compare.
+        """
         sentinel = _sentinel(self.run_dir, stage)
         if not sentinel.exists():
-            return None
+            return "absent", None
         try:
-            return json.loads(sentinel.read_text()).get("fingerprint")
-        except (json.JSONDecodeError, AttributeError):
-            return None
+            recorded = json.loads(sentinel.read_text())["fingerprint"]
+        except (json.JSONDecodeError, TypeError, KeyError):
+            recorded = None
+        return ("present", recorded) if recorded is not None else ("stale", None)
+
+    def _unestablishable(self, stage: str, *, because: str) -> RuntimeError:
+        """The one message for a sentinel that RAN under unknown inputs (F-167).
+
+        Shared by both legs so they cannot drift into describing the same run_dir
+        differently — which is the defect, not the wording.
+        """
+        return RuntimeError(
+            f"Stage {stage!r} has a cached sentinel with no fingerprint "
+            f"({_sentinel(self.run_dir, stage)}). It predates fingerprinted caching "
+            f"for this stage, so whether its artifacts match the current config "
+            f"cannot be established{because}. Re-run {stage!r} with --force (this "
+            f"discards its existing artifacts), or use a fresh --run-dir."
+        )
 
     def _effective_fingerprint(self, stage: str) -> dict:
         """This stage's own config inputs, plus the upstream sentinel's RECORDED
@@ -679,13 +715,21 @@ class Pipeline:
                 f"sentinel cannot say WHICH config its artifacts belong to. Give "
                 f"{upstream!r} a fingerprint before chaining to it."
             )
-        recorded = self._recorded_fingerprint(upstream)
-        if recorded is None:
+        state, recorded = self._recorded_fingerprint(upstream)
+        if state == "absent":
             raise RuntimeError(
                 f"Stage {stage!r} depends on {upstream!r}, which has not completed "
-                f"in {self.run_dir} (no readable fingerprinted sentinel). Run "
-                f"{upstream!r} first — running {stage!r} now would record a "
-                f"provenance chain for artifacts that do not exist."
+                f"in {self.run_dir} (no sentinel). Run {upstream!r} first — running "
+                f"{stage!r} now would record a provenance chain for artifacts that "
+                f"do not exist."
+            )
+        if state == "stale":
+            # It DID run, and its artifacts are on disk. Saying "has not completed"
+            # here sent an operator looking for missing output that was in front of
+            # them (F-167).
+            raise self._unestablishable(
+                upstream,
+                because=f", and {stage!r} would chain its provenance to that",
             )
         # The upstream artifacts must ALSO be current for this config. Recursing
         # here (rather than only comparing our own inputs) is what catches a stale
@@ -722,26 +766,16 @@ class Pipeline:
             return True  # stage declares no config dependency; bare sentinel
 
         expected = self._effective_fingerprint(stage)
-        try:
-            recorded = json.loads(sentinel.read_text())
-            found = recorded["fingerprint"]
-        except (json.JSONDecodeError, TypeError, KeyError):
-            found = None
+        state, found = self._recorded_fingerprint(stage)
         # A RECORDED `null` is the realistic legacy shape, not a corrupt file: it is
         # exactly what `_mark_done` wrote for a stage that declared no fingerprint
-        # at the time. So it must reach the same actionable message as a sentinel
-        # with the key absent — before F-75 it fell through to `_diff_fingerprints`,
-        # which did `set(None)` and raised a bare TypeError with a traceback. This
-        # recurs for EVERY stage that gains a fingerprint later (`diagnostics` next,
-        # RD-108/AC-45), so it is guarded here rather than at the call site.
-        if found is None:
-            raise RuntimeError(
-                f"Stage {stage!r} has a cached sentinel with no fingerprint "
-                f"({sentinel}). It predates fingerprinted caching for this stage, so "
-                f"whether its artifacts match the current config cannot be "
-                f"established. Re-run with --force to rebuild {stage!r} (this "
-                f"discards its existing artifacts), or use a fresh --run-dir."
-            ) from None
+        # at the time. Before F-75 it fell through to `_diff_fingerprints`, which did
+        # `set(None)` and raised a bare TypeError with a traceback. This recurs for
+        # EVERY stage that gains a fingerprint later (`diagnostics` next,
+        # RD-108/AC-45), so `_recorded_fingerprint` names the state and both legs
+        # read it from there (F-167).
+        if state == "stale":
+            raise self._unestablishable(stage, because="") from None
 
         if found != expected:
             diff = _diff_fingerprints(found, expected) or ["    (nested value changed)"]

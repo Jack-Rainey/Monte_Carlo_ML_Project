@@ -39,19 +39,27 @@ from . import provenance
 from .acoustics import sabine_rt60
 
 
-#: Where `configs/` may live, most-preferred first.
+#: Where `configs/` lives: beside `src/`, in the checkout this package was
+#: installed from.
 #:
-#: `configs/` used to be resolved three levels up from this module and nowhere
-#: else, which silently assumed a source checkout — so a wheel installed into
-#: site-packages could not find `base.yaml` and failed with a bare
-#: `FileNotFoundError` deep inside `_merge_yaml`, naming a path three parents above
-#: a site-packages directory (F-73). That is the same class of defect as a
-#: platform-keyed branch: a host-layout assumption baked into package code.
+#: ONE CANDIDATE, because there is one layout (RD-109). A second entry pointing at
+#: `amcd/configs/` was listed FIRST here as a provision for shipping `configs/` as
+#: package data — but no build ever shipped it, `pyproject.toml` declares no
+#: package data, and a search path that can never match is not a provision, it is a
+#: claim to support an install mode that does not work. Its only effect was to put
+#: a directory that cannot exist at the head of the error message below.
 #:
-#: The packaged location is listed FIRST and is not a source checkout's layout, so
-#: shipping `configs/` as package data later needs no change here.
+#: The documented install is `pip install -e .` (README), under which this resolves
+#: to the checkout on both declared hosts (docs/gsound_sir_setup.md). A non-editable
+#: wheel is not supported: `configs/` sits outside the package directory, so
+#: shipping it needs a real packaging change — a build-backend directive and a test
+#: that installs and loads — not a speculative path. `_require_configs` says so.
+#:
+#: Kept as a tuple rather than collapsed to a single Path so that change stays a
+#: one-line addition, and so the error message keeps enumerating what it tried
+#: (F-73: before any of this, a missing `base.yaml` surfaced as a bare
+#: `FileNotFoundError` from inside `_merge_yaml`, naming a path three parents up).
 _CONFIG_ROOT_CANDIDATES = (
-    Path(__file__).parent / "configs",            # packaged alongside the package
     Path(__file__).parent.parent.parent / "configs",  # source checkout: repo/configs
 )
 
@@ -83,10 +91,11 @@ def _require_configs() -> None:
         raise FileNotFoundError(
             "amcd cannot find `configs/base.yaml`, which holds every default a run "
             f"is built from.\n  Tried:\n{tried}\n"
-            "  Run from a source checkout (where `configs/` sits beside `src/`), or "
-            "install a build that ships `configs/` as package data. There is no "
-            "built-in fallback: a value that governs an experiment never has a "
-            "default in Python."
+            "  Install from a source checkout, where `configs/` sits beside `src/` "
+            "— `pip install -e .` (README). A non-editable wheel does NOT ship "
+            "`configs/` and is not supported (RD-109). There is no built-in "
+            "fallback: a value that governs an experiment never has a default in "
+            "Python."
         )
     # The plugin params directories too, not just base.yaml (F-80). A root holding
     # base.yaml but none of these — precisely the half-finished "ship configs/ as
@@ -773,9 +782,35 @@ class Config(BaseModel):
     # Reporting
     report_format: str
 
-    # QC thresholds
-    max_onset_ms: float
+    # ── Render QC thresholds (§6 QC record / §7) ──────────────────────────────
+    # All FOUR of Research I's criteria (paper §B.4, Figure 5), because QC decides
+    # dataset ADMISSION and E1 is "reproduce the old null" — two of four declared
+    # meant a silently different admission rule (RD-18).
+
+    #: Tolerance on the direct-path onset MISMATCH BETWEEN the low-ray and high-ray
+    #: renders of one scene, in ms. A PAIRED criterion, not a bound on either IR's
+    #: own onset: RI's check is that the same physical arrival lands at a consistent
+    #: sample location across the pair, which a scene with a genuinely late direct
+    #: arrival satisfies. Named `max_onset_ms` until RD-18, which reads as the
+    #: absolute bound it is not.
+    onset_mismatch_tolerance_ms: float
+
+    #: Smallest total IR energy admitted, in dB re `min_energy_reference`.
     min_energy_db: float
+    #: What `min_energy_db` is dB RELATIVE TO. Declared rather than assumed: RI
+    #: states its floor as a linear energy (1e-10), and a bare "-60 dB" is not a
+    #: level until the reference is stated — read as re 1.0 it is ~40 dB stricter
+    #: than RI's, which would exclude scenes RI admitted (RD-18).
+    min_energy_reference: float
+
+    #: Largest retained-path export admitted, in MB. Was declared FIXED in
+    #: docs/design_spec.md §11.1's role table while appearing in no config, which is
+    #: a hidden default in the strict sense — nothing could set it (RD-18).
+    max_path_file_mb: float
+    #: Whether a scene with an EMPTY retained-path file is refused. RI requires
+    #: non-empty path data; declared as a switch rather than assumed so a future
+    #: backend that exports no paths can say so instead of failing every scene.
+    require_non_empty_path_file: bool
 
     # D0a headroom-probe verdict thresholds (design_spec §4)
     d0a_gap_large_db: float

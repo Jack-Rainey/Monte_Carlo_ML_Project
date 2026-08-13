@@ -14,10 +14,8 @@
 #                   corridor geometry ranges · per-axis margins · heights
 #                   1.2-1.8 m · source-receiver separation 1.0-10.0 m · split
 #                   counts 500/60/60/40/30/30 · per-split seeds 1001-1006
-# PINNED AT STEP 4: the four QC thresholds (onset mismatch 2.0 ms, minimum total
-#                   energy 1e-10, non-empty retained-path file, max retained-path
-#                   file 128 MB). Two of those config keys do not exist yet, so
-#                   they are NOT in this file — ledger RD-18.
+#                   the four QC thresholds — see the QC block below, which pins
+#                   all of them (RD-18 closed the two keys that did not exist)
 #
 # ── SIX DELIBERATE DEVIATIONS — this config is NOT a verbatim RI clone ────────
 # Each is arbitrated and tracked; the E1 report must disclose them per split.
@@ -122,6 +120,21 @@ seeds:
 sample_rate: 48000
 ir_duration: 3.0
 ambisonics_order: 3
+
+# ── Figure 5: quality-control thresholds — all four, as RI states them ────────
+# base.yaml declares its own stricter energy floor for its own reasons; this config
+# claims RI faithfulness, so it pins RI's (paper §B.4 and Figure 5). The onset
+# tolerance and the file-size bound already agree with base.yaml and are restated
+# here rather than inherited, because a reader checking this file against Figure 5
+# must find all four in it (RD-18).
+onset_mismatch_tolerance_ms: 2.0
+# RI's floor is a LINEAR total energy of 1e-10, which is -100 dB re 1.0. base.yaml's
+# -60 dB re 1.0 is ~40 dB stricter and would exclude scenes RI admitted, so
+# reproducing the old null requires RI's number, not the better one.
+min_energy_db: -100.0
+min_energy_reference: 1.0
+max_path_file_mb: 128.0
+require_non_empty_path_file: true
 
 # ── Figure 5: ray budgets — FROZEN for E1 ─────────────────────────────────────
 # Do not change these to explore cost. The Step 6 ray-budget probe informs the

@@ -243,12 +243,49 @@ early_stopping_patience: 10 # tuned-capable
 report_format: text
 
 # ── QC thresholds ─────────────────────────────────────────────────────────────
-# Render-stage quality-control gates (§6 render QC record / §7): the real gsound_sir
-# backend will reject/flag an IR whose direct-sound onset exceeds max_onset_ms or
-# whose total energy falls below min_energy_db. Unused by the dry_run path (its
-# synthetic IRs are clean by construction) — awaiting the real render backend.
-max_onset_ms: 2.0
+# Render-stage quality-control gates (§6 render QC record / §7). QC decides which
+# renders are ADMITTED to the dataset, and E1 is "reproduce the old null", so a
+# silently different admission rule confounds the reproduction — which is why all
+# FOUR of Research I's criteria are declared here rather than the two that were
+# (RD-18). RI states them at docs/research_I_paper.md §B.4 and Figure 5.
+#
+# Unused by the dry_run path (its synthetic IRs are clean by construction) —
+# the criteria themselves await the real render backend. Declaring them now is
+# what makes that implementation a matter of reading config rather than of
+# rediscovering four numbers.
+#
+# THE ONSET CHECK IS PAIRED, NOT ABSOLUTE (RD-18). RI l.480: "a direct-path onset
+# mismatch within the configured tolerance BETWEEN THE LOW-RAY AND HIGH-RAY
+# RENDERS ... the same physical arrival represented at a consistent sample
+# location across each paired example". This key was named `max_onset_ms` and
+# described as a bound on one IR's onset, which is a different criterion: a scene
+# whose geometry puts the direct arrival at 8 ms is perfectly well paired and
+# would have been rejected. Renamed rather than left to the implementation,
+# because nothing reads it yet and a name that states the wrong criterion is what
+# the implementation would have been written against.
+onset_mismatch_tolerance_ms: 2.0
+
+# THE ENERGY FLOOR NEEDS ITS REFERENCE, OR IT IS NOT A LEVEL (RD-18). RI's figure
+# gives 1e-10 as a LINEAR total energy; -60 dB stood here with no reference stated,
+# which reads as -60 dB re 1.0 and is then ~40 dB STRICTER than RI's (1e-10 is
+# -100 dB re 1.0). Both halves are declared so the comparison is checkable:
+# `min_energy_db` is dB re `min_energy_reference`, and RI is reproduced by
+# reference 1.0 with -100.0.
+#
+# -60.0 re 1.0 is base.yaml's own choice and is deliberately stricter than RI's:
+# below it an IR carries too little energy for the ISO estimator's decay range to
+# be measurable at all, so admitting it would only produce unscored rows.
+# `configs/research_i.yaml` overrides both to RI's values, and that deviation is
+# recorded there.
 min_energy_db: -60.0
+min_energy_reference: 1.0
+
+# Retained-path export bounds. RI: non-empty path data, and a file within the
+# configured size bound of 128 MB (Figure 5). `max_path_file_mb` was declared FIXED
+# in docs/design_spec.md §11.1's role table while being absent from every config —
+# a hidden default in the strict sense, since nothing could set it (RD-18).
+max_path_file_mb: 128.0
+require_non_empty_path_file: true
 
 # ── D0a headroom-probe verdict thresholds (design_spec §4) ────────────────────
 d0a_gap_large_db: 3.0
