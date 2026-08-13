@@ -146,6 +146,12 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             # Not a drop: the value is scored, but its ESTIMATOR carries 24-31 %
             # sd in this range, which a bare point estimate does not convey.
             parts.append(f"{row['n_estimator_variance_limited']} high-variance")
+        if row.get("n_resolvability_limited"):
+            # Also not a drop: the PHYSICAL legs reported a value from a band their
+            # own octave filter cannot resolve. Scored and disclosed rather than
+            # censored, because censoring an estimator on its own value biases the
+            # survivors — but a reader must be able to see which numbers carry it.
+            parts.append(f"{row['n_resolvability_limited']} band-unresolvable")
         return ", ".join(parts)
 
     def _metric_row(row: dict) -> str:
@@ -251,6 +257,12 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         f"  high-variance: EDT below metric_edt_variance_limited_s = "
         f"{config.metric_edt_variance_limited_s:g} s, where the ESTIMATOR's",
         "  sd is 24-31 % of T60 — a scored value, not a precise one (AC-27/RD-78).",
+        f"  band-unresolvable: the PHYSICAL legs reported a value from a band whose",
+        f"  decay is below what that octave filter can resolve "
+        f"({config.metric_band_resolvability_margin:g} x the filter's own decay).",
+        "  Scored and disclosed, never censored — censoring an estimator on its own",
+        "  value biases the survivors (AC-38) — but the absolute is the least",
+        "  trustworthy in the table (F-M2).",
         "=" * 70,
     ]
     summary_txt = "\n".join(lines)

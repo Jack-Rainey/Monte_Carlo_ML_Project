@@ -1008,7 +1008,28 @@ def compute_room_acoustic_metrics(
                 and not (
                     leg == "pred"
                     and metric in bands[b][2]
-                    and not physical_floor_limited[b]
+                    # THE EXEMPTION DOES NOT EXTEND TO C50 (F-99).
+                    #
+                    # For T30 and EDT, keeping pred in a band no leg resolves is
+                    # right: every leg is measured by one instrument with one
+                    # limitation, and the error is BOUNDED by the decay itself.
+                    #
+                    # C50's is not. Its denominator is the late window, and where
+                    # the physics is floor-limited that window holds filter ringing
+                    # rather than reverberation, so the ratio can be arbitrarily
+                    # large. MEASURED at true T60 = 0.020 s — inside base.yaml's
+                    # declared support, and the regime `test_material_shift` is made
+                    # of — a degenerate 5 ms pred scored **+204.12 dB** against
+                    # physical legs at 135.03/135.10, pooling -69 dB of pure
+                    # artifact into the split's mean and its CI.
+                    #
+                    # Only PRED is suppressed. The physical legs keep their values
+                    # and their AC-38 caveat, because censoring a physical leg on a
+                    # verdict that correlates with absorption is confounded with
+                    # `test_material_shift`'s own independent variable — the defect
+                    # `test_a_physical_leg_is_never_censored_for_its_own_c50` exists
+                    # to catch, and which dropping the whole band would reintroduce.
+                    and not (physical_floor_limited[b] and metric != "C50")
                 )
                 for b in range(n_bands)
             ]
@@ -1016,6 +1037,7 @@ def compute_room_acoustic_metrics(
         }
         # The band set is the physical legs' — pred never votes (AC-25).
         kept = [b for b in range(n_bands) if all(finite[leg][b] for leg in physical_legs)]
+
         excluded = [b for b in range(n_bands) if b not in kept]
 
         leg_vals: dict[str, float] = {}

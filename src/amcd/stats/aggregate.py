@@ -280,6 +280,15 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             "n_estimator_variance_limited": _count_true(
                 group.get("estimator_variance_limited")
             ),
+            # F-M2: this reached metrics.parquet and stopped there. A caveat the
+            # reported table never renders is a code comment, not a disclosure —
+            # and this is the one that marks a value the PHYSICAL legs reported
+            # from a band their own octave filter cannot resolve, i.e. exactly the
+            # scenes whose absolute is least trustworthy.
+            "n_resolvability_limited": _count_true(
+                group.get("n_bands_resolvability_limited") > 0
+                if "n_bands_resolvability_limited" in group else None
+            ),
         }
         summary.append(row)
 
@@ -318,6 +327,7 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 "n_partial_band": 0,
                 "n_pred_band_unresolved": 0,
                 "n_estimator_variance_limited": 0,
+                "n_resolvability_limited": 0,
             })
 
     summary_df = pd.DataFrame(summary)
