@@ -38,7 +38,7 @@ sample_rate: 48000
 # so 3.0 s (the Research I value) did NOT cover base's support. 4.25 s covers it
 # with margin rather than by equality. Config load recomputes this corner from the
 # declared ranges and records it; gen-scenes hard-gates on the REALIZED over-limit
-# fraction (scenes.max_t60_over_ir_duration_frac), which base declares as 0.0.
+# fraction (scenes.max_t60_over_ir_duration_frac), which base declares as 0.05 (see that key's note and design_spec 11.2).
 #
 # configs/research_i.yaml deliberately stays at 3.0 s — that is an RI-pinned value,
 # not a research choice, so its 4.09 s corner is a structural deviation it discloses.

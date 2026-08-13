@@ -393,6 +393,15 @@ _DIAGNOSTICS_EXEMPTION = (
 #: reason must contain "Non-exempt", or say the field is "fingerprinted through"
 #: another key.
 FINGERPRINT_EXEMPT_FIELDS: dict[str, str] = {
+    "convergence": (
+        "RD-17's ray-budget convergence tolerances (config.py `ConvergenceTolerance`). "
+        "Read ONLY by scripts/rd17_convergence_probe.py, which is an engineering-"
+        "feasibility probe outside the pipeline and writes no canonical artifact — no "
+        "stage consumes these, so no stage output can go stale when they move. "
+        "Non-exempt the moment a convergence verdict reaches a reported table or a "
+        "canonical artifact: it must then be fingerprinted through whichever stage "
+        "carries it, or a stale verdict would be served as current."
+    ),
     "run_id": (
         "Experiment-ledger label with no pipeline consumer (config.py `run_id`). "
         "Fingerprinting it would discard an expensive artifact on a relabel. "

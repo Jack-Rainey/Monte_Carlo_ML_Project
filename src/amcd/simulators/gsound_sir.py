@@ -779,7 +779,7 @@ class GsoundSirSimulator:
         }
 
     def _support_falsification(self, scene: SceneSpec, n_native: int) -> dict:
-        """Falsify `predicted_support_t60_multiples` against the realized record.
+        """Falsify the declared `predicted_support_*` law against the realized record.
 
         The declaration in `configs/simulators/gsound_sir.yaml` predicts how much of
         a scene's decay this backend's adaptive energy trim will retain (AC-184).
