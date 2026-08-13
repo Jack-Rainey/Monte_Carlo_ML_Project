@@ -235,6 +235,27 @@ max_ir_length_s: 3.0
 # ~19% of T60 in a small room. 4mV scales with volume while S*alpha scales with
 # surface, so in the largest declared room correct air absorption would DOMINATE the
 # Eyring term at high frequency.
+# ── SYNTHESIS: EARLY-REFLECTION HANDLING (AC-180) ─────────────────────────────
+#
+# Upstream's `generate_ambisonic_ir` takes both of these and defaults them
+# (binding.cpp:284,286,498,500). The worker did not pass either, so the values
+# governing how every IR's early reflections are synthesized were UPSTREAM
+# DEFAULTS this project never stated — a hidden experiment value, and one that
+# moves C50/D50/EDT, the metrics the early/late split is defined on.
+#
+# Declared at the shipped defaults, deliberately: this records what the existing
+# renders were made with rather than silently changing them. Turning
+# `precise_early_reflections` on separates paths into early and late by energy and
+# synthesizes the early ones individually instead of onto the shared noise carrier
+# (binding.cpp:357-368,429). That is plausibly MORE faithful — the carrier is what
+# AC-59 measures as moving C50 by ~1 dB — but it is a different renderer, needs its
+# own cost measurement, and would invalidate every cached render. A change here is
+# a research decision, which is why it is a config key and not a default.
+precise_early_reflections: false
+# Fraction of total path energy below which a path is treated as late rather than
+# early. Read only when `precise_early_reflections` is true.
+early_reflection_threshold: 0.01
+
 air_absorption_realized_fraction: 0.25
 # The highest band at which the alpha_ISO/4 error stays inside the tolerance below.
 # `iso_eval_freqs` above this is REFUSED rather than silently mis-rendered.

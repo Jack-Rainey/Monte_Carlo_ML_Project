@@ -1439,6 +1439,8 @@ class TestRenderWorkerContract:
             "specular_depth": 50,
             "sample_rate": 48000,
             "normalize_ir": False,
+            "precise_early_reflections": False,
+            "early_reflection_threshold": 0.01,
             "ambisonics_order": 3,
             "frequency_points": [88.7412, 176.7767, 353.5534, 707.1068,
                                  1414.2136, 2828.4271, 5656.8542],

@@ -575,6 +575,35 @@ def _validate_realized_support_declared(
     return float(support)
 
 
+def simulator_max_eval_freq_hz(config) -> float | None:
+    """Highest band the active backend can render faithfully enough to MEASURE, or
+    None if it declares no such limit.
+
+    A backend may realize a physical effect incorrectly in a way it cannot fix. This
+    one attenuates air absorption at alpha_ISO/4 — the domain confusion is compiled
+    in and not exposed for pre-compensation the way surface absorption is — and the
+    error grows with frequency: inert at the reported 500/1000 Hz bands (<= 0.4 % of
+    T60), but ~19 % at 8 kHz in a small room, where it would dominate the Eyring
+    term in the largest declared rooms.
+
+    `iso_eval_freqs` is a config LIST, so a later study widening it would silently
+    report metrics from bands the renderer gets wrong. Declaring the ceiling here
+    turns that into a refusal at config load.
+
+    None means "no declared ceiling", not "unlimited" — a scaffold has no physics to
+    get wrong, so it has nothing to declare.
+    """
+    from ..registry import simulator_registry
+
+    SimClass = simulator_registry.get(config.simulator.name)
+    getter = getattr(SimClass, "max_eval_freq_hz", None)
+    if not callable(getter):
+        return None
+    validated = SimClass.Params(**config.simulator.params).model_dump()
+    limit = getter(validated)
+    return None if limit is None else float(limit)
+
+
 def simulator_code_scope(config) -> tuple[str, ...]:
     """Source scope whose content decides the IRs the ACTIVE backend produces.
 

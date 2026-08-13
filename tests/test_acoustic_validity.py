@@ -19,7 +19,11 @@ import pytest
 
 from amcd.acoustics import critical_distance, predicted_support_s
 from amcd.config import Config
-from amcd.scenes.generator import _room_acoustics, run_gen_scenes
+from amcd.scenes.generator import (
+    _check_eval_bands_against_the_backend,
+    _room_acoustics,
+    run_gen_scenes,
+)
 
 from tests.conftest import QUIET, tiny_config
 
@@ -450,3 +454,39 @@ class TestRealizedRecordSupport:
         """Realized support rises with the ray budget, so a coefficient without a
         declared operating point carries an implicit one (AC-185)."""
         assert declared["budget"] > 0
+
+
+class TestEvalBandsAgainstTheBackend:
+    """AC-66: `configs/simulators/gsound_sir.yaml` stated that an eval band above
+    `air_absorption_max_eval_freq_hz` is "REFUSED", and nothing refused it.
+
+    The backend attenuates air absorption at a quarter of the ISO value — a
+    compiled-in domain confusion it cannot pre-compensate the way it does surface
+    absorption. That is inert at the reported bands (<= 0.4 % of T60 at 500/1000 Hz)
+    and reaches ~19 % at 8 kHz in a small room, where it would dominate the Eyring
+    term in the largest declared rooms. `iso_eval_freqs` is a config list, so
+    widening it is a one-line edit.
+    """
+
+    def test_the_shipped_bands_are_inside_the_declared_ceiling(self) -> None:
+        cfg = Config.load(_BASE)
+        ceiling = cfg.simulator.params["air_absorption_max_eval_freq_hz"]
+        assert cfg.iso_eval_freqs and max(cfg.iso_eval_freqs) <= ceiling
+
+    def test_a_band_above_the_ceiling_is_refused(self, tmp_path: Path) -> None:
+        layer = tmp_path / "wide.yaml"
+        layer.write_text("iso_eval_freqs: [500, 1000, 8000]\n")
+        cfg = Config.load(_BASE, layer)
+        with pytest.raises(ValueError, match="air_absorption_max_eval_freq_hz"):
+            run_gen_scenes(cfg, tmp_path / "run", QUIET)
+
+    def test_a_backend_declaring_no_ceiling_is_not_constrained(
+        self, tmp_path: Path
+    ) -> None:
+        """The scaffold has no physics to get wrong, so it declares nothing — and
+        `None` must mean "unconstrained", not "zero"."""
+        layer = tmp_path / "wide.yaml"
+        layer.write_text("iso_eval_freqs: [500, 1000, 8000]\n")
+        cfg = Config.load(_BASE, Path("configs/overlays/simulator_dry_run.yaml"), layer)
+        assert 8000 in cfg.iso_eval_freqs
+        _check_eval_bands_against_the_backend(cfg)  # must not raise

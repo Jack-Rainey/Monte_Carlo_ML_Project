@@ -37,6 +37,7 @@ from ..config import Config, Margins, PlacementRegime
 from ..runtime import Verbosity, emit
 from ..simulators.base import (
     SceneSpec,
+    simulator_max_eval_freq_hz,
     simulator_min_separation,
     simulator_realized_support_s,
 )
@@ -181,6 +182,40 @@ def _sample_positions(
         f"{stats['above_max']} above the maximum) — widen distance_range, adjust "
         f"the geometry range, or raise scenes.max_placement_attempts."
     )
+
+
+def _check_eval_bands_against_the_backend(config: Config) -> None:
+    """Refuse an eval band the active backend cannot render faithfully (AC-66).
+
+    A backend may realize a physical effect wrongly in a way it cannot fix, and
+    declare the band above which that error exceeds a stated tolerance. gsound
+    attenuates air absorption at a quarter of the ISO value — compiled in, not
+    exposed for pre-compensation the way surface absorption is — which is inert at
+    500/1000 Hz and reaches ~19 % of T60 at 8 kHz. Its config already said such
+    bands are "REFUSED"; this is what makes that true.
+
+    Checked HERE, beside the other backend pre-flight, rather than in `Config`:
+    `config.py` is in `_CORE_SOURCES`, so importing the simulator seam from it puts
+    `simulators/base.py` into every stage's cache key. gen-scenes is the first
+    stage, so failing here is early enough to cost nothing.
+
+    A backend declaring no ceiling is not constrained — the scaffold has no physics
+    to get wrong, so it has nothing to declare.
+    """
+    limit = simulator_max_eval_freq_hz(config)
+    if limit is None:
+        return
+    over = [f for f in config.iso_eval_freqs if float(f) > limit]
+    if over:
+        raise ValueError(
+            f"iso_eval_freqs {over} exceed the {limit:g} Hz ceiling the "
+            f"{config.simulator.name!r} backend declares it can render faithfully "
+            f"(air_absorption_max_eval_freq_hz). Above it the backend's realized air "
+            f"absorption puts T60 outside its own declared tolerance, so a metric "
+            f"reported from those bands would describe the renderer's error rather "
+            f"than the room. Raise the ceiling only with a measurement that "
+            f"justifies it, or drop the bands."
+        )
 
 
 def _check_regimes_clear_backend_floor(config: Config) -> float:
@@ -826,6 +861,7 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # Config-level pre-flight: no scene is generated under a placement regime the
     # active backend could not render (AC-13/F-48/RD-45).
     _check_regimes_clear_backend_floor(config)
+    _check_eval_bands_against_the_backend(config)
 
     # The record-length gate's denominator (AC-175, AC-184). Resolved ONCE here and
     # passed down as a plain callable, so `_room_acoustics` never touches the

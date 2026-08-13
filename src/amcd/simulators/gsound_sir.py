@@ -292,7 +292,8 @@ def main(request_path):
       geometry    dims, absorption, scattering, source_pos, receiver_pos,
                   source_radius, listener_radius, source_power
       budgets     diffuse_count, specular_count, diffuse_depth, specular_depth
-      synthesis   sample_rate, normalize_ir, ambisonics_order, frequency_points
+      synthesis   sample_rate, normalize_ir, ambisonics_order, frequency_points,
+                  precise_early_reflections, early_reflection_threshold
       retention   energy_percentage, max_rays  (artifact only, never synthesis)
 
     RESPONSE, written into out_dir:
@@ -366,7 +367,9 @@ def main(request_path):
         np.asarray(paths["speeds_of_sound"], dtype=np.float32),
         freq_points,
         float(req["sample_rate"]),
+        precise_early_reflections=bool(req["precise_early_reflections"]),
         normalize=bool(req["normalize_ir"]),
+        early_reflection_threshold=float(req["early_reflection_threshold"]),
     )
     ir = np.asarray(ir, dtype=np.float32)
 
@@ -520,6 +523,8 @@ class GsoundSirSimulator:
         #: does not reach. Compiled ON and not exposed, so it is DECLARED and
         #: guarded rather than corrected: inert at 500/1000 Hz (<= 0.4% of T60),
         #: ~19% at 8 kHz. `iso_eval_freqs` above the max below is refused.
+        precise_early_reflections: bool
+        early_reflection_threshold: float
         air_absorption_realized_fraction: float
         air_absorption_max_eval_freq_hz: float
         air_absorption_t60_error_tolerance_frac: float
@@ -645,6 +650,18 @@ class GsoundSirSimulator:
             float(params["predicted_support_surface_exponent"]),
         )
         return min(trim_s, float(params["max_ir_length_s"]), float(window_s))
+
+    @classmethod
+    def max_eval_freq_hz(cls, params: dict) -> float:
+        """Highest band this backend renders faithfully enough to measure (AC-66).
+
+        Air absorption is realized at `air_absorption_realized_fraction` of the ISO
+        value — a compiled-in domain confusion, declared rather than corrected
+        because `AIR_ABSORPTION` is on and not exposed for pre-compensation. The
+        resulting T60 error grows with frequency and passes
+        `air_absorption_t60_error_tolerance_frac` above this band.
+        """
+        return float(params["air_absorption_max_eval_freq_hz"])
 
     @classmethod
     def code_scope(cls) -> tuple[str, ...]:
@@ -890,6 +907,8 @@ class GsoundSirSimulator:
             "specular_depth": int(self.params["specular_depth"]),
             "sample_rate": int(self.sample_rate),
             "normalize_ir": bool(self.params["normalize_ir"]),
+            "precise_early_reflections": bool(self.params["precise_early_reflections"]),
+            "early_reflection_threshold": float(self.params["early_reflection_threshold"]),
             "ambisonics_order": self._ambisonics_order,
             "frequency_points": list(self.params["frequency_points"]),
             "energy_percentage": energy_percentage,
