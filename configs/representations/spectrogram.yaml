@@ -102,14 +102,12 @@ min_db_headroom_db: 52.0
 # CENTRES, not a [lo, hi] range: a contiguous range cannot express a non-contiguous
 # evaluation band set, and would silently re-admit every band between.
 #
-# THIS IS A SECOND DECLARATION OF THE EVALUATION BAND SET — the AC-24 shape. It is
-# only admissible because `test_the_headroom_guard_reads_exactly_the_reported_metric_bands`
-# reads base.yaml and asserts EQUALITY with iso_eval_freqs (equality, not
-# containment: over-coverage is the defect being fixed). It exists only because
-# `build_representation` takes sample_rate as its sole cross-cutting argument, so
-# the rep cannot see the master config; retiring it for a derived operand is filed
-# as spanning row RD-187 in the lane-M inbox.
-min_db_headroom_octave_centres_hz: [500.0, 1000.0]
+# THE BAND SET IS NOT DECLARED HERE — it is `iso_eval_freqs` from configs/base.yaml,
+# handed to `build_representation` as a cross-cutting argument alongside
+# `sample_rate` (RD-187). It used to be re-declared as
+# `min_db_headroom_octave_centres_hz`, which is the AC-24 divergence shape: a guard
+# calibrated against the REPORTED metric bands, and a second config naming its own
+# band set, held together only by a test asserting the two were equal.
 
 # ── The fractional-octave ladder (AC-19) ──────────────────────────────────────
 # Previously literals inside `_build_third_octave_filters`. Declared here because

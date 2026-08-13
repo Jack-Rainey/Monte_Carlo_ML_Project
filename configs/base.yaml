@@ -399,14 +399,13 @@ convergence:
 
 # ── ISO 3382 evaluation bands (Hz) — design_spec §7 / §3 ──────────────────────
 #
-# DECLARED TWICE, AND BOTH MUST MOVE TOGETHER (RR-116).
-# `min_db_headroom_octave_centres_hz` in configs/representations/spectrogram.yaml
-# mirrors this set: it is the band set the AC-37 headroom guard reads, and it is a
-# separate declaration only because a representation cannot see the master config
-# (`build_representation` takes `sample_rate` as its sole cross-cutting argument —
-# RD-187). `test_the_headroom_guard_reads_exactly_the_reported_metric_bands`
-# asserts the two are EQUAL, so changing this line alone fails the suite rather
-# than silently mis-calibrating the guard.
+# DECLARED ONCE, HERE (RD-187). The AC-37 headroom guard in
+# configs/representations/spectrogram.yaml is calibrated against the REPORTED metric
+# bands, so it reads this set — handed to `build_representation` as a cross-cutting
+# argument beside `sample_rate`. It used to hold a mirror copy
+# (`min_db_headroom_octave_centres_hz`) kept in step by a test asserting equality;
+# changing this line now moves the guard directly, which is what a single
+# declaration means.
 iso_eval_freqs: [500, 1000]
 
 # Direct-arrival onset detection: integration starts at the first sample this many dB

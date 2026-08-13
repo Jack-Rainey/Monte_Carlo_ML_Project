@@ -52,13 +52,35 @@ class Representation(Protocol):
         ...
 
 
-def build_representation(name: str, params: dict[str, Any], *, sample_rate: int) -> "Representation":
+def build_representation(
+    name: str,
+    params: dict[str, Any],
+    *,
+    sample_rate: int,
+    eval_freqs_hz: list[float],
+) -> "Representation":
     """Instantiate a registered representation, validating `params` against its
     own nested `Params` schema (mirrors models.cnn.build_model).
 
     Keeps preprocess/infer/probe rep-agnostic: adding a new output domain needs
-    only a registered class with its own `Params`; `sample_rate` is the sole
-    cross-cutting arg (the analogue of `n_channels` for models)."""
+    only a registered class with its own `Params`.
+
+    TWO CROSS-CUTTING ARGS, NOT ONE (RD-187). `sample_rate` was the only one, and
+    that is what forced `configs/representations/spectrogram.yaml` to re-declare
+    the evaluation band set as `min_db_headroom_octave_centres_hz` — a SECOND
+    declaration of `iso_eval_freqs`, i.e. the AC-24 divergence shape, held together
+    only by a test asserting the two are equal. A representation whose guard is
+    calibrated against the REPORTED metric bands has to be told what those are; it
+    cannot see the master config, and inventing its own copy is how the described
+    band set and the measured one drift apart.
+
+    `eval_freqs_hz` is `config.iso_eval_freqs`. Passed to every representation
+    rather than only to the ones that use it, for the reason `sample_rate` is: an
+    argument a rep may ignore costs nothing, while a rep that needs it and cannot
+    reach it grows a duplicate declaration.
+    """
     RepClass = representation_registry.get(name)
     validated = RepClass.Params(**params).model_dump()
-    return RepClass(sample_rate=sample_rate, **validated)
+    return RepClass(
+        sample_rate=sample_rate, eval_freqs_hz=list(eval_freqs_hz), **validated
+    )

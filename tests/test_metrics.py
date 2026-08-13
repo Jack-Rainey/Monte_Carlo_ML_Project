@@ -12,6 +12,7 @@ import torch
 from amcd.config import Config
 
 from amcd.evaluation.room_acoustic import channel_band_avg_metrics
+from tests.conftest import EVAL_FREQS
 
 _SR = 48000
 _ISO = [500.0, 1000.0]
@@ -639,42 +640,61 @@ def test_the_placement_axis_moves_c50_through_the_iso_path() -> None:
 
 
 def test_the_headroom_guard_reads_exactly_the_reported_metric_bands() -> None:
-    """AC-37-R4 — the guard's declared band set must EQUAL `iso_eval_freqs`.
+    """AC-37-R4 / RD-187 — the guard's operand IS `iso_eval_freqs`, not a copy of it.
 
-    `min_db_headroom_octave_centres_hz` in configs/representations/spectrogram.yaml
-    is a SECOND declaration of the evaluation band set — the AC-24 divergence shape,
-    where one physical quantity is declared twice and the two drift apart. It exists
-    only because `build_representation` takes `sample_rate` as its sole
-    cross-cutting argument, so the representation cannot read the master config, and
-    threading `iso_eval_freqs` through would touch three files in two other lanes.
+    It used to be a copy: `min_db_headroom_octave_centres_hz` in
+    configs/representations/spectrogram.yaml declared the evaluation band set a
+    SECOND time, because `build_representation` took `sample_rate` as its only
+    cross-cutting argument and so a representation could not read the master config.
+    That is the AC-24 divergence shape, and it was admissible only while a test
+    asserted the two were equal.
 
-    A second declaration is admissible ONLY while a test forbids the drift, and this
-    is that test.
+    The band set is now handed down, so there is nothing left to drift — and this
+    test changes accordingly: instead of comparing two declarations, it asserts the
+    guard's operand tracks `iso_eval_freqs` when that MOVES. A representation that
+    reintroduced its own copy would pass an equality check against the shipped
+    config and fail this one.
 
-    EQUALITY, NOT CONTAINMENT. The defect being fixed is a minimum taken over too
-    wide a band set — the old guard minimised over all 27 ladder bands and was
+    EQUALITY, NOT CONTAINMENT, still. The defect being fixed is a minimum taken over
+    too wide a band set — the old guard minimised over all 27 ladder bands and was
     decided by a low single-FFT-bin band, 4.91 dB away from the bands the metrics
-    actually use. A containment assertion would permit arbitrary over-coverage and
-    so would not prevent the very defect it is here to prevent.
+    actually use. Containment would permit arbitrary over-coverage.
     """
-    cfg = _base_config()
     from pathlib import Path
 
     import yaml
 
-    declared = yaml.safe_load(
-        Path("configs/representations/spectrogram.yaml").read_text()
-    )["min_db_headroom_octave_centres_hz"]
+    from amcd.representations.base import build_representation
 
-    assert sorted(float(f) for f in declared) == sorted(
-        float(f) for f in cfg.iso_eval_freqs
-    ), (
-        f"the AC-37 headroom guard reads octave bands {sorted(declared)} while the "
-        f"reported ISO metrics are computed over {sorted(cfg.iso_eval_freqs)}. These "
-        f"are two declarations of ONE band set and they have drifted (AC-24 shape). "
-        f"The guard's threshold is calibrated on oracle T30 at the REPORTED bands, "
-        f"so a mismatch means it is again calibrated on one band set and enforced "
-        f"on another — the AC-37-R4 defect."
+    cfg = _base_config()
+    params = yaml.safe_load(
+        Path("configs/representations/spectrogram.yaml").read_text()
+    )
+    assert "min_db_headroom_octave_centres_hz" not in params, (
+        "the representation config declares the evaluation band set again. It is "
+        "handed down by `build_representation` now; a second declaration is the "
+        "AC-24 shape and nothing keeps the two in step any more (RD-187)."
+    )
+
+    shipped = [float(f) for f in cfg.iso_eval_freqs]
+    rep = build_representation(
+        cfg.representation.name, cfg.representation.params,
+        sample_rate=cfg.sample_rate, eval_freqs_hz=shipped,
+    )
+    assert sorted(rep.eval_freqs_hz) == sorted(shipped)
+
+    # And it MOVES with the band set — which a re-introduced literal would not.
+    moved = [250.0, 2000.0]
+    rep_moved = build_representation(
+        cfg.representation.name, cfg.representation.params,
+        sample_rate=cfg.sample_rate, eval_freqs_hz=moved,
+    )
+    assert sorted(rep_moved.eval_freqs_hz) == sorted(moved)
+    assert rep_moved.headroom_band_indices != rep.headroom_band_indices, (
+        "the guard selects the same ladder bands for two different evaluation band "
+        "sets, so its operand is not actually derived from them — the AC-37-R4 "
+        "defect, where the guard is calibrated on one band set and enforced on "
+        "another"
     )
 
 
@@ -1213,7 +1233,8 @@ def _ac37_setup():
         Path("configs/base.yaml"), Path("configs/overlays/simulator_dry_run.yaml")
     )
     rep = build_representation(
-        cfg.representation.name, cfg.representation.params, sample_rate=cfg.sample_rate
+        cfg.representation.name, cfg.representation.params,
+        sample_rate=cfg.sample_rate, eval_freqs_hz=EVAL_FREQS,
     )
     sim = build_simulator(
         cfg.simulator.name, cfg.simulator.params,

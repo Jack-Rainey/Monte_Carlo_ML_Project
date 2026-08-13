@@ -18,7 +18,7 @@ import torch
 from amcd.evaluation.signal import compute_signal_metrics
 from amcd.representations import build_representation
 
-from tests.conftest import tiny_config
+from tests.conftest import EVAL_FREQS, tiny_config
 
 
 def _fake_tensors(seed: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -32,7 +32,7 @@ def test_energy_snr_undefined_for_amplitude_domain_rep() -> None:
     """F-19: on the waveform (amplitude) path, energy_snr_db must be the documented
     all-NaN triple — never a finite-but-garbage 10**(amplitude/10) number. The
     domain comes from the rep's declaration, exactly what preprocess stamps."""
-    rep = build_representation("waveform", {}, sample_rate=8000)
+    rep = build_representation("waveform", {}, sample_rate=8000, eval_freqs_hz=EVAL_FREQS)
     assert rep.value_domain == "amplitude"
 
     rng = np.random.default_rng(7)
@@ -61,7 +61,8 @@ def test_energy_snr_finite_for_db_domain_rep() -> None:
     # experiment-governing values in test fixtures).
     cfg = tiny_config()
     rep = build_representation(
-        cfg.representation.name, cfg.representation.params, sample_rate=cfg.sample_rate
+        cfg.representation.name, cfg.representation.params,
+        sample_rate=cfg.sample_rate, eval_freqs_hz=EVAL_FREQS,
     )
     assert rep.value_domain == "db"
 

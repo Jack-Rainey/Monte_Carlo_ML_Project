@@ -22,7 +22,7 @@ from amcd.data.normalization import compute_stats
 from amcd.data.splits import assign_split
 from amcd.simulators.base import SceneSpec
 
-from tests.conftest import QUIET, TINY_LAYERS, dry_run_simulator
+from tests.conftest import EVAL_FREQS, QUIET, TINY_LAYERS, dry_run_simulator
 
 
 def _make_minimal_config() -> Config:
@@ -155,7 +155,7 @@ class TestLossActivity:
         cfg = _make_minimal_config()
         rep = build_representation(
             cfg.representation.name, cfg.representation.params,
-            sample_rate=cfg.sample_rate,
+            sample_rate=cfg.sample_rate, eval_freqs_hz=EVAL_FREQS,
         )
         pred = torch.randn(2, cfg.n_channels, rep.n_bands, 5)
         target = torch.randn(2, cfg.n_channels, rep.n_bands, 5)

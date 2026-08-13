@@ -24,7 +24,7 @@ from amcd.config import Config
 from amcd.representations import build_representation
 from amcd.representations.spectrogram import _build_third_octave_filters
 
-from tests.conftest import tiny_config
+from tests.conftest import EVAL_FREQS, tiny_config
 
 _BASE = Path("configs/base.yaml")
 
@@ -35,7 +35,7 @@ def production_rep():
     cfg = Config.load(_BASE)
     return build_representation(
         cfg.representation.name, cfg.representation.params,
-        sample_rate=cfg.sample_rate,
+        sample_rate=cfg.sample_rate, eval_freqs_hz=EVAL_FREQS,
     )
 
 
@@ -135,9 +135,9 @@ class TestLadderIsDeclaredNotHardcoded:
         """Not a decorative knob: 1 gives the ISO octave ladder."""
         cfg = tiny_config()
         params = dict(cfg.representation.params)
-        third = build_representation("spectrogram", params, sample_rate=48000)
+        third = build_representation("spectrogram", params, sample_rate=48000, eval_freqs_hz=EVAL_FREQS)
         params["bands_per_octave"] = 1
-        octave = build_representation("spectrogram", params, sample_rate=48000)
+        octave = build_representation("spectrogram", params, sample_rate=48000, eval_freqs_hz=EVAL_FREQS)
         assert octave.n_bands < third.n_bands
         assert 1000.0 in octave.center_freqs  # the reference anchors both ladders
 
@@ -150,7 +150,7 @@ class TestLadderIsDeclaredNotHardcoded:
         cfg = Config.load(_BASE)
         rep = build_representation(
             cfg.representation.name, cfg.representation.params,
-            sample_rate=cfg.sample_rate,
+            sample_rate=cfg.sample_rate, eval_freqs_hz=EVAL_FREQS,
         )
         for lo, hi in rep.band_description["band_edges_hz"]:
             assert hi <= cfg.sample_rate / 2.0, f"band [{lo}, {hi}] exceeds Nyquist"
@@ -159,7 +159,7 @@ class TestLadderIsDeclaredNotHardcoded:
         cfg = tiny_config()
         params = dict(cfg.representation.params, min_bins_per_band=0)
         with pytest.raises(ValueError, match="min_bins_per_band"):
-            build_representation("spectrogram", params, sample_rate=48000)
+            build_representation("spectrogram", params, sample_rate=48000, eval_freqs_hz=EVAL_FREQS)
 
     def test_an_impossible_band_floor_fails_loudly(self) -> None:
         """Rather than returning an empty bank and failing later on a shape."""

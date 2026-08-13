@@ -427,6 +427,7 @@ def _run_d0b(
     rep = build_representation(
         config.representation.name, config.representation.params,
         sample_rate=config.sample_rate,
+        eval_freqs_hz=[float(x) for x in config.iso_eval_freqs],
     )
     carrier_dir = preprocessed_dir / "carrier"
 

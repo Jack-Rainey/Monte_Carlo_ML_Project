@@ -24,8 +24,12 @@ class WaveformRepresentation:
     # this and report their metric undefined rather than 10**(amplitude/10) (F-19).
     value_domain = "amplitude"
 
-    def __init__(self, sample_rate: int) -> None:
+    def __init__(self, sample_rate: int, eval_freqs_hz: list[float]) -> None:
         self.sample_rate = sample_rate
+        #: The reported metric bands (`config.iso_eval_freqs`). Accepted and unused:
+        #: `build_representation` passes it to every representation so a rep that
+        #: NEEDS it never has to grow its own copy of the band set (RD-187).
+        self.eval_freqs_hz = list(eval_freqs_hz)
 
     @property
     def center_freqs(self) -> list[float]:

@@ -352,15 +352,6 @@ class ThirdOctaveSpectrogram:
         #: This is a SECOND declaration of the evaluation band set, which is the
         #: AC-24 divergence shape, and is only acceptable because a test forbids the
         #: drift: `test_the_headroom_guard_reads_exactly_the_reported_metric_bands`
-        #: reads `configs/base.yaml` and asserts EQUALITY with `iso_eval_freqs` —
-        #: equality, not containment, because over-coverage is the defect being
-        #: fixed. It is a second declaration only because the representation cannot
-        #: see the master config: `build_representation` takes `sample_rate` as its
-        #: sole cross-cutting argument, and threading `iso_eval_freqs` through would
-        #: touch `data/preprocess.py`, `training/infer.py` and `diagnostics/probe.py`
-        #: — three files in two other lanes. Retiring it in favour of a derived
-        #: operand is filed as spanning row RD-187.
-        min_db_headroom_octave_centres_hz: list[float]
 
     # Per-channel third-octave log band-energy in dB (the banded-rep contract).
     value_domain = "db"
@@ -368,6 +359,13 @@ class ThirdOctaveSpectrogram:
     def __init__(
         self,
         sample_rate: int,
+        #: The REPORTED metric bands (`config.iso_eval_freqs`), handed down by
+        #: `build_representation`. The headroom guard's operand is derived from
+        #: THESE rather than from a copy this config used to declare of its own
+        #: (RD-187): a guard calibrated against the reported bands and a config
+        #: naming its own band set is the AC-24 divergence shape, and it was held
+        #: together only by a test asserting the two were equal.
+        eval_freqs_hz: list[float],
         n_fft: int,
         hop_length: int,
         min_db: float,
@@ -376,14 +374,17 @@ class ThirdOctaveSpectrogram:
         min_center_freq_hz: float,
         min_bins_per_band: int,
         min_db_headroom_db: float,
-        min_db_headroom_octave_centres_hz: list[float],
     ) -> None:
         self.sample_rate = sample_rate
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.min_db = min_db
         self.min_db_headroom_db = min_db_headroom_db
-        self.min_db_headroom_octave_centres_hz = list(min_db_headroom_octave_centres_hz)
+        #: The reported metric bands, handed down rather than re-declared here
+        #: (RD-187). `_resolve_headroom_bands` derives the guard's operand from
+        #: exactly these, so the guard cannot be calibrated against one band set
+        #: while the metrics are reported over another.
+        self.eval_freqs_hz = list(eval_freqs_hz)
         self._filter_bank, self.band_description = _build_third_octave_filters(
             n_fft, sample_rate,
             reference_freq_hz=reference_freq_hz,
@@ -405,14 +406,14 @@ class ThirdOctaveSpectrogram:
         """
         idx: list[int] = []
         for b, fc in enumerate(self.center_freqs):
-            for centre in self.min_db_headroom_octave_centres_hz:
+            for centre in self.eval_freqs_hz:
                 if centre / 2.0 ** 0.5 <= fc <= centre * 2.0 ** 0.5:
                     idx.append(b)
                     break
         if not idx:
             raise ValueError(
-                f"min_db_headroom_octave_centres_hz="
-                f"{self.min_db_headroom_octave_centres_hz} selects NO ladder band "
+                f"the reported metric bands (iso_eval_freqs) "
+                f"{self.eval_freqs_hz} select NO ladder band "
                 f"at sample_rate={self.sample_rate}, n_fft={self.n_fft} (band "
                 f"centres {self.center_freqs[0]:.1f}-{self.center_freqs[-1]:.1f} Hz). "
                 f"The AC-37 headroom guard would then have nothing to check and "
@@ -526,7 +527,7 @@ class ThirdOctaveSpectrogram:
         if worst_headroom < self.min_db_headroom_db:
             spans = ", ".join(
                 f"{c / 2 ** 0.5:.1f}-{c * 2 ** 0.5:.1f} Hz"
-                for c in self.min_db_headroom_octave_centres_hz
+                for c in self.eval_freqs_hz
             )
             raise ValueError(
                 f"scene rejected by the min_db headroom guard (AC-37): channel "

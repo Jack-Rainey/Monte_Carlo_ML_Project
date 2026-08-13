@@ -39,6 +39,16 @@ TEST_TINY = _OVERLAYS / "test_tiny.yaml"
 #: fall out of step with the README and the F-51 error message.
 CANONICAL_DRY_RUN = (_BASE_YAML, SIMULATOR_DRY_RUN, _OVERLAYS / "dry_run.yaml")
 
+#: The reported metric band set, read from the config that governs it (RD-187).
+#:
+#: `build_representation` takes it as a cross-cutting argument beside `sample_rate`,
+#: so a probe that wants a representation has to supply one. Read rather than
+#: written as `[500.0, 1000.0]`: the whole point of RD-187 is that this set is
+#: declared ONCE, and a test-file literal would be the third declaration.
+EVAL_FREQS: list[float] = [
+    float(f) for f in yaml.safe_load(_BASE_YAML.read_text())["iso_eval_freqs"]
+]
+
 #: The layers `tiny_config()` composes, for tests that must go through the real
 #: `Config.load` or the CLI rather than the in-process merge.
 TINY_LAYERS = (SIMULATOR_DRY_RUN, TEST_TINY)

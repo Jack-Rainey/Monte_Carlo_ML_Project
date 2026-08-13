@@ -8,6 +8,7 @@ import pytest
 from amcd.config import Config
 
 from tests.conftest import (
+    EVAL_FREQS,
     CANONICAL_DRY_RUN,
     QUIET,
     dry_run_simulator,
@@ -125,7 +126,7 @@ class TestPluginSeam:
         params must NOT carry those params into the new rep. test_tiny sets
         spectrogram n_fft/hop_length; a waveform override must land with clean params
         and build, not fail with `n_fft` extra_forbidden deep in preprocess."""
-        from tests.conftest import tiny_config
+        from tests.conftest import EVAL_FREQS, tiny_config
         from amcd.representations import build_representation
 
         cfg = tiny_config(representation={"name": "waveform"})
@@ -135,7 +136,8 @@ class TestPluginSeam:
         )
         # And it actually builds (the drop-in claim), no TypeError/ValidationError.
         rep = build_representation(
-            cfg.representation.name, cfg.representation.params, sample_rate=cfg.sample_rate
+            cfg.representation.name, cfg.representation.params,
+            sample_rate=cfg.sample_rate, eval_freqs_hz=EVAL_FREQS,
         )
         assert type(rep).__name__ == "WaveformRepresentation"
 
@@ -150,7 +152,8 @@ class TestPluginSeam:
         cfg = tiny_config(representation={"name": "edr"})
         assert cfg.representation.name == "edr" and cfg.representation.params == {}
         rep = build_representation(
-            cfg.representation.name, cfg.representation.params, sample_rate=cfg.sample_rate
+            cfg.representation.name, cfg.representation.params,
+            sample_rate=cfg.sample_rate, eval_freqs_hz=EVAL_FREQS,
         )
         with pytest.raises(NotImplementedError):
             rep.encode(np.zeros((cfg.n_channels, 16), dtype=np.float32))

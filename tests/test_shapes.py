@@ -8,7 +8,10 @@ from amcd.representations import build_representation
 from amcd.representations.spectrogram import ThirdOctaveSpectrogram
 from amcd.simulators.base import SceneSpec
 
-from tests.conftest import dry_run_simulator
+import json
+from pathlib import Path
+
+from tests.conftest import CANONICAL_DRY_RUN, EVAL_FREQS, QUIET, dry_run_simulator
 
 
 def make_scene(seed: int = 42) -> SceneSpec:
@@ -81,7 +84,7 @@ class TestEnergyTensorShape:
     def _make_rep(self, config: Config) -> ThirdOctaveSpectrogram:
         return build_representation(
             config.representation.name, config.representation.params,
-            sample_rate=config.sample_rate,
+            sample_rate=config.sample_rate, eval_freqs_hz=EVAL_FREQS,
         )
 
     def test_encode_output_shape(self, dry_run_config: Config, sample_ir: np.ndarray) -> None:
@@ -125,3 +128,95 @@ class TestEnergyTensorShape:
             ir = sim.render(make_scene(seed), ray_budget=1000).ir
             shapes.append(rep.encode(ir).shape)
         assert len(set(shapes)) == 1, f"Inconsistent energy tensor shapes: {shapes}"
+
+
+class TestTheSpectralSlopeIsRecordedAndTheRefusalIsNotSwallowed:
+    """RD-188 — narrowing the AC-37 headroom guard removed a false rejection AND the
+    disclosure that went with it.
+
+    The guard originally took a minimum across ALL bands, which is a spectral-
+    FLATNESS constraint: a steeply sloped render failed it even when both REPORTED
+    metric bands had ample headroom. Narrowing the operand to those bands fixed the
+    false rejection (F-M3) — and a 2nd-order 4 kHz lowpass now passes SILENTLY where
+    it previously failed loudly. The slope is a real property of the render, so it is
+    recorded rather than gated.
+
+    The other half is why "err toward rejecting" is not itself a selection effect: a
+    refusal aborts the run rather than dropping a scene. That rests on the ABSENCE of
+    an except, which nothing asserted.
+    """
+
+    def test_preprocess_does_not_swallow_an_encode_refusal(self) -> None:
+        """The absence of a try/except is what makes the AC-37 guard safe.
+
+        Swallowing a refusal per scene would silently drop scenes whose spectra sit
+        near `min_db` — a population that correlates with absorption, i.e. with
+        `test_material_shift`'s own declared axis — and shrink the split it came
+        from with nothing recording it.
+
+        Asserted over the module's AST rather than by grep so a comment mentioning
+        `except` cannot satisfy it and a nested handler cannot hide from it.
+        """
+        import ast
+        import inspect
+
+        import amcd.data.preprocess as preprocess
+
+        tree = ast.parse(inspect.getsource(preprocess))
+        handlers = [n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler)]
+        assert handlers == [], (
+            f"preprocess.py now catches exceptions (line(s) "
+            f"{[h.lineno for h in handlers]}). If `rep.encode`'s AC-37 refusal is "
+            f"inside one, scenes near the min_db floor are dropped instead of "
+            f"aborting the run — and which scenes those are correlates with "
+            f"absorption (RD-188)."
+        )
+
+    def test_every_scene_and_leg_carries_a_slope(self, tmp_path: Path) -> None:
+        from amcd.pipeline import Pipeline
+
+        cfg = Config.load(*CANONICAL_DRY_RUN)
+        pipe = Pipeline(cfg, tmp_path, QUIET)
+        for stage in ("gen-scenes", "render", "preprocess"):
+            pipe.run_stage(stage)
+        meta = json.loads((tmp_path / "preprocessed" / "meta.json").read_text())
+
+        slopes = meta["spectral_slope_db_per_decade"]
+        assert slopes, "no scene recorded a spectral slope"
+        for sid, legs in slopes.items():
+            assert set(legs) == {"low", "high"}, (sid, legs)
+            for leg, value in legs.items():
+                assert value == value, f"{sid}/{leg} recorded a NaN slope"
+
+    def test_the_slope_MOVES_when_the_spectrum_is_sloped(self) -> None:
+        """The measurement, not just the key: a lowpassed IR must read a steeper
+        slope than the same IR unfiltered, or this records a constant."""
+        import numpy as np
+        from scipy.signal import butter, sosfilt
+
+        from amcd.data.preprocess import _spectral_slope_db_per_decade
+        from amcd.representations.base import build_representation
+
+        cfg = Config.load(*CANONICAL_DRY_RUN)
+        rep = build_representation(
+            cfg.representation.name, cfg.representation.params,
+            sample_rate=cfg.sample_rate, eval_freqs_hz=EVAL_FREQS,
+        )
+        rng = np.random.default_rng(4)
+        n = int(0.3 * cfg.sample_rate)
+        t = np.arange(n) / cfg.sample_rate
+        flat = (rng.standard_normal(n) * np.exp(-6.9 * t / 0.5)).astype(np.float32)
+        sloped = sosfilt(
+            butter(2, 4000.0, btype="low", fs=cfg.sample_rate, output="sos"), flat
+        ).astype(np.float32)
+
+        def slope(x):
+            return _spectral_slope_db_per_decade(
+                rep.encode(x[None, :]), rep.center_freqs
+            )
+
+        assert slope(sloped) < slope(flat) - 5.0, (
+            f"a 2nd-order 4 kHz lowpass moved the recorded slope from "
+            f"{slope(flat):.1f} to only {slope(sloped):.1f} dB/decade — this is not "
+            f"measuring the spectral tilt the narrowed guard stopped seeing (RD-188)"
+        )
