@@ -86,14 +86,14 @@ class TestRealizedRecordLengthGate:
         independent variable, so it under-counted the censoring it exists to bound.
         """
         cfg = Config.load(_BASE)
-        assert cfg.scenes.max_t60_over_ir_duration_frac == 0.05
+        assert cfg.scenes.max_frac_below_iso_t30_decay_range == 0.05
         run_gen_scenes(cfg, tmp_path, QUIET)
         report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
         censored = sum(e["record_decay_range"]["decay_range_below_iso_t30"]["count"]
                        for e in report.values())
         total = sum(e["n_scenes"] for e in report.values())
         assert (censored, total) == (23, 600)
-        assert 0 < censored / total < cfg.scenes.max_t60_over_ir_duration_frac
+        assert 0 < censored / total < cfg.scenes.max_frac_below_iso_t30_decay_range
 
     def test_the_censoring_is_reported_per_split_not_only_in_aggregate(
         self, tmp_path: Path
@@ -136,18 +136,18 @@ class TestRealizedRecordLengthGate:
                        for e in report.values())
         total = sum(e["n_scenes"] for e in report.values())
         assert (censored, total) == (5, 720)
-        assert censored / total < cfg.scenes.max_t60_over_ir_duration_frac
+        assert censored / total < cfg.scenes.max_frac_below_iso_t30_decay_range
 
     def test_exceeding_the_declared_tolerance_fails_loudly(self, tmp_path: Path) -> None:
         """A 0.1 s record against base's geometry: every scene is over."""
-        cfg = tiny_config(scenes={"max_t60_over_ir_duration_frac": 0.0})
-        with pytest.raises(ValueError, match="max_t60_over_ir_duration_frac"):
+        cfg = tiny_config(scenes={"max_frac_below_iso_t30_decay_range": 0.0})
+        with pytest.raises(ValueError, match="max_frac_below_iso_t30_decay_range"):
             run_gen_scenes(cfg, tmp_path, QUIET)
 
     def test_the_failure_names_the_corner_and_the_offending_splits(
         self, tmp_path: Path
     ) -> None:
-        cfg = tiny_config(scenes={"max_t60_over_ir_duration_frac": 0.0})
+        cfg = tiny_config(scenes={"max_frac_below_iso_t30_decay_range": 0.0})
         with pytest.raises(ValueError) as exc:
             run_gen_scenes(cfg, tmp_path, QUIET)
         message = str(exc.value)
@@ -170,7 +170,7 @@ class TestRealizedRecordLengthGate:
             }
 
         cfg = Config.load(*_RI).model_copy(deep=True)
-        cfg.scenes.max_t60_over_ir_duration_frac = 0.01  # 530 scenes -> at most 5
+        cfg.scenes.max_frac_below_iso_t30_decay_range = 0.01  # 530 scenes -> at most 5
         # 1 of 30 in the small split is 3.3 % per-split but 0.19 % overall: allowed.
         _disclose_and_gate_record_length(cfg, report(0, 1), QUIET)
         # 16 of 500 is 3.2 % per-split — the rate a per-split gate would have to
@@ -180,7 +180,7 @@ class TestRealizedRecordLengthGate:
 
     def test_a_plumbing_overlay_declares_that_it_claims_no_fidelity(self) -> None:
         """test_tiny/dry_run declare 1.0 — stated, not silently exempted."""
-        assert tiny_config().scenes.max_t60_over_ir_duration_frac == 1.0
+        assert tiny_config().scenes.max_frac_below_iso_t30_decay_range == 1.0
 
 
 class TestDiffuseFieldValidityFlags:
@@ -323,7 +323,7 @@ class TestValidityReachesTheReport:
         """
         run_dir = tmp_path_factory.mktemp("ri_validity")
         cfg = Config.load(*_RI).model_copy(deep=True)
-        cfg.scenes.max_t60_over_ir_duration_frac = 1.0
+        cfg.scenes.max_frac_below_iso_t30_decay_range = 1.0
         run_gen_scenes(cfg, run_dir, QUIET)
         return json.loads((run_dir / "scenes" / "placement_report.json").read_text())
 

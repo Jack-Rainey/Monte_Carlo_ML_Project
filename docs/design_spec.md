@@ -445,7 +445,7 @@ reshape its declared population around it. Consequences, all deliberate:
   reverberant tail are measurable here and were partly truncation-biased in RI. The
   paired improvement E1 actually claims is unaffected either way, because both legs
   of a comparison share one record.
-- `scenes.max_t60_over_ir_duration_frac` is a **regression tripwire on the censoring
+- `scenes.max_frac_below_iso_t30_decay_range` is a **regression tripwire on the censoring
   rate**, not an admissibility gate: it trips if the rate roughly doubles.
 - Any E1/E2 claim over the reverberant end is a claim over a **censored
   subpopulation**, and must be reported as such.

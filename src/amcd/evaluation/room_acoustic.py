@@ -888,9 +888,7 @@ def compute_room_acoustic_metrics(
     Uses W-channel (ch 0), onset-aligned per IR (AC-02) so metrics are invariant to
     leading propagation-delay silence.
 
-    Returns a 4-TUPLE (RR-85 — this said "(triples, nan_reasons)" while returning
-    four values, and never named `band_accounting` at all, which is the structure
-    carrying the caveat columns into `ci_table.csv`):
+    Returns a 4-tuple:
 
     1. `triples` — {metric: MetricTriple}, one per metric in (T30, EDT, C50), with
        `kind="match_reference"` (pred should match the HIGH reference's value).

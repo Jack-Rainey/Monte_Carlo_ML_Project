@@ -40,7 +40,7 @@ scenes:
   # this overlay exists to exercise PLUMBING at speed and claims no acoustic
   # fidelity — the record-length rule belongs to configs that report physics
   # (AC-22). base.yaml declares 0.0 and means it.
-  max_t60_over_ir_duration_frac: 1.0
+  max_frac_below_iso_t30_decay_range: 1.0
 
 splits:
   test_material_shift:  { role: test, count: 2, axes: { material: ceiling_absorptive } }

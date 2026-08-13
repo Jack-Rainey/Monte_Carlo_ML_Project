@@ -588,7 +588,7 @@ class Scenes(BaseModel):
     #: separately (`Config.worst_case_t60`), never used as a threshold.
     #: Sabine, not Eyring: it is the longer of the two, so the check errs toward
     #: declaring a scene unsupported rather than silently truncating it.
-    max_t60_over_ir_duration_frac: float
+    max_frac_below_iso_t30_decay_range: float
 
     #: Decay range, in dB, that a record must hold for a T30 fit to be admissible —
     #: ISO 3382-1's requirement (45 dB for T30; 35 for T20, 20 for EDT).
@@ -808,7 +808,7 @@ class Config(BaseModel):
         This is deliberately NOT used as a gate. The corner is the product of two
         independent extremes and has near-zero probability of being drawn, so
         gating on it would reject configs whose realized scenes are all fine. The
-        gate is `scenes.max_t60_over_ir_duration_frac`, applied to the REALIZED set
+        gate is `scenes.max_frac_below_iso_t30_decay_range`, applied to the REALIZED set
         at gen-scenes (RD-56). The E1 write-up needs this number either way, so it
         is computed here and stamped into resolved.yaml.
 

@@ -97,6 +97,41 @@ def predicted_support_s(
     return coefficient_s * reflection_depth**depth_exponent * surface_m2**surface_exponent
 
 
+#: c·SABINE_K — the only place either constant appears in the ISO 3382-1 §5.3
+#: minimum measurement distance. Substituting either T60 leaves both inside this
+#: product and cancels the volume, so d_min needs neither separately. Exactly
+#: 24·ln10 by construction, since `SABINE_K` is computed from `SPEED_OF_SOUND_M_S`.
+_C_TIMES_SABINE_K = 24.0 * math.log(10.0)
+
+
+def min_measurement_distance(absorption: float, surface_m2: float,
+                             characterization: str) -> float:
+    """ISO 3382-1 §5.3 minimum measurement distance, d_min = 2·sqrt(V/(c·T60)) (m).
+
+    VOLUME-INDEPENDENT, which is why it takes surface and absorption instead:
+    substituting either T60 puts c·SABINE_K in the denominator and cancels V, so
+    d_min reduces to 2·sqrt(αS/(c·K)) for Sabine and the same with −ln(1−α) for
+    Eyring. Reported and counted per scene rather than enforced — the criterion
+    varies with each scene's own absorption and surface while the config declares
+    ONE global placement floor, so no single floor can satisfy it everywhere.
+
+    Lives here rather than in `scenes/generator.py` for the reason `sabine_rt60`
+    does: it is scene/statistical-model physics, and a second copy of a formula is
+    how the described room and the rendered room drift apart (S-1).
+    """
+    if characterization == "sabine":
+        absorption_area = absorption
+    elif characterization == "eyring":
+        absorption_area = -math.log(1.0 - absorption)
+    else:
+        raise ValueError(
+            f"characterization must be 'sabine' or 'eyring'; got {characterization!r}. "
+            f"Both are carried because Eyring is always the stricter criterion and "
+            f"the spread between them is itself the disclosure."
+        )
+    return 2.0 * math.sqrt(absorption_area * surface_m2 / _C_TIMES_SABINE_K)
+
+
 def sabine_rt60(volume_m3: float, surface_m2: float, absorption: float) -> float:
     """Sabine reverberation time (s) for a room of `volume_m3` and `surface_m2`
     with a single mean absorption coefficient.

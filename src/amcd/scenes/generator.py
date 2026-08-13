@@ -29,6 +29,7 @@ import numpy as np
 from ..acoustics import (
     box_volume_and_surface,
     critical_distance,
+    min_measurement_distance,
     diffuse_field_drr_db,
     eyring_rt60,
     sabine_rt60,
@@ -42,18 +43,6 @@ from ..simulators.base import (
     simulator_realized_support_s,
 )
 
-#: c·SABINE_K — the only place either appears in the ISO 3382-1 §5.3 minimum
-#: measurement distance d_min = 2·sqrt(V/(c·T60)). Substituting either T60 leaves
-#: both inside this product and cancels the volume, so d_min needs neither
-#: separately (AC-30).
-#:
-#: Sabine's constant is exactly 24·ln10/c, so this product is c-independent BY
-#: CONSTRUCTION — but only while `acoustics.SABINE_K` is computed from the declared
-#: speed rather than shipped rounded. It used to ship as 0.161, which implies
-#: 343.2425 m/s against a declared 343.0 and left d_min a constant −0.035 % off
-#: one recomputed from this module's own published `t60_sabine_s`. Both are now
-#: derived from `acoustics.SPEED_OF_SOUND_M_S` and agree exactly (AC-109/AC-150).
-_C_TIMES_SABINE_K = 24.0 * math.log(10.0)
 
 #: Why excluding a non-enclosure from the record-length fractions is not the same
 #: as it being fine (AC-53). Emitted twice — per scene in `uncharacterized_reason`
@@ -421,7 +410,7 @@ def _room_acoustics(
 
     # ISO 3382-1 §5.3 minimum measurement distance (AC-30): d_min = 2·sqrt(V/(c·T60)),
     # which reduces to 2·sqrt(αS/(c·K)) for Sabine and the same with −ln(1−α) in place
-    # of α for Eyring — volume-independent (constant and caveat: _C_TIMES_SABINE_K).
+    # of α for Eyring — volume-independent (see `acoustics.min_measurement_distance`).
     # Reported and counted rather than enforced: the criterion is PER SCENE, varying
     # with each scene's own absorption and surface, while the config declares ONE
     # global placement floor, so the floor cannot satisfy it everywhere. The
@@ -439,8 +428,8 @@ def _room_acoustics(
     # `below_iso_min_distance_sabine` swap which is the stricter flag there (the
     # Eyring flag swaps at α ≈ 0.889). Neither number is wrong under its own
     # definition, which is why both definitions are stated.
-    d_min_sabine = 2.0 * math.sqrt(alpha * surface / _C_TIMES_SABINE_K)
-    d_min_eyring = 2.0 * math.sqrt(-math.log1p(-alpha) * surface / _C_TIMES_SABINE_K)
+    d_min_sabine = min_measurement_distance(alpha, surface, "sabine")
+    d_min_eyring = min_measurement_distance(alpha, surface, "eyring")
 
     return {
         "characterization": "sabine",
@@ -613,7 +602,7 @@ def _warn_regimes_over_limit(
             emit(verbosity, "warning",
                  f"  WARNING: {label}: {count}/{scored} scenes ({frac:.3%}) "
                  f"exceed ir_duration {config.ir_duration} s — above this config's "
-                 f"own scenes.max_t60_over_ir_duration_frac ({limit}). The gate is "
+                 f"own scenes.max_frac_below_iso_t30_decay_range ({limit}). The gate is "
                  f"the OVERALL fraction and may still pass; a shift split far over on "
                  f"its own is a fact about that split's decay distribution (RD-65).")
 
@@ -631,7 +620,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     AC-22 in the shape RD-56 settled. The two halves differ in kind: the CORNER
     (`Config.worst_case_t60`) is the product of two independent extremes and has
     near-zero probability of being drawn, so it is printed and stamped, never used
-    as a threshold; the GATE is `scenes.max_t60_over_ir_duration_frac` applied to
+    as a threshold; the GATE is `scenes.max_frac_below_iso_t30_decay_range` applied to
     the scenes that actually exist, which is the population the metrics are
     computed over.
 
@@ -650,7 +639,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     that scored none is UNSCORED, never passed (F-71/RD-112).
     """
     corner = _disclose_declared_support_corner(config, verbosity)
-    limit = config.scenes.max_t60_over_ir_duration_frac
+    limit = config.scenes.max_frac_below_iso_t30_decay_range
 
     # S-F4, the OVER-declared direction. Skipping is silent by construction, so a
     # real regime named here would leave the warning loop and the gate sums with no
@@ -757,7 +746,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
             f"{over} of {total} scenes ({over / total:.3%}) get less than "
             f"{config.scenes.iso_t30_decay_range_db:g} dB of decay range from the "
             f"record the {config.simulator.name!r} backend will actually produce — "
-            f"more than scenes.max_t60_over_ir_duration_frac ({limit}) allows:\n"
+            f"more than scenes.max_frac_below_iso_t30_decay_range ({limit}) allows:\n"
             f"{lines}{exclusion}\n"
             f"This is measured against the backend's DECLARED REALIZED SUPPORT, not "
             f"against ir_duration ({config.ir_duration} s), which is only the window "
@@ -844,7 +833,7 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     the canonical per-split report into `run_dir/scenes/`.
 
     Raises `ValueError` from the record-length gate if the config's realized draws
-    breach `scenes.max_t60_over_ir_duration_frac`. No stage sentinel is written in
+    breach `scenes.max_frac_below_iso_t30_decay_range`. No stage sentinel is written in
     that case, so render will not proceed past it.
     """
     out_dir = run_dir / "scenes"

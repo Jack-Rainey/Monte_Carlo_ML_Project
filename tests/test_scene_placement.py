@@ -30,9 +30,9 @@ import numpy as np
 import pytest
 
 from amcd.config import Config, PlacementRegime
-from amcd.acoustics import SPEED_OF_SOUND_M_S, SABINE_K
+from amcd.acoustics import _C_TIMES_SABINE_K, SPEED_OF_SOUND_M_S, SABINE_K
 from amcd.scenes.generator import (
-    _C_TIMES_SABINE_K,
+    
     _disclose_and_gate_record_length,
     _flag_counts,
     _generation_plan,
@@ -591,7 +591,7 @@ class TestUncharacterizedScenesLeaveTheRecordLengthGate:
         Counting the 3 openfield scenes as passing gives 26/29 = 89.7 %, under the
         limit: the dataset would buy its pass with scenes nobody characterized.
         """
-        cfg = _openfield_config(max_t60_over_ir_duration_frac=0.9)
+        cfg = _openfield_config(max_frac_below_iso_t30_decay_range=0.9)
         with pytest.raises(ValueError, match="26 of 26 scenes") as exc:
             run_gen_scenes(cfg, tmp_path, QUIET)
         assert "3 of 29 scenes are excluded" in str(exc.value), (
@@ -632,7 +632,7 @@ class TestPerSplitOverLimitWarning:
         machinery — and at 0.05 the arithmetic below stops exercising either branch.
         """
         cfg = ri_config.model_copy(deep=True)
-        cfg.scenes.max_t60_over_ir_duration_frac = 0.01  # 530 scenes -> at most 5
+        cfg.scenes.max_frac_below_iso_t30_decay_range = 0.01  # 530 scenes -> at most 5
         return cfg
 
     def test_a_split_over_its_own_limit_is_named_while_the_gate_passes(
@@ -959,7 +959,7 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
         }
         with pytest.raises(ValueError, match="3 of 4 scenes"):
             gen._disclose_and_gate_record_length(
-                tiny_config(scenes={"max_t60_over_ir_duration_frac": 0.5}),
+                tiny_config(scenes={"max_frac_below_iso_t30_decay_range": 0.5}),
                 report, QUIET,
             )
         assert "absorption_convention" not in capsys.readouterr().err
@@ -1018,7 +1018,7 @@ class TestTheGateNamesWhatItActuallyScored:
         by `data/splits.py`. Calling it a "split" invites the reader to hear
         `train`."""
         with pytest.raises(ValueError):  # 0.0 tolerance: the gate also refuses
-            run_gen_scenes(tiny_config(scenes={"max_t60_over_ir_duration_frac": 0.0}),
+            run_gen_scenes(tiny_config(scenes={"max_frac_below_iso_t30_decay_range": 0.0}),
                            tmp_path, QUIET)
         warnings = capsys.readouterr().err
 
@@ -1031,7 +1031,7 @@ class TestTheGateNamesWhatItActuallyScored:
         """A shift split IS its own generation entry, so the plain wording is right
         there — the label must not become uniformly hedged."""
         with pytest.raises(ValueError):
-            run_gen_scenes(tiny_config(scenes={"max_t60_over_ir_duration_frac": 0.0}),
+            run_gen_scenes(tiny_config(scenes={"max_frac_below_iso_t30_decay_range": 0.0}),
                            tmp_path, QUIET)
         assert "split 'test_geometry_shift'" in capsys.readouterr().err
 
@@ -1104,7 +1104,7 @@ class TestTheMixedCharacterizedSplit:
             uncharacterized_consequence="unchecked.", iso_t30_decay_range_db=45.0,
         )
         report = {"test_mixed": {"n_scenes": 10, "record_decay_range": block}}
-        cfg = tiny_config(scenes={"max_t60_over_ir_duration_frac": 0.5})
+        cfg = tiny_config(scenes={"max_frac_below_iso_t30_decay_range": 0.5})
 
         with pytest.raises(ValueError, match="4 of 4 scenes") as exc:
             _disclose_and_gate_record_length(cfg, report, QUIET)

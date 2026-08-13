@@ -204,7 +204,7 @@ scenes:
   # larger than the old instrument could see. Accepted as a renderer limitation per
   # the user decision at design_spec 11.2; the affected scenes return T30 unscored
   # with a reason rather than a truncation-biased number.
-  max_t60_over_ir_duration_frac: 0.05
+  max_frac_below_iso_t30_decay_range: 0.05
 
   # Figure 5: shoebox L 4.0-14.0 / W 3.0-10.0 / H 2.4-4.5 m;
   #           corridor L 8.0-24.0 / W 1.8-4.0 / H 2.4-4.0 m.

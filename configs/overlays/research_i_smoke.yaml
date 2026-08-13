@@ -29,7 +29,7 @@ scenes:
   # 1.0 (no constraint), like the other plumbing overlays — this file claims no
   # acoustic fidelity, so the record-length rule does not apply (AC-22).
   # research_i.yaml itself declares 0.01 and means it.
-  max_t60_over_ir_duration_frac: 1.0
+  max_frac_below_iso_t30_decay_range: 1.0
 
 splits:
   train:                { role: train, frac: null, count: 12, seed: 1001 }

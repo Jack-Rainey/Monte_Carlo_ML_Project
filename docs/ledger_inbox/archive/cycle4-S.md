@@ -83,7 +83,7 @@ Reproduced first, with a declared `openfield` family (3 scenes,
 ###   scored denominator (block n_scenes) : 26  -> 100.000%
 ### gate at tolerance 0.9, 26 enclosed scenes all over-limit + 3 non-enclosures:
 ###   RAISED — ir_duration is 0.1 s, but 26 of 26 scenes (100.000%) exceed it —
-###            more than scenes.max_t60_over_ir_duration_frac (0.9) allows:
+###            more than scenes.max_frac_below_iso_t30_decay_range (0.9) allows:
 ###       id: 20/20 scenes
 ###       test_material_shift: 2/2 scenes ...
 ```

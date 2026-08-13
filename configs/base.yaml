@@ -38,7 +38,7 @@ sample_rate: 48000
 # so 3.0 s (the Research I value) did NOT cover base's support. 4.25 s covers it
 # with margin rather than by equality. Config load recomputes this corner from the
 # declared ranges and records it; gen-scenes hard-gates on the REALIZED over-limit
-# fraction (scenes.max_t60_over_ir_duration_frac), which base declares as 0.05 (see that key's note and design_spec 11.2).
+# fraction (scenes.max_frac_below_iso_t30_decay_range), which base declares as 0.05 (see that key's note and design_spec 11.2).
 #
 # configs/research_i.yaml deliberately stays at 3.0 s — that is an RI-pinned value,
 # not a research choice, so its 4.09 s corner is a structural deviation it discloses.
@@ -109,7 +109,7 @@ scenes:
   # unscored WITH A REASON from the estimator's own ISO bound (AC-176), and the
   # per-split scored-vs-attempted counts carry it into the report. The gate is a
   # regression tripwire on the censoring RATE; the censoring itself is disclosed.
-  max_t60_over_ir_duration_frac: 0.05
+  max_frac_below_iso_t30_decay_range: 0.05
   # Decay range a record must hold for an admissible T30 fit. ISO 3382-1 requires
   # 45 dB for T30 (35 for T20, 20 for EDT). Matches the estimator's own
   # measurement-time bound `metric_min_decay_range_db.T30` below; they answer the

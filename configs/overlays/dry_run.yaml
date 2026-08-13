@@ -20,7 +20,7 @@ scenes:
   # exceeds it. Declared at 1.0 (no constraint) rather than fixed — this overlay
   # exists to exercise PLUMBING at speed and claims no acoustic fidelity, so the
   # record-length rule does not apply to it (AC-22). base.yaml declares 0.0.
-  max_t60_over_ir_duration_frac: 1.0
+  max_frac_below_iso_t30_decay_range: 1.0
 
 splits:
   test_material_shift:  { role: test, count: 3, axes: { material: ceiling_absorptive } }
