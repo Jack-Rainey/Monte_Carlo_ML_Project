@@ -13,7 +13,7 @@ from ..data.dataset import EnergyDataset
 from ..data.normalization import denormalize
 from ..representations import build_representation
 from ..models.cnn import build_model  # noqa: F401 — import also triggers registration
-from ..provenance import select_device
+from ..device import select_device
 from ..runtime import Verbosity, emit
 
 
@@ -43,7 +43,7 @@ def run_infer(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
 
     n_channels = meta["n_channels"]
     norm_stats = meta["norm_stats"]
-    device = select_device()  # shared selector — see provenance.select_device (F-74)
+    device = select_device()  # shared selector — see amcd.device (F-74)
 
     # Instantiate representation for D3 decode (required per §6, §3-D3)
     rep = build_representation(

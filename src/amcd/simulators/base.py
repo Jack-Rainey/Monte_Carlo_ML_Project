@@ -575,6 +575,47 @@ def _validate_realized_support_declared(
     return float(support)
 
 
+def simulator_code_scope(config) -> tuple[str, ...]:
+    """Source scope whose content decides the IRs the ACTIVE backend produces.
+
+    The render stage's cache key needs this and cannot name it itself: the stage
+    must not know what a gsound is, and a static list here would have to enumerate
+    every backend, so adding one would silently under-declare until someone
+    remembered. The backend declares its own, exactly as it declares its
+    host-scoped params.
+
+    Scoping matters more here than anywhere else in the pipeline. The whole
+    `simulators` package would mean a tweak to the `dry_run` scaffold invalidates a
+    real 720-scene dataset — hours of emulated render discarded for an edit that
+    cannot touch it. A backend therefore names its OWN module plus the seam it
+    implements, and nothing else.
+
+    Registry lookup only, no instantiation: the answer is a property of the CLASS,
+    and scene generation must stay runnable on a host with no render environment.
+    """
+    from ..registry import simulator_registry
+
+    name = config.simulator.name
+    SimClass = simulator_registry.get(name)
+    scope = getattr(SimClass, "code_scope", None)
+    if not callable(scope):
+        raise TypeError(
+            f"simulator {name!r} does not declare the required classmethod "
+            f"`code_scope() -> tuple[str, ...]`. Without it the render stage cannot "
+            f"state which source decides its output, and a backend edit would be "
+            f"invisible to the cache — the artifact that costs the most to rebuild "
+            f"would be the one least protected."
+        )
+    declared = tuple(scope())
+    if not declared:
+        raise ValueError(
+            f"simulator {name!r} declared an EMPTY code_scope. A backend whose "
+            f"source cannot change its output does not exist; an empty scope would "
+            f"make every render permanently cache-valid."
+        )
+    return declared
+
+
 def simulator_host_scoped_params(config) -> tuple[str, ...]:
     """The active backend's declared host-scoped param names (F-86).
 

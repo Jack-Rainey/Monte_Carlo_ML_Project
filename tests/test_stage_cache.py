@@ -282,11 +282,19 @@ class TestCodeVersionSeesTheWorkingTree:
             )
 
     def test_every_stage_carrying_a_code_version_declares_a_scope(self) -> None:
+        """A `code_version` with no declared scope would hash something nobody
+        stated. Two ways to declare one: a fixed entry in `STAGE_CODE_SCOPE`, or
+        membership of `_BACKEND_SCOPED_STAGES`, whose scope the ACTIVE simulator
+        supplies so that swapping backends swaps the protection with them."""
+        from amcd.pipeline import _BACKEND_SCOPED_STAGES
+
         for stage, fingerprint in STAGE_FINGERPRINT.items():
             if fingerprint is None:
                 continue
             if "code_version" in fingerprint(tiny_config()):
-                assert stage in STAGE_CODE_SCOPE
+                assert stage in STAGE_CODE_SCOPE or stage in _BACKEND_SCOPED_STAGES, (
+                    f"{stage} carries a code_version but declares no scope"
+                )
 
     def test_it_does_not_depend_on_git_being_available(self) -> None:
         """A wheel install into site-packages returned "unavailable" permanently,
@@ -527,6 +535,119 @@ class TestTheTableProducingStagesAreCacheProtected:
             assert _code_version("preprocess") != before
         finally:
             target.write_bytes(original)
+
+
+class TestTheExpensiveArtifactIsCacheProtected:
+    """F-75/RD-107/AC-44: `render` is the costliest artifact and was the least
+    protected.
+
+    Neither `gen-scenes` nor `render` carried a `code_version`, so an edit to the
+    backend that synthesizes the decay changed every reported absolute AND every
+    paired improvement while all nine stages printed `[skip] (cached)` at exit 0.
+    eval reads `renders/<scene>/high.npy` as the ISO REFERENCE leg, so this was not
+    "the renders are stale" — it was "the thing improvement is measured against is
+    stale".
+
+    Scoping is the whole difficulty. Naming the `simulators` package would mean a
+    tweak to the dry-run scaffold discards hours of emulated render; naming nothing
+    leaves the hole. The backend declares its own scope (`code_scope()`), so the
+    protection follows whichever simulator is active.
+    """
+
+    def test_editing_the_active_backend_invalidates_the_render(self, tmp_path) -> None:
+        assert self._moves(tmp_path, "amcd/simulators/gsound_sir.py"), (
+            "an edit to the backend that produces the IRs must invalidate them"
+        )
+
+    def test_editing_an_inactive_backend_does_not(self, tmp_path) -> None:
+        assert not self._moves(tmp_path, "amcd/simulators/dry_run.py"), (
+            "the dry-run scaffold cannot change a gsound render, and discarding "
+            "one over it costs hours under emulation"
+        )
+
+    def test_editing_device_selection_does_not(self, tmp_path) -> None:
+        """`amcd/device.py` exists as its own module for exactly this: it was in
+        `_CORE_SOURCES`, which every scope unions in, so the MPS -> CUDA -> CPU
+        fallback — the code the cross-platform requirement makes someone touch —
+        would have invalidated a 720-scene render."""
+        assert not self._moves(tmp_path, "amcd/device.py")
+
+    @staticmethod
+    def _moves(tmp_path, rel: str) -> bool:
+        """Render `code_version` before vs after appending a statement to `rel`,
+        computed in a SEPARATE interpreter against a COPY of the package so the
+        probe never writes to tracked source (F-217)."""
+        import shutil, subprocess, sys
+
+        root = tmp_path / "pkg"
+        shutil.copytree(Path("src"), root / "src")
+        shutil.copytree(Path("configs"), root / "configs")
+        probe = root / "probe.py"
+        probe.write_text(
+            f"import sys; sys.path.insert(0, {str(root / 'src')!r})\n"
+            "from pathlib import Path\n"
+            "from amcd.config import Config\n"
+            "from amcd.pipeline import _render_fingerprint\n"
+            "print(_render_fingerprint(Config.load(Path('configs/base.yaml')))['code_version'])\n"
+        )
+
+        def version() -> str:
+            out = subprocess.run([sys.executable, "probe.py"], cwd=root,
+                                 capture_output=True, text=True)
+            assert out.stdout.strip(), out.stderr[-400:]
+            return out.stdout.strip()
+
+        before = version()
+        target = root / "src" / rel
+        target.write_text(target.read_text() + "\n_MUTATION_PROBE = 1\n")
+        return version() != before
+
+
+class TestTheDatasetFingerprintsAreHostIndependent:
+    """F-81/F-100/F-82: a cache key must describe the DATASET, not the machine.
+
+    `_render_fingerprint` and `_gen_scenes_fingerprint` hashed
+    `config.simulator.params` whole, so `render_python` — the x86 interpreter the
+    emulated render runs under — was part of the render's cache identity. The
+    project is required to run on this Apple-Silicon host and on a native x86_64
+    desktop from the same code, so that made a dataset rendered on one host demand
+    a byte-identical re-render on the other.
+    """
+
+    @staticmethod
+    def _with_host_layer(tmp_path):
+        layer = tmp_path / "host.yaml"
+        layer.write_text(
+            "simulator:\n  params:\n    render_python: /somewhere/else/bin/python\n"
+        )
+        return Config.load(Path("configs/base.yaml"), layer)
+
+    @pytest.mark.parametrize("fingerprint", [_render_fingerprint, _gen_scenes_fingerprint])
+    def test_the_interpreter_path_is_not_a_cache_key(self, tmp_path, fingerprint) -> None:
+        base = Config.load(Path("configs/base.yaml"))
+        moved = self._with_host_layer(tmp_path)
+        assert base.simulator.params["render_python"] != moved.simulator.params["render_python"], (
+            "the fixture must actually differ, or this test cannot fail"
+        )
+        dumped = json.dumps(fingerprint(base), sort_keys=True, default=str)
+        assert json.dumps(fingerprint(moved), sort_keys=True, default=str) == dumped
+        assert "render_python" not in dumped
+
+    @pytest.mark.parametrize("fingerprint", [_render_fingerprint, _gen_scenes_fingerprint])
+    def test_a_disclosure_threshold_is_not_a_cache_key(self, fingerprint) -> None:
+        """`max_discarded_tail_db` changes what is REPORTED about an IR and never
+        the IR, so re-tightening it must not cost a multi-hour emulated re-render."""
+        assert "max_discarded_tail_db" not in json.dumps(
+            fingerprint(Config.load(Path("configs/base.yaml"))), sort_keys=True, default=str
+        )
+
+    def test_the_pinned_upstream_version_IS_still_a_cache_key(self) -> None:
+        """The filter must not become a hole: `commit_sha` identifies the renderer
+        that produced the IR, so it stays."""
+        assert "commit_sha" in json.dumps(
+            _render_fingerprint(Config.load(Path("configs/base.yaml"))),
+            sort_keys=True, default=str,
+        )
 
 
 class TestDeclaredScopeCoversWhatTheStageImports:
@@ -851,17 +972,29 @@ class TestAnUnprotectedStaleStageIsDisclosedNotVouchedFor:
     def test_a_changed_package_warns_when_an_unprotected_stage_is_served(
         self, tmp_path: Path, capsys
     ) -> None:
+        """Driven off the DECLARATION rather than a named stage: `gen-scenes` was
+        the example until it gained a `code_version`, and hardcoding a stage name
+        here would have made this test silently vacuous at that moment instead of
+        moving to whatever is still unprotected."""
+        unprotected = [s for s, f in STAGE_FINGERPRINT.items()
+                       if f is None or "code_version" not in f(tiny_config())]
+        assert unprotected, (
+            "every stage is now cache-protected — delete this test and the "
+            "warning it covers, rather than keeping a check that cannot fire"
+        )
+        stage = unprotected[0]
+
         pipe = Pipeline(tiny_config(scenes={"n_id": 4}), tmp_path, QUIET)
-        pipe._mark_done("gen-scenes")
-        sentinel = _sentinel(tmp_path, "gen-scenes")
+        pipe._mark_done(stage)
+        sentinel = _sentinel(tmp_path, stage)
         recorded = json.loads(sentinel.read_text())
         recorded["code_version_unscoped"] = "0" * 64  # as if built by older source
         sentinel.write_text(json.dumps(recorded))
 
         capsys.readouterr()
-        pipe._warn_if_unprotected_and_stale("gen-scenes")
+        pipe._warn_if_unprotected_and_stale(stage)
         err = capsys.readouterr().err
-        assert "gen-scenes" in err and "no code_version" in err, err
+        assert stage in err and "no code_version" in err, err
 
     def test_a_fingerprinted_stage_does_not_warn(self, tmp_path: Path, capsys) -> None:
         """`preprocess` refuses on a scoped change, so a whole-package drift there

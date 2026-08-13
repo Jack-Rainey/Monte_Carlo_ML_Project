@@ -1289,9 +1289,13 @@ class Config(BaseModel):
         return siblings
 
     # ── Provenance ────────────────────────────────────────────────────────────
-    def stamp(self, run_dir: Path) -> None:
+    def stamp(self, run_dir: Path, device: str | None = None) -> None:
         """Write the resolved concrete config, the flattened resolved point + seeds,
         and package versions.
+
+        `device` is the torch device this run will use, supplied by the caller
+        (`amcd.device.select_device`) rather than chosen here — see the comment at
+        the `versions["device"]` assignment for why this module must not import it.
 
         Note: config.yaml holds the RESOLVED run (tune/sweep leaves already collapsed
         to scalars), not the pre-resolution declared tree — the declared spaces are
@@ -1350,9 +1354,16 @@ class Config(BaseModel):
             "cached stages may predate it — see stages/<stage>.done"
         )
         # WHICH MACHINE, beside which code — the same config and code_version give
-        # different weights on MPS and on CUDA/CPU. Neither is a cache key; see
-        # amcd.provenance (F-74).
-        versions["device"] = str(provenance.select_device())
+        # different weights on MPS and on CUDA/CPU. Neither is a cache key (F-74).
+        #
+        # The device is PASSED IN rather than selected here. `config.py` is in
+        # `_CORE_SOURCES`, which every stage's declared scope unions in, so importing
+        # `amcd.device` from this module — at module scope or inside this function,
+        # since the closure walker sees both — would put device selection back into
+        # every stage's cache key. An edit to the MPS -> CUDA -> CPU fallback would
+        # then invalidate a 720-scene render, and that fallback is exactly the code
+        # the cross-platform requirement makes someone touch.
+        versions["device"] = device or "not recorded"
         versions["platform_machine"] = provenance.host_platform()
         (run_dir / "versions.json").write_text(json.dumps(versions, indent=2))
 

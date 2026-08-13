@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from ..config import Config
 from ..data.dataset import EnergyDataset
 from ..models.cnn import build_model  # noqa: F401 — import also triggers registration
-from ..provenance import select_device
+from ..device import select_device
 from ..runtime import Verbosity, emit
 from .loss import build_criterion
 

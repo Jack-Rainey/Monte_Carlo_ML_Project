@@ -23,6 +23,7 @@ from typing import Callable
 
 from . import provenance
 from .config import Config
+from .simulators.base import simulator_code_scope, simulator_host_scoped_params
 from .runtime import Verbosity, emit
 
 STAGES = ["gen-scenes", "render", "preprocess", "diagnostics", "train", "infer", "eval", "stats", "report"]
@@ -69,8 +70,45 @@ def _gen_scenes_fingerprint(config: Config) -> dict:
         },
         "seed_scene_generation": config.seed("scene_generation"),
         "ir_duration": config.ir_duration,
-        "simulator": {"name": config.simulator.name, "params": config.simulator.params},
+        "code_version": _code_version("gen-scenes", config),
+        "simulator": {"name": config.simulator.name,
+                      "params": _dataset_simulator_params(config)},
     }
+
+
+#: Simulator params that change what is REPORTED about an IR and never the IR.
+#: Declared here rather than on the backend: a backend's `host_scoped_params()`
+#: answers "is this a machine fact", which is a different question, and folding
+#: these in would redact them from canonical provenance where they belong (F-82).
+_DISCLOSURE_ONLY_PARAMS: frozenset[str] = frozenset({"max_discarded_tail_db"})
+
+
+def _dataset_simulator_params(config: Config) -> dict:
+    """`config.simulator.params` minus the entries that describe the HOST or the
+    DISCLOSURE, not the IR.
+
+    Both fingerprints below hashed the params block whole, which made the render
+    cache identity depend on things that cannot change a single sample:
+
+    * **Host-scoped params** (`render_python` — the x86 interpreter the emulated
+      render runs under). Probe: `base.yaml` alone fingerprints to 6999713b8247…,
+      `base.yaml` + a host layer to 51033e7d57c0…, differing only in
+      `simulator.params.render_python`. The same dataset rendered on this Mac would
+      fail loudly on the x86_64 Linux host demanding a byte-identical re-render —
+      a direct violation of the cross-platform requirement. The backend already
+      DECLARES which of its params are host-scoped, and `render._canonical_meta`
+      already redacts them from provenance; this asks the same declaration.
+    * **Disclosure-only thresholds** (`max_discarded_tail_db`). Re-tightening a QC
+      threshold changes what is REPORTED about an IR, never the IR, so it must not
+      cost a multi-hour emulated re-render. It is deliberately NOT folded into the
+      backend's host-scoped declaration: it is not a host fact, and conflating the
+      two would redact it from provenance, where it belongs.
+
+    Everything else stays: `commit_sha` in particular, so an upstream version change
+    still invalidates the cache with no extra wiring.
+    """
+    excluded = set(simulator_host_scoped_params(config)) | _DISCLOSURE_ONLY_PARAMS
+    return {k: v for k, v in config.simulator.params.items() if k not in excluded}
 
 
 def _render_fingerprint(config: Config) -> dict:
@@ -80,7 +118,9 @@ def _render_fingerprint(config: Config) -> dict:
     version change invalidates the cache with no extra wiring.
     """
     return {
-        "simulator": {"name": config.simulator.name, "params": config.simulator.params},
+        "code_version": _code_version("render", config),
+        "simulator": {"name": config.simulator.name,
+                      "params": _dataset_simulator_params(config)},
         "sample_rate": config.sample_rate,
         "n_samples": config.n_samples,
         "ambisonics_order": config.ambisonics_order,
@@ -263,6 +303,11 @@ def _report_fingerprint(config: Config) -> dict:
 #: absent BY DECISION, not oversight: they carry no `code_version` at all, so they
 #: have nothing to scope — see STAGE_FINGERPRINT, RD-107 and RD-108 for the cost
 #: that buys and what it leaves exposed.
+#: Stages whose scope is not a fixed list because it depends on which backend is
+#: active. Resolved through `simulator_code_scope(config)`, so swapping simulators
+#: swaps the scope with them and a scaffold edit cannot invalidate a real dataset.
+_BACKEND_SCOPED_STAGES = frozenset({"gen-scenes", "render"})
+
 STAGE_CODE_SCOPE: dict[str, tuple[str, ...]] = {
     # Assigns splits and encodes tensors. `simulators/base.py` is named as a
     # single module rather than the whole subpackage because `data/preprocess.py`
@@ -272,10 +317,10 @@ STAGE_CODE_SCOPE: dict[str, tuple[str, ...]] = {
     "preprocess": ("data", "representations", "simulators/base.py"),
     # Trains weights: the model, the loss, the trainer, the dataset it reads, and
     # the representation whose domain the loss is expressed in.
-    "train": ("training", "models", "data", "representations"),
+    "train": ("training", "models", "data", "representations", "device.py"),
     # Loads the checkpoint, decodes through the representation, and denormalizes
     # every predicted leg — hence `data` (F-66).
-    "infer": ("training", "models", "data", "representations"),
+    "infer": ("training", "models", "data", "representations", "device.py"),
     # The stage whose output IS the research claim. `data` because it denormalizes
     # every reported leg (F-66) — previously omitted here and from infer's scope,
     # masked only by `data` being in TRAIN's scope so the chain refused upstream
@@ -293,13 +338,25 @@ STAGE_CODE_SCOPE: dict[str, tuple[str, ...]] = {
 }
 
 
-def _code_version(stage: str) -> str:
+def _code_version(stage: str, config: Config | None = None) -> str:
     """The content hash of `stage`'s declared sources — see
     `amcd.provenance.code_version`.
 
     Shared with `Config.stamp` through that module so the cache key and
     `versions.json` cannot describe different code (F-56).
     """
+    if stage in _BACKEND_SCOPED_STAGES:
+        if config is None:
+            raise ValueError(
+                f"stage {stage!r} scopes itself on the ACTIVE backend, so its "
+                f"code_version cannot be computed without a config."
+            )
+        scope = simulator_code_scope(config)
+        if stage == "gen-scenes":
+            # The generator's own source decides placement and admission; the
+            # backend's decides the realized support that gate measures against.
+            scope = ("scenes",) + scope
+        return provenance.code_version(scope)
     return provenance.code_version(STAGE_CODE_SCOPE[stage])
 
 

@@ -70,6 +70,13 @@ class DryRunSimulator:
         return float(params["min_source_receiver_distance_m"])
 
     @classmethod
+    def code_scope(cls) -> tuple[str, ...]:
+        """Required declaration (`Simulator`). The scaffold synthesizes the decay
+        that IS the ground truth under `dry_run`, so an edit here changes every
+        reported number and must invalidate the render."""
+        return ("simulators/dry_run.py", "simulators/base.py")
+
+    @classmethod
     def realized_support_s(cls, params: dict, t60_s: float, volume_m3: float,
                            surface_m2: float, window_s: float) -> float:
         """Required pre-render declaration (`Simulator`).

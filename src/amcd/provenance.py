@@ -12,11 +12,12 @@ The distinction the module exists to keep straight:
 * `git_sha()` is HUMAN provenance. It is allowed to be "unavailable", and it is
   never the only thing standing between a config change and a stale artifact.
 
-`host_platform()` and `select_device()` sit on the human side too: the same config
+`host_platform()` sits on the human side too: the same config
 and the same `code_version` produce different weights on this Mac (MPS) and on the
 x86 box (CUDA/CPU), so the host and the device belong in `versions.json` — and
 deliberately in no cache key, since moving machines must not discard a checkpoint
-(F-74). `select_device` explains why runtime policy lives in this module.
+(F-74). Device SELECTION lives in `amcd.device`, outside `_CORE_SOURCES`, so a
+fallback edit does not invalidate every fingerprinted stage.
 """
 from __future__ import annotations
 
@@ -150,42 +151,9 @@ def host_platform() -> str:
 
     HUMAN provenance, beside `git_sha()`. The project is required to run on this
     Apple-Silicon machine and on a native x86_64 desktop from the same code, so
-    "which host" is part of describing a run — never a cache key (see
-    `select_device`).
+    "which host" is part of describing a run — never a cache key.
     """
     return platform.machine()
-
-
-def select_device() -> "torch.device":  # noqa: F821 — torch imported lazily below
-    """The torch device this host offers, preferring MPS, then CUDA, then CPU.
-
-    This is runtime policy, not provenance, and this is not its natural home: it
-    lives here because `Config.stamp` must record the chosen device into
-    `versions.json` and `config.py` is in `_CORE_SOURCES`. A core module importing
-    `amcd.training` would put `training/` in EVERY stage's import closure and make
-    every stage's declared scope wrong. The natural home is a top-level
-    `amcd/device.py`; lane P's cycle-4 file ownership does not include one, so this
-    placement is a constraint, not a claim about where it belongs.
-
-    The cost of living in a core module, recorded so it is a decision and not a
-    surprise: an edit HERE invalidates every fingerprinted stage. That is
-    tolerable while `gen-scenes`/`render` carry no `code_version`; if they gain
-    one, editing this fallback would force a re-render, which under x86 emulation
-    is the multi-hour artifact — and this fallback is exactly the code the
-    second-host requirement will make someone touch.
-
-    The device is deliberately absent from every fingerprint (F-74). The same
-    config on MPS and on CUDA produces different weights, which is a real
-    provenance fact and belongs in `versions.json`; making it a cache key would
-    discard an expensive checkpoint because the operator moved machines.
-    """
-    import torch
-
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
 
 
 def git_sha() -> str:

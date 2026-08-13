@@ -83,13 +83,14 @@ def _invoke(
 ) -> None:
     """Shared command body; `stage=None` runs all stages."""
     from .config import Config
+    from .device import select_device
     cfg = Config.load(*config)
     verbosity = Verbosity(save=save_verbosity, show=show_verbosity)
     if run_dir is None:
         run_dir = _make_run_dir(stage if stage is not None else "all")
     run_dir = Path(run_dir)
     if verbosity.saves("provenance"):
-        cfg.stamp(run_dir)
+        cfg.stamp(run_dir, device=str(select_device()))
     emit(verbosity, "timing", f"Run dir: {run_dir.resolve()}")
     pipeline = Pipeline(cfg, run_dir, verbosity, force=force)
     if stage is None:

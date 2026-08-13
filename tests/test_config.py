@@ -174,7 +174,12 @@ class TestVersionsJsonNamesTheMachine:
     """
 
     def _versions(self, tmp_path: Path) -> dict:
-        Config.load().stamp(tmp_path)
+        """Stamps the way `cli.py` does — the device is SUPPLIED, not selected by
+        `Config.stamp`, so that `config.py` (which is in `_CORE_SOURCES`) never
+        imports `amcd.device` and drag it into every stage's cache key."""
+        from amcd.device import select_device
+
+        Config.load().stamp(tmp_path, device=str(select_device()))
         return json.loads((tmp_path / "versions.json").read_text())
 
     def test_the_device_is_recorded(self, tmp_path: Path) -> None:
@@ -192,7 +197,7 @@ class TestVersionsJsonNamesTheMachine:
         """The stamp must agree with the selector `train` and `infer` actually use,
         or the record describes a different run than the one on disk (F-56's rule,
         applied to the device)."""
-        from amcd.provenance import select_device
+        from amcd.device import select_device
 
         assert self._versions(tmp_path)["device"] == str(select_device())
 
@@ -211,7 +216,7 @@ class TestVersionsJsonNamesTheMachine:
         """It was duplicated verbatim in trainer.py and infer.py, so the two could
         drift apart while both claimed to describe 'the device'."""
         from amcd.training import infer, trainer
-        from amcd.provenance import select_device
+        from amcd.device import select_device
 
         assert trainer.select_device is select_device
         assert infer.select_device is select_device

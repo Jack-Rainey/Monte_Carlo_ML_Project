@@ -647,6 +647,18 @@ class GsoundSirSimulator:
         return min(trim_s, float(params["max_ir_length_s"]), float(window_s))
 
     @classmethod
+    def code_scope(cls) -> tuple[str, ...]:
+        """Required declaration (`Simulator`) — the source that decides this
+        backend's IRs, and no more.
+
+        Deliberately NOT the whole `simulators` package: that would let an edit to
+        the `dry_run` scaffold invalidate a real emulated dataset. `base.py` is in
+        scope because the seam it defines — `_fit_to_window`'s window contract and
+        `PathData` — shapes what this backend returns.
+        """
+        return ("simulators/gsound_sir.py", "simulators/base.py")
+
+    @classmethod
     def host_scoped_params(cls) -> tuple[str, ...]:
         """`render_python` is a machine-local interpreter path, not a dataset fact.
 
