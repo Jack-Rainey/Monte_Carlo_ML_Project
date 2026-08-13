@@ -1030,6 +1030,30 @@ class Config(BaseModel):
         return self.seeds.resolved()[name]
 
     # ── Split helpers ─────────────────────────────────────────────────────────
+    def generation_regime_of(self, split_name: str) -> tuple[str, tuple[str, ...]]:
+        """(the `placement_report.json` key `split_name`'s scenes were generated
+        under, every declared split that key covers).
+
+        `scenes/placement_report.json` is keyed by generation REGIME, not by split:
+        in frac mode the id-pool splits share one `id` entry and are separated later
+        by `data/splits.py`, while in count mode each is its own entry (S-F7). Any
+        consumer that carries a per-regime number onto a per-split row has to know
+        which, and getting it wrong prints a `train`-sized figure beside `test_id`.
+
+        Lives here because the split/regime vocabulary does — `id_pool_is_counted`
+        is the predicate directly above, and a second copy of this mapping in the
+        reporting layer is the AC-24 shape.
+        """
+        if split_name not in self.splits:
+            raise KeyError(
+                f"{split_name!r} is not a declared split; declared: "
+                f"{sorted(self.splits)}. The generation regime of an undeclared "
+                f"split is undefined."
+            )
+        if self.splits[split_name].is_id_pool and not self.id_pool_is_counted:
+            return "id", tuple(self.id_pool_splits)
+        return split_name, (split_name,)
+
     @property
     def id_pool_splits(self) -> dict[str, SplitSpec]:
         return {name: sp for name, sp in self.splits.items() if sp.is_id_pool}

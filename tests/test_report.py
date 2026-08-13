@@ -408,3 +408,101 @@ class TestTheAttemptedBoundIsComputedOverTheRightScenes:
         assert row["improvement_mean_attempted"] == pytest.approx(
             row["improvement_mean"]
         )
+
+
+class TestEachSplitSectionCarriesItsOwnRecordLengthCount:
+    """RD-65 — the record-length gate is the OVERALL over-limit fraction across
+    regimes, which is the one aggregation invariant #9 forbids for results.
+
+    That is the right GATE: a per-split gate would let the smallest split set the
+    tolerance for train. But research_i's 0.01 over 720 scenes permits 7 over-limit
+    scenes that could ALL sit in the 30-scene `test_geometry_shift` — 23 % of it —
+    and still pass, and the per-shift breakdown IS the research result. It reached
+    only scenes/placement_report.json, surfacing in the console solely when the gate
+    tripped.
+    """
+
+    def _run_dir(self, tmp_path: Path, placement: dict | None) -> Path:
+        (tmp_path / "stats").mkdir()
+        (tmp_path / "stats" / "summary.json").write_text(json.dumps([
+            _summary_row("T30", split="test_id"),
+            _summary_row("T30", split="test_geometry_shift"),
+        ]))
+        (tmp_path / "preprocessed").mkdir()
+        (tmp_path / "preprocessed" / "meta.json").write_text(
+            json.dumps({"value_domain": "db"})
+        )
+        if placement is not None:
+            (tmp_path / "scenes").mkdir()
+            (tmp_path / "scenes" / "placement_report.json").write_text(
+                json.dumps(placement)
+            )
+        return tmp_path
+
+    @staticmethod
+    def _entry(over: int, scored: int) -> dict:
+        return {"record_decay_range": {
+            "n_scenes": scored,
+            "decay_range_below_iso_t30": {"count": over, "fraction": over / scored},
+        }}
+
+    def test_each_split_reports_its_OWN_count(self, tmp_path: Path) -> None:
+        cfg = tiny_config()
+        run_dir = self._run_dir(tmp_path, {
+            "id": self._entry(0, 20),
+            "test_geometry_shift": self._entry(7, 30),
+        })
+        run_report(cfg, run_dir, QUIET)
+        txt = (run_dir / "report" / "summary.txt").read_text()
+
+        lines = txt.splitlines()
+        geo_at = next(i for i, l in enumerate(lines) if "test_geometry_shift" in l)
+        note = next(l for l in lines[geo_at:] if l.startswith("Record length"))
+        assert "7/30" in note and "23.3%" in note, note
+        # And the clean split says so rather than inheriting the shift split's count.
+        id_at = next(i for i, l in enumerate(lines) if "(test_id," in l)
+        id_note = next(l for l in lines[id_at:] if l.startswith("Record length"))
+        assert "0/20" in id_note, id_note
+
+    def test_the_pooled_id_regime_is_named_as_pooled(self, tmp_path: Path) -> None:
+        """S-F7: in frac mode `train`/`valid`/`test_id` share one `id` entry, so a
+        count printed beside `test_id` covers all three. Saying `split 'test_id'`
+        there would invite the reader to size it against test_id alone."""
+        cfg = tiny_config()
+        run_dir = self._run_dir(tmp_path, {
+            "id": self._entry(3, 20),
+            "test_geometry_shift": self._entry(0, 30),
+        })
+        run_report(cfg, run_dir, QUIET)
+        txt = (run_dir / "report" / "summary.txt").read_text()
+        note = next(
+            l for l in txt.splitlines()
+            if l.startswith("Record length") and "3/20" in l
+        )
+        assert "regime 'id'" in note and "pooling" in note, note
+
+    def test_an_unscored_regime_is_not_reported_as_zero(self, tmp_path: Path) -> None:
+        """RD-64/F-71: a fraction whose denominator is zero is UNDEFINED, and 0.0
+        would read as 'measured, and within the record'."""
+        cfg = tiny_config()
+        run_dir = self._run_dir(tmp_path, {
+            "id": self._entry(0, 20),
+            "test_geometry_shift": {"record_decay_range": {
+                "n_scenes": 0, "decay_range_below_iso_t30": {"count": 0},
+            }},
+        })
+        run_report(cfg, run_dir, QUIET)
+        txt = (run_dir / "report" / "summary.txt").read_text()
+        assert "UNSCORED" in txt and "undefined, not 0" in txt
+
+    def test_a_run_dir_with_no_placement_report_still_renders(
+        self, tmp_path: Path
+    ) -> None:
+        """The disclosure is about scene generation; its absence is not a reason to
+        refuse a metrics table."""
+        cfg = tiny_config()
+        run_dir = self._run_dir(tmp_path, None)
+        run_report(cfg, run_dir, QUIET)
+        txt = (run_dir / "report" / "summary.txt").read_text()
+        assert "Record length" not in txt
+        assert "T30" in txt

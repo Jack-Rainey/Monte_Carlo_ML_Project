@@ -110,6 +110,61 @@ def _stamped_value_domain(run_dir: Path, config=None) -> str:
     return stamped
 
 
+def _record_length_line(config: Config, run_dir: Path, split_name: str) -> str | None:
+    """This split's own record-length over-limit count, for its report section.
+
+    RD-65: the gate `scenes/generator.py` applies is the OVERALL over-limit fraction
+    across every regime — the one aggregation invariant #9 forbids for results. That
+    is the right GATE (a per-split gate lets the smallest split set the tolerance for
+    train), but it means research_i's 0.01 over 720 scenes permits 7 over-limit
+    scenes that could all sit in the 30-scene `test_geometry_shift`, 23 % of it, and
+    still pass. The per-shift breakdown IS the research result, and it reached only
+    `placement_report.json` — surfacing in the operator's console solely when the
+    gate tripped.
+
+    A scene is over the limit when its closed-form decay does not fit the record, so
+    its T30 is the truncation rather than the room. That is a caveat on the numbers
+    in the section this line sits under, which is why it is rendered per split rather
+    than once for the run.
+
+    Returns None when there is no report to read — a run_dir assembled from stats
+    alone, which the report tests do — rather than failing: this is a disclosure
+    about scene generation, and its absence is not a reason to refuse a table.
+    """
+    report_path = run_dir / "scenes" / "placement_report.json"
+    if not report_path.exists():
+        return None
+    with open(report_path) as f:
+        placement = json.load(f)
+    regime, covered = config.generation_regime_of(split_name)
+    entry = placement.get(regime)
+    if not isinstance(entry, dict) or "record_decay_range" not in entry:
+        return None
+    block = entry["record_decay_range"]
+    scored = block.get("n_scenes", 0)
+    over = block.get("decay_range_below_iso_t30", {}).get("count", 0)
+    # In frac mode the id-pool splits share one regime entry, so the count covers
+    # train+valid+test_id and naming it after this split alone would overstate what
+    # was measured here (S-F7).
+    scope = (
+        f"regime {regime!r}, pooling {'/'.join(covered)}"
+        if covered != (split_name,) else f"split {split_name!r}"
+    )
+    if not scored:
+        return (
+            f"Record length: UNSCORED for {scope} — no scene was characterized, so "
+            f"the over-limit fraction is undefined, not 0 (RD-64/F-71)."
+        )
+    limit = config.scenes.max_frac_below_iso_t30_decay_range
+    verdict = "" if over / scored <= limit else "  ** ABOVE this config's own limit **"
+    return (
+        f"Record length: {over}/{scored} scenes ({over / scored:.1%}) in {scope} carry "
+        f"a decay the record cannot hold, against a declared {limit:.0%} (RD-65). "
+        f"The GATE is the OVERALL fraction across regimes, so this split may be far "
+        f"over on its own and the run still pass.{verdict}"
+    )
+
+
 def _unconverged_reference_footer(config: Config, unapplied: list[str]) -> list[str]:
     """Footer lines for every metric whose REFERENCE LEG is not converged (AC-187).
 
@@ -363,6 +418,13 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         lines += [hdr, "-" * len(hdr)]
         for row in scored_rows:
             lines.append(_metric_row(row))
+        # RD-65: this split's own record-length over-limit count, beside the numbers
+        # it is a caveat on rather than only in scenes/placement_report.json.
+        record_note = _record_length_line(config, run_dir, split_name) if (
+            split_name in config.splits
+        ) else None
+        if record_note:
+            lines += ["", record_note]
 
     lines += [
         "",
