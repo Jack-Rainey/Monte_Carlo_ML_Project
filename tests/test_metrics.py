@@ -4,8 +4,12 @@ These are the load-bearing evidence for the two metric fixes — the dry_run pip
 zero-delay, low-noise synthetic IRs do not exercise either path, so correctness is
 proved here with synthetic IRs of known structure, not by the pipeline run.
 """
+from pathlib import Path
+
 import numpy as np
 import torch
+
+from amcd.config import Config
 
 from amcd.evaluation.room_acoustic import channel_band_avg_metrics
 
@@ -1611,20 +1615,54 @@ def test_a_physical_leg_is_never_censored_for_its_own_c50(true_t60: float) -> No
 # known answer cannot.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_IR_DURATION_S = 4.25       # configs/base.yaml
-_T30_JND_FRAC = 0.05        # configs/base.yaml d0b_t30_jnd_frac
+def _base_scalar(name: str) -> float:
+    """One experiment-governing value, read from `configs/base.yaml` (F-219).
+
+    These were module literals with a `# configs/base.yaml` comment standing in for
+    a read — `ir_duration: 4.25` and `d0b_t30_jnd_frac: 0.05`, both duplicated from
+    the config that governs them. Either could move and every test built on them
+    would keep asserting against the old value while claiming to describe the
+    shipped one.
+    """
+    return float(getattr(Config.load(Path("configs/base.yaml")), name))
+
+
+def _backend_native_support_s() -> float:
+    """The longest native record the ACTIVE backend can produce, from its config.
+
+    gsound compiles `maxIRLength = 3.0 s` and does not expose it, so no render
+    exceeds it whatever `ir_duration` says — which is why this is read from
+    `max_ir_length_s` rather than derived from the decay (AC-178).
+    """
+    params = Config.load(Path("configs/base.yaml")).simulator.params
+    return float(params["max_ir_length_s"])
+
+
+#: Realizations per cell where a test averages over draws. The estimator is
+#: stochastic — the decay is noise under an envelope — so a single draw measures a
+#: draw, not the estimator. 30 is the smallest count at which the spread of a
+#: 2-band mean is stable enough to assert on; it is a TEST parameter, not an
+#: experiment value, and nothing in the pipeline reads it.
+_SEEDS = 30
 
 
 def _padded_decay(rt60: float, seed: int, floor_rms: float = 0.0) -> np.ndarray:
-    """A decay written into a full `ir_duration` record, zero-padded like the backend.
+    """A decay written into the backend's REALIZED native support, then zero-padded
+    to the full `ir_duration` record — the production record shape.
 
-    `_fit_to_window` ALWAYS pads to the configured record length, so the last 10 %
-    of every real record is exactly zero unless the synthesis leaves a numerical
-    floor. That padding is what AC-58 and AC-64 are both about, so these probes
-    reproduce it rather than testing a bare decay.
+    Both halves matter and neither is free (AC-178):
+
+    * The native part is bounded by what the backend can actually produce
+      (`max_ir_length_s`), NOT by the decay. The earlier version used `2 * T60`, a
+      free parameter with no backend meaning, so above T60 ~ 2.1 s it wrote MORE
+      decay than any render can contain — and the tests that rest on it are
+      precisely the ones about a room too reverberant for its record.
+    * `_fit_to_window` then pads to the configured length, so the last stretch of
+      every real record is exactly zero unless synthesis leaves a numerical floor.
+      That padding is what the truncation-window tests are about.
     """
-    n_record = int(_IR_DURATION_S * _SR)
-    n_native = min(int(2.0 * rt60 * _SR), n_record)
+    n_record = int(_base_scalar("ir_duration") * _SR)
+    n_native = min(int(_backend_native_support_s() * _SR), n_record)
     ir = np.zeros(n_record)
     ir[:n_native] = _decaying_noise_ir(rt60, n_native / _SR, seed)[:n_native]
     if floor_rms:
@@ -1673,7 +1711,7 @@ class TestTheTruncationIndexUnderAZeroPad:
                 # Relative, and tied to the JND rather than to bit-exactness: the
                 # residual is float32 noise in the filter output (~5.6e-5, i.e.
                 # 0.1 % of d0b_t30_jnd_frac), not the index moving the answer.
-                assert (max(got) - min(got)) / scale < _T30_JND_FRAC / 50.0, (
+                assert (max(got) - min(got)) / scale < _base_scalar("d0b_t30_jnd_frac") / 50.0, (
                     f"{metric} at {fc} Hz moved across 1e-6..1e+3 of pure gain: "
                     f"{got}. ISO 3382 metrics are ratios; a level change must not "
                     "move them (AC-58)."
@@ -1708,7 +1746,6 @@ class TestTheTruncationIndexUnderAZeroPad:
 #: noise under an envelope — so a single draw measures a draw, not the estimator.
 #: Not an experiment-governing value: it sets the resolution of a test's own
 #: claim, and it is stated here because the claim quotes it.
-_SEEDS = 30
 
 
 class TestT30RecoversAKnownDecayInAPaddedRecord:
@@ -1762,10 +1799,10 @@ class TestT30RecoversAKnownDecayInAPaddedRecord:
                     )
                     errs.append(abs(t30 - rt60) / rt60)
                 mean_err = float(np.mean(errs))
-                if mean_err > _T30_JND_FRAC:
+                if mean_err > _base_scalar("d0b_t30_jnd_frac"):
                     bad.append((rt60, fc, mean_err))
         assert not bad, (
-            f"MEAN T30 error breaches d0b_t30_jnd_frac={_T30_JND_FRAC} at {bad}. "
+            f"MEAN T30 error breaches d0b_t30_jnd_frac at {bad}. "
             "The estimator must recover a known decay through the shipped ISO "
             "path before a render can be read as measuring the backend (AC-64)."
         )
@@ -1789,7 +1826,7 @@ class TestT30RecoversAKnownDecayInAPaddedRecord:
                         band_resolvability_margin=_NO_FLOOR,
                         min_decay_range_db=_NO_SNR_BOUND,
                     )
-                    if abs(values["T30"] - rt60) / rt60 > _T30_JND_FRAC:
+                    if abs(values["T30"] - rt60) / rt60 > _base_scalar("d0b_t30_jnd_frac"):
                         n += 1
                 if n:
                     breaches[(rt60, fc)] = n
@@ -1826,12 +1863,21 @@ class TestARoomTooReverberantForItsRecord:
     """
 
     def test_a_decay_that_fits_its_record_is_scored(self) -> None:
-        """The control. Without it the refusal below could be refusing everything."""
+        """The control. Without it the refusal below could be refusing everything.
+
+        T60 = 2.0 s, not the 4.2 s this used: under the backend's realized support
+        (`max_ir_length_s` = 3.0 s, compiled and not settable) a 4.2 s decay gets
+        60 x 3.0 / 4.2 = 42.9 dB of range and is correctly REFUSED. It only looked
+        like a control while the helper wrote `2 * T60` of decay into the full
+        4.25 s record and ignored the backend's cap (AC-178) — i.e. while the
+        "control" described a record no render can produce. At 2.0 s the range is
+        90 dB, well inside the standard's 45.
+        """
         from amcd.evaluation.room_acoustic import _iso3382_band_metrics
 
         for fc in _ISO:
             values, reasons, _ = _iso3382_band_metrics(
-                _padded_decay(4.200, seed=0), fc, _SR,
+                _padded_decay(2.000, seed=0), fc, _SR,
                 band_resolvability_margin=_NO_FLOOR,
                 min_decay_range_db=_ISO_SNR_BOUND,
             )
@@ -1839,8 +1885,8 @@ class TestARoomTooReverberantForItsRecord:
                 f"a decay that FITS its record was refused at {fc} Hz: "
                 f"{reasons['T30']}. The bound must refuse truncation, not length."
             )
-            err = abs(values["T30"] - 4.200) / 4.200
-            assert err <= _T30_JND_FRAC, f"control T30 off by {err:.2%} at {fc} Hz"
+            err = abs(values["T30"] - 2.000) / 2.000
+            assert err <= _base_scalar("d0b_t30_jnd_frac"), f"control T30 off by {err:.2%} at {fc} Hz"
 
     def test_a_decay_twice_its_record_is_unscored_with_a_reason(self) -> None:
         from amcd.evaluation.room_acoustic import _iso3382_band_metrics

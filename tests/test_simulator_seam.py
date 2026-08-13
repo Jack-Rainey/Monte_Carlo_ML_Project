@@ -1000,6 +1000,14 @@ class TestGsoundProvenanceFill:
             _SH_CONDON_SHORTLEY_PHASE,
         )
 
+        # ORDER 3, which is what production renders (`configs/base.yaml`
+        # `ambisonics_order: 3`, 16 channels). The earlier version of this test ran
+        # at order 1, so `calculate_sh_normalization` was validated only at l = 0
+        # and l = 1 and the Condon-Shortley phase only at |m| = 1 — while a
+        # per-degree normalization error at l = 2 or 3 would have been invisible.
+        # Every number below is MEASURED against the real synthesizer, not
+        # predicted (AC-78).
+        order, n_channels = 3, 16
         fs, n_bands = 48000.0, 8
         edges = np.asarray(
             Config.load(Path("configs/base.yaml")).simulator.params["frequency_points"],
@@ -1013,7 +1021,7 @@ class TestGsoundProvenanceFill:
         peaks = {}
         for name, direction in axes.items():
             ir = np.asarray(sh.generate_ambisonic_ir(
-                1,                                                    # order 1 -> 4 ch
+                order,
                 np.asarray([direction], dtype=np.float32),
                 np.ones((1, n_bands), dtype=np.float32),
                 np.asarray([1.0], dtype=np.float32),
@@ -1028,6 +1036,28 @@ class TestGsoundProvenanceFill:
 
         w = peaks["+x"][0]
         assert w != 0.0, "W is silent; the synthesizer produced no arrival to read"
+        assert len(w_axis := peaks["+x"]) == n_channels, (
+            f"order {order} must give (order+1)^2 = {n_channels} channels; "
+            f"got {len(w_axis)}"
+        )
+
+        # N3D AT EVERY DEGREE, which is what order 3 buys over order 1. On the +z
+        # axis only the m = 0 channels are excited, and N3D's normalization makes
+        # each one exactly sqrt(2l+1) — 1, sqrt(3), sqrt(5), sqrt(7) at ACN 0, 2, 6,
+        # 12. SN3D would give 1.0 at every degree, so this separates the two
+        # conventions three times rather than once.
+        z_ratios = peaks["+z"] / peaks["+z"][0]
+        for degree, channel in enumerate((0, 2, 6, 12)):
+            assert abs(abs(z_ratios[channel]) - np.sqrt(2 * degree + 1)) < 1e-4, (
+                f"+z ACN {channel} (l={degree}): |ratio| = "
+                f"{abs(z_ratios[channel]):.6f}; N3D predicts "
+                f"{np.sqrt(2 * degree + 1):.6f} and SN3D predicts 1.0"
+            )
+        # …and nothing else is excited on that axis: an m != 0 channel with energy
+        # would mean the ordering is not ACN.
+        m0 = {0, 2, 6, 12}
+        assert not [i for i in range(n_channels)
+                    if i not in m0 and abs(z_ratios[i]) > 1e-6], z_ratios
 
         # ACN ordering (W, Y, Z, X): each axis excites exactly one first-order channel.
         for name, channel in (("+x", 3), ("+y", 1), ("+z", 2)):

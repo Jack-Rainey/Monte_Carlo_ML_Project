@@ -27,7 +27,7 @@ from amcd.config import Config
 from amcd.pipeline import Pipeline
 from amcd.runtime import Verbosity
 
-from tests.conftest import QUIET, tiny_config
+from tests.conftest import CANONICAL_DRY_RUN, QUIET, tiny_config
 
 #: Shows the `metrics` ladder category, which is where both probes print their
 #: verdict tables. Warnings reach stderr at every level (F-24), so QUIET is enough
@@ -309,3 +309,53 @@ class TestD0bComparesTheSameBands:
         assert reasons, "a dropped band left no reason"
         for reason in reasons.values():
             assert "Hz" in reason and ("partial" in reason or "no eval band" in reason)
+
+
+class TestD0bEnumeratesDeclaredSplits:
+    """F-45's D0b half: `sorted(set(splits.values()))` listed only splits that
+    RECEIVED a scene, so a declared-but-empty split vanished from d0b_oracle.json
+    while d0a_gap.json included it — and the run still printed
+    `D0b verdict: CARRIER CEILING CLEARS`, a verdict over a split set that
+    silently differed from the declared one. The `if not scene_ids:` branch whose
+    message read "declared in config but received no scenes" was DEAD CODE."""
+
+    def test_an_empty_declared_split_is_named_in_the_d0b_artifact(
+        self, tmp_path: Path
+    ) -> None:
+        import json
+
+        from amcd.config import Config
+        from amcd.pipeline import Pipeline
+
+        # Same recipe as the stats/report sibling above: split_assignment 104 with
+        # n_id 6 starves test_id while train/valid survive, so the run completes and
+        # the split's absence from D0b is the only thing under test.
+        overlay = tmp_path / "starve.yaml"
+        overlay.write_text("seeds:\n  split_assignment: 104\nscenes:\n  n_id: 6\n")
+        cfg = Config.load(*CANONICAL_DRY_RUN, overlay)
+        tmp_path = tmp_path / "run"
+        for stage in ("gen-scenes", "render", "preprocess", "diagnostics"):
+            Pipeline(cfg, tmp_path, QUIET).run_stage(stage)
+
+        d0b = json.loads((tmp_path / "diagnostics" / "d0b_oracle.json").read_text())
+        assert "test_id" in d0b["per_split"], (
+            "a declared split with no scenes is absent from d0b_oracle.json — "
+            "indistinguishable from a split that was never declared (F-45)"
+        )
+        assert d0b["per_split"]["test_id"]["n_scenes"] == 0
+        assert "received no scenes" in d0b["per_split"]["test_id"]["unscored_reason"]
+
+    def test_the_declared_split_order_is_config_order_not_alphabetical(
+        self, tmp_path: Path
+    ) -> None:
+        import json
+
+        from amcd.pipeline import Pipeline
+
+        cfg = tiny_config(scenes={"n_id": 8})
+        for stage in ("gen-scenes", "render", "preprocess", "diagnostics"):
+            Pipeline(cfg, tmp_path, QUIET).run_stage(stage)
+
+        d0b = json.loads((tmp_path / "diagnostics" / "d0b_oracle.json").read_text())
+        declared = [s for s in cfg.splits if s in d0b["per_split"]]
+        assert list(d0b["per_split"])[: len(declared)] == declared
