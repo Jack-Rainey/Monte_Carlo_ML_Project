@@ -142,13 +142,19 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             # this scene — record an all-NaN triple for each ISO-3382 metric rather
             # than dropping the row. improvement is then undefined (None), never a
             # borrowed flag. Simulator-agnostic: no stage special-cases a simulator.
-            nan_triple = MetricTriple(
-                float("nan"), float("nan"), float("nan"), kind="match_reference"
-            )
+            def _nan_triple(metric: str) -> MetricTriple:
+                # The unit survives an unscored row: a reader must be able to see
+                # what the column WOULD have held.
+                return MetricTriple(
+                    float("nan"), float("nan"), float("nan"),
+                    kind="match_reference", unit="dB" if metric == "C50" else "s",
+                )
+
+            nan_triple = _nan_triple("T30")
             reason = "decoded/reference IR artifacts absent for this scene"
             band_accounting = {}
             for key in ("T30", "C50", "EDT"):
-                all_metrics[key] = nan_triple
+                all_metrics[key] = _nan_triple(key)
                 for leg in KIND_LEGS[nan_triple.kind]:
                     nan_reasons[(key, leg)] = reason
 
@@ -184,6 +190,9 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 "split": split,
                 "metric": metric_name,
                 "kind": triple.kind,
+                # Carried from the producer so the reported Unit column reads a
+                # DECLARATION rather than a second map that has to agree with it.
+                "unit": triple.unit,
                 "low_val": float(triple.low),
                 "pred_val": float(triple.pred),
                 "high_ref": float(triple.high),

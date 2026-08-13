@@ -57,7 +57,8 @@ class MetricTriple(NamedTuple):
     reference (NaN when the kind does not consume it). kind: one of
     `METRIC_KINDS`, declared HERE at the metric's definition site — required, no
     default, so a producer can never fall back to an implicit match-reference
-    assumption (F-20). NaN in a consumed leg means that leg is unavailable →
+    assumption (F-20). `unit` is declared at the same place and for the same
+    reason. NaN in a consumed leg means that leg is unavailable →
     improvement is undefined for the row and the evaluator logs the drop (F-21).
     """
 
@@ -65,6 +66,15 @@ class MetricTriple(NamedTuple):
     pred: float
     high: float
     kind: str
+    #: The metric's physical unit, declared HERE at the producer for the same
+    #: reason `kind` is. The reported table used to hold its own `_METRIC_UNITS`
+    #: map — a second declaration, asserting what another module's numbers mean
+    #: with nothing binding the two, so a metric could change domain and the Unit
+    #: column would keep printing the old one (RD-201/AC-127). `""` is legal and
+    #: means dimensionless; a unit that depends on the representation's operand
+    #: domain (an MSE) is rendered by the reporting layer from the stamped
+    #: `value_domain`, which only that layer knows.
+    unit: str
 
 
 class MetricDrop(NamedTuple):
@@ -101,7 +111,7 @@ def metric_improvement(triple: MetricTriple) -> tuple[bool | None, float]:
     """
     if _consumed_legs(triple) is None:
         return None, float("nan")
-    low, pred, high, kind = triple
+    low, pred, high, kind = triple.low, triple.pred, triple.high, triple.kind
     if kind == "match_reference":
         low_err = abs(low - high)
         pred_err = abs(pred - high)
@@ -121,7 +131,7 @@ def paired_improvement(triple: MetricTriple) -> float:
     """
     if _consumed_legs(triple) is None:
         return float("nan")
-    low, pred, high, kind = triple
+    low, pred, high, kind = triple.low, triple.pred, triple.high, triple.kind
     if kind == "match_reference":
         return abs(low - high) - abs(pred - high)
     return (pred - low) if kind == "maximize" else (low - pred)

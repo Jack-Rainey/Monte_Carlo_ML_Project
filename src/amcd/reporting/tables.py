@@ -10,31 +10,15 @@ import pandas as pd
 from ..config import Config
 from ..runtime import Verbosity, emit
 
-class _OperandDomainSquared:
-    """A metric whose unit is the OPERAND DOMAIN's, squared.
-
-    Not a fixed string: the same metric carries different units under different
-    representations, so it is resolved from the preprocess-stamped `value_domain`.
-    A named type rather than a bare `object()` (RR-145) so that
-    `dict[str, str | _OperandDomainSquared]` tells a reader what a legal entry is.
-    """
-
-
-_OPERAND_DOMAIN_SQUARED = _OperandDomainSquared()
 
 #: Metric → the unit `paired_improvement` returns it in (evaluation/metric_row.py).
 #: A unit cannot come from `kind`: `T30` and `C50` are both `match_reference` and
 #: differ in unit. Unlisted → `_unit_for` raises. The durable form declares `unit`
 #: beside `kind` on the metric itself and carries it into `ci_table.csv` (RD-201).
-_METRIC_UNITS: dict[str, str | _OperandDomainSquared] = {
-    "T30": "s",
-    "EDT": "s",
-    "C50": "dB",
-    "energy_snr_db": "dB",
-    # An operand-domain MSE against the high reference (evaluation/signal.py), so
-    # its unit is whatever the representation encodes in — squared.
-    "energy_mse": _OPERAND_DOMAIN_SQUARED,
-}
+#: The one unit a producer CANNOT state, because it depends on what preprocess
+#: encoded in. A metric declares this token and the reporting layer resolves it
+#: from the stamped `value_domain`.
+_OPERAND_DOMAIN_SQUARED_TOKEN = "operand_domain_squared"
 
 #: `value_domain` → how to render an operand-domain-squared unit. The vocabulary
 #: is declared on the representation (`representations/base.py`) and stamped by
@@ -47,24 +31,29 @@ _METRIC_UNITS: dict[str, str | _OperandDomainSquared] = {
 _DOMAIN_UNITS = {"db": "dB²", "amplitude": "a.u.²"}
 
 
-def _unit_for(metric: str, value_domain: str) -> str:
-    """The unit of `metric`'s improvement columns, or raise naming the metric.
+def _unit_for(metric: str, declared: str, value_domain: str) -> str:
+    """Render `metric`'s declared unit, or raise naming the metric.
 
-    `value_domain` is the PREPROCESS-STAMPED domain, never inferred from a
-    representation class — the same rule `evaluation/signal.py` states for the
-    metrics themselves (F-19).
+    `declared` is what the PRODUCER stated on its own `MetricTriple` and carried
+    through `metrics.parquet`. This layer used to hold a `_METRIC_UNITS` map of its
+    own — a second declaration asserting what another module's numbers mean, with
+    nothing binding the two, so a metric could change domain and the Unit column
+    would keep printing the old one (RD-201/AC-127). The only thing resolved here
+    is the operand-domain case, because the domain is a PREPROCESS stamp that the
+    producer of the metric cannot see.
+
+    `value_domain` is that stamp, never inferred from a representation class — the
+    same rule `evaluation/signal.py` states for the metrics themselves (F-19).
     """
-    try:
-        unit = _METRIC_UNITS[metric]
-    except KeyError:
+    if not declared:
         raise ValueError(
             f"Metric {metric!r} reaches the report with no declared unit. Its "
             f"improvement mean, CI and MDES are rendered as bare numbers beside "
             f"metrics measured in seconds and in decibels, so a reader cannot tell "
-            f"what it is. Add it to `_METRIC_UNITS` in reporting/tables.py."
-        ) from None
-    if isinstance(unit, str):   # narrows the union, so `-> str` is honest (RR-145)
-        return unit
+            f"what it is. Declare `unit` on the `MetricTriple` its producer builds."
+        )
+    if declared != _OPERAND_DOMAIN_SQUARED_TOKEN:
+        return declared
     try:
         return _DOMAIN_UNITS[value_domain]
     except KeyError:
@@ -126,7 +115,10 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # unscored and crashed the report on a later run that scored it, moving the
     # failure away from the change that caused it. The guard is over the metric
     # SET, so it fires on the first run that mentions the metric at all.
-    units = {row["metric"]: _unit_for(row["metric"], value_domain) for row in summary}
+    units = {
+        row["metric"]: _unit_for(row["metric"], row.get("unit", ""), value_domain)
+        for row in summary
+    }
 
     def _caveats(row: dict) -> str:
         """Composition caveats on the scored population (F-62 / AC-25 / RD-78).

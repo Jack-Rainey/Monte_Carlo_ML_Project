@@ -207,8 +207,11 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         # the legs, never read from the `improved` column, so a hostile or
         # inconsistent column cannot skew CI/MDES (F-18).
         paired_all = np.array([
+            # `unit` is irrelevant to the improvement arithmetic, which is why it
+            # is passed empty here rather than re-derived: the reported unit comes
+            # from the metric row's own declaration, not from this reconstruction.
             paired_improvement(MetricTriple(
-                float(r.low_val), float(r.pred_val), float(r.high_ref), kind
+                float(r.low_val), float(r.pred_val), float(r.high_ref), kind, ""
             ))
             for r in group.itertuples()
         ])
@@ -277,6 +280,10 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 group.get("n_bands_pred_unresolved") > 0
                 if "n_bands_pred_unresolved" in group else None
             ),
+            # One value per (split, metric) group by construction; `first`
+            # rather than a set so a producer disagreeing with itself is a loud
+            # pandas error, not a silently-picked winner.
+            "unit": group["unit"].iloc[0] if "unit" in group else "",
             "n_estimator_variance_limited": _count_true(
                 group.get("estimator_variance_limited")
             ),

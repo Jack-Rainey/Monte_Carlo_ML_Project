@@ -21,9 +21,19 @@ from amcd.reporting.tables import run_report
 from tests.conftest import QUIET, tiny_config
 
 
+#: What each metric's PRODUCER declares on its `MetricTriple` and carries through
+#: `metrics.parquet` — mirrored here only so a fixture row looks like a real one.
+#: The reporting layer no longer holds a map of its own (RD-201/AC-127).
+_PRODUCER_UNITS = {
+    "T30": "s", "EDT": "s", "C50": "dB", "energy_snr_db": "dB",
+    "energy_mse": "operand_domain_squared",
+}
+
+
 def _summary_row(metric: str, **overrides) -> dict:
     row = {
         "split": "test_id", "metric": metric, "kind": "match_reference",
+        "unit": _PRODUCER_UNITS.get(metric, ""),
         "n_attempted": 3, "n_pred": 3,
         "pred_mean": 0.4321, "pred_ci_lower": 0.30, "pred_ci_upper": 0.55,
         "pred_std": 0.10,
@@ -90,9 +100,12 @@ class TestReportedImprovementsCarryTheirUnit:
 
     The unit CANNOT be derived from `kind` (RD-201): `kind` is
     match_reference|maximize|minimize, and T30 and C50 share `match_reference`
-    while differing in unit. It is therefore declared per metric, and an
-    undeclared metric is REFUSED rather than rendered blank — a blank unit beside
-    a physical quantity is the silent exclusion the drop log exists to prevent.
+    while differing in unit. It is declared by the PRODUCER on its own
+    `MetricTriple` and carried through `metrics.parquet`, so the reported column
+    reads a declaration rather than a second map this layer keeps in step by hand.
+    An undeclared metric is REFUSED rather than rendered blank — a blank unit
+    beside a physical quantity is the silent exclusion the drop log exists to
+    prevent.
     """
 
     def test_seconds_and_decibels_are_distinguished(self) -> None:
@@ -116,7 +129,7 @@ class TestReportedImprovementsCarryTheirUnit:
         """The guard against the NEXT metric, not just today's five: a new metric
         must declare its unit rather than inherit a blank."""
         with pytest.raises(ValueError, match="c80_undeclared"):
-            _render([_summary_row("c80_undeclared")])
+            _render([_summary_row("c80_undeclared", unit="")])
 
     def test_an_undeclared_metric_is_refused_even_when_it_is_UNSCORED(self) -> None:
         """F-163/AC-130: the refusal must be over the metric SET, not the scored

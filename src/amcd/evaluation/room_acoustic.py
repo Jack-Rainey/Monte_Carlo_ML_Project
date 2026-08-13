@@ -1174,6 +1174,9 @@ def compute_room_acoustic_metrics(
         triples[metric] = MetricTriple(
             low=leg_vals["low"], pred=leg_vals["pred"], high=leg_vals["high"],
             kind="match_reference",
+            # Declared beside the values it describes: T30/EDT are the fitted decay
+            # TIMES, C50 an early/late energy RATIO in dB.
+            unit="dB" if metric == "C50" else "s",
         )
     window = {
         f"{fc:g}": (idx, src)

@@ -67,10 +67,13 @@ def compute_signal_metrics(
 
     triples = {
         "energy_mse": MetricTriple(
-            low=baseline_mse, pred=pred_mse, high=0.0, kind="match_reference"
+            low=baseline_mse, pred=pred_mse, high=0.0, kind="match_reference",
+            # Operand-domain squared: whatever the representation encodes in. The
+            # reporting layer resolves it from the stamped `value_domain`.
+            unit="operand_domain_squared",
         ),
         "energy_snr_db": MetricTriple(
-            low=low_snr_db, pred=pred_snr_db, high=float("nan"), kind="maximize"
+            low=low_snr_db, pred=pred_snr_db, high=float("nan"), kind="maximize", unit="dB"
         ),
     }
     return triples, nan_reasons

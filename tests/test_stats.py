@@ -164,7 +164,7 @@ def test_paired_improvement_sign_matches_improved_flag() -> None:
     rng = np.random.default_rng(1234)
     for _ in range(200):
         low, pred, high = rng.normal(0.0, 2.0, 3)
-        improved, _ = metric_improvement(MetricTriple(low, pred, high, kind="match_reference"))
+        improved, _ = metric_improvement(MetricTriple(low, pred, high, kind="match_reference", unit="s"))
         paired = abs(low - high) - abs(pred - high)
         assert (paired > 0) == improved, f"sign mismatch at {(low, pred, high)}"
 
