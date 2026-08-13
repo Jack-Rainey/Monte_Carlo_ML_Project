@@ -1633,33 +1633,27 @@ def _padded_decay(rt60: float, seed: int, floor_rms: float = 0.0) -> np.ndarray:
 
 
 class TestTheTruncationIndexUnderAZeroPad:
-    """AC-58: is the reported METRIC invariant to a pure gain?
+    """AC-58: a pure gain must move neither the reported metric nor the window.
 
-    ISO 3382's T30/EDT/C50 are RATIOS, so a pure gain must not move them. The
-    Schroeder limit is chosen by `_lundeby_truncate`, which estimates a noise
-    floor from the last 10 % of the record and clamps it to 1e-30 — and on a
-    zero-padded record that region is EXACTLY zero, so the clamp turns a relative
-    "10 dB above the floor" test into an ABSOLUTE 1e-29.
+    ISO 3382's T30/EDT/C50 are RATIOS, so scaling a recording cannot change them.
+    The Schroeder limit is chosen by `_lundeby_truncate`, and on a zero-padded
+    record — which is every gsound record, since they are padded from their native
+    length out to `ir_duration` — the last 10 % is EXACTLY zero. The old code
+    estimated a noise floor there anyway, clamped the result to 1e-30, and so
+    turned a relative "10 dB above the floor" test into an ABSOLUTE 1e-29 that the
+    signal crosses at a gain-dependent place.
 
-    THE FIRST VERSION OF THIS CLASS MEASURED THE WRONG SIGNAL and concluded the
-    index was gain-invariant. It called `_lundeby_truncate(ir**2, ...)`; production
-    calls it on `_band_energy(...)` (`_shared_truncation_per_band`,
-    `_iso3382_band_metrics`). Through the PRODUCTION path, exact-zero pad,
-    T60 0.6 s, gains 1e-6..1e+3:
+    Measured through the production path on a retained real render
+    (`experiments/ac175_probe/ac175_mid`, 500 Hz) over 10^-8 … 10^+8:
 
-        raw `ir**2`              index 57840 at every gain      swing 0
-        `_band_energy`  500 Hz   57990 -> 61380     swing 3390 = 70.6 ms
-        `_band_energy` 1000 Hz   57939 -> 59635     swing 1696 = 35.3 ms
+        before   index 20948 -> 40672   swing 19724 samples = 411 ms
+        after    index unchanged        swing 0
 
-    So AC-58's own measured "74 ms swing over 1e-7..1e+3" DOES reproduce, and the
-    fold's note that it does not was an artifact of the raw path.
-
-    What survives is a stronger and more useful claim: **the index moves and the
-    METRIC does not**, because the samples the moving window adds are filter
-    ringing decayed into the pad and carry no energy. That is the property worth
-    pinning — a fix that froze the index while changing the metric would be worse
-    than the defect, and a fix that kept the metric while moving the index is what
-    the code already does.
+    The fix truncates at the point where band energy falls to `peak * eps` instead,
+    which is invariant because both terms scale together. A bare "last non-zero
+    sample" is not: the octave filter rings into the pad, and how far that ringing
+    survives before underflowing depends on absolute magnitude — measured at 126.7
+    ms of residual swing, better than 411 and still not a room-acoustic quantity.
     """
 
     def test_the_metric_is_gain_invariant_even_though_the_index_is_not(self) -> None:
@@ -1685,27 +1679,29 @@ class TestTheTruncationIndexUnderAZeroPad:
                     "move them (AC-58)."
                 )
 
-    def test_the_truncation_index_itself_is_not_gain_invariant(self) -> None:
-        """Documents the live defect, so a fix cannot land unnoticed.
+    def test_the_truncation_index_is_gain_invariant(self) -> None:
+        """The window itself, not only the metric it produces.
 
-        AC-58's mechanism is real: with an exactly-zero pad `noise_power` clamps
-        to 1e-30 and the threshold becomes an absolute 1e-29, so the index tracks
-        the signal's absolute level. It is inert today only because the samples it
-        adds carry no energy. `source_power` is a config knob and nothing guards
-        the coupling, which is why AC-58 stays OPEN.
+        Pinning the metric alone is not enough: `source_power` is a config knob, so
+        a window that tracks absolute level couples the integration limit to a
+        setting that has nothing to do with the room. This asserts the index is
+        EXACTLY unchanged — not approximately — because the fix is a comparison
+        against a scaled threshold, and anything less than exact would mean it had
+        regressed to a level test.
         """
         from amcd.evaluation.room_acoustic import _lundeby_truncate, _band_energy
 
         ir = _padded_decay(0.6, seed=0)
-        idx = []
-        for e in (-6, 3):
-            band = _band_energy(ir * 10.0**e, _ISO[0], _SR)
-            idx.append(_lundeby_truncate(band[0] if isinstance(band, tuple) else band, _SR))
-        assert idx[1] - idx[0] > 1000, (
-            f"the truncation index no longer tracks absolute level ({idx}). If "
-            "AC-58 has been fixed, DELETE this test and keep the metric-invariance "
-            "one above — do not relax it."
-        )
+        for fc in _ISO:
+            idx = {
+                _lundeby_truncate(_band_energy(ir * 10.0**e, fc, _SR), _SR)
+                for e in (-8, -6, -3, 0, 3, 8)
+            }
+            assert len(idx) == 1, (
+                f"the truncation index at {fc} Hz moved across 1e-8..1e+8 of pure "
+                f"gain: {sorted(idx)}. ISO 3382 metrics are ratios, and so is the "
+                "window they are integrated over (AC-58)."
+            )
 
 
 #: Realizations per (T60, band) cell. The estimator is stochastic — the decay is

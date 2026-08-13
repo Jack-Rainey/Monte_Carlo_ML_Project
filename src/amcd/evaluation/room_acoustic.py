@@ -89,12 +89,39 @@ def _filter_guard_samples(fc: float, sample_rate: int) -> int:
 # ---------------------------------------------------------------------------
 
 def _lundeby_truncate(energy_samples: np.ndarray, sample_rate: int) -> int:
-    """
-    Simplified Lundeby-style noise-floor truncation.
-    Returns the sample index at which to truncate before Schroeder integration.
-    Estimates noise floor from the last 10% of the record; finds the last sample
-    where a short-time smoothed energy exceeds noise_power × 10 dB.
-    Falls back to a 10 ms minimum if no samples exceed the threshold (degenerate IR).
+    """Sample index at which to truncate before Schroeder integration.
+
+    Two regimes, and PRODUCTION IS THE SECOND ONE:
+
+    1. **A measured noise floor.** Estimate it from the last 10 % of the record and
+       return the last sample whose 10 ms-smoothed energy is 10 dB above it. This is
+       the Lundeby-style path, and it is what a record containing real additive
+       noise takes.
+    2. **A record that ends in exact silence.** Then there is no noise floor to
+       measure, and pretending otherwise is not merely imprecise — it breaks
+       gain-invariance, which ISO 3382 metrics require because T30/EDT/C50 are
+       ratios. `mean(noise_region)` is 0.0, the `1e-30` clamp turns the threshold
+       into an ABSOLUTE 1e-29, and the index then depends on where the signal
+       crosses a fixed level, i.e. on the recording's gain.
+
+    Measured on a retained real render (`experiments/ac175_probe/`, 500 Hz): scaling
+    one waveform over 10^-8 … 10^+8 moved the index 20948 → 40672 samples, a 411 ms
+    swing, and T30 with it, 0.67976 → 0.69400 s. Nothing about the room changed.
+    That regime is not an edge case here: every gsound record is zero-padded from
+    its native length out to `ir_duration`, so the noise region is IDENTICALLY zero
+    on every leg of every scene (exact-zero fraction 1.0000, measured on all four
+    retained legs at both eval bands).
+
+    So when the noise region is silent, truncate where the band energy falls to the
+    limit of what float64 can still represent RELATIVE TO ITS OWN PEAK. Below
+    `peak * eps` the samples carry no information — they are the filter's ringing
+    decaying into rounding error — and because both peak and sample scale together,
+    the index is exactly invariant to gain.
+
+    A bare "last non-zero sample" is NOT: the octave filter rings into the padded
+    region, and how far those values survive before underflowing to zero depends on
+    absolute magnitude. Measured, that residual moved the index 126.7 ms over the
+    same 16 decades — better than 411 ms and still not a room-acoustic quantity.
     """
     n = len(energy_samples)
     # 10 ms minimum: enough samples for a valid regression, never n//2 (that forces
@@ -102,8 +129,16 @@ def _lundeby_truncate(energy_samples: np.ndarray, sample_rate: int) -> int:
     min_samples = max(2, int(0.010 * sample_rate))
 
     noise_region = energy_samples[int(0.9 * n):]
-    noise_power = float(np.mean(noise_region)) if len(noise_region) > 0 else 1e-30
-    noise_power = max(noise_power, 1e-30)
+    if len(noise_region) == 0 or not np.any(noise_region):
+        peak = float(np.max(energy_samples)) if n else 0.0
+        if peak <= 0.0:
+            return min_samples
+        above = np.flatnonzero(energy_samples > peak * np.finfo(np.float64).eps)
+        if len(above) == 0:
+            return min_samples
+        return max(int(above[-1]) + 1, min_samples)
+
+    noise_power = max(float(np.mean(noise_region)), 1e-30)
     threshold = noise_power * 10.0  # 10 dB above noise floor
 
     # Smooth energy with a 10 ms window to reduce sample-level jitter
@@ -422,14 +457,29 @@ def _shared_truncation_per_band(
 
     Why this exists
     ---------------
-    `_lundeby_truncate` is noise-floor dependent, and the noise floor IS this
-    study's independent variable (ray budget). Truncating each leg at its own index
-    integrates the legs over DIFFERENT limits, manufacturing a metric difference
-    with no acoustic cause: with identical decay and only the floor scaled by
-    sqrt(40) (the 5,000:200,000 ray ratio), the noisier leg read T30 12-16 % short
-    at a -50 dB floor and ~51 % short at -30 dB — 3-10x the project's own declared
-    T30 JND (`d0b_t30_jnd_frac` = 0.05). All legs are the same room, so ISO-3382
-    band metrics are only comparable over a common integration limit.
+    Each leg's own truncation index is a function of the ray budget, so truncating
+    legs at their own indices integrates them over DIFFERENT limits and manufactures
+    a metric difference with no acoustic cause. All legs are the same room, so
+    ISO-3382 band metrics are only comparable over a common integration limit.
+
+    The index depends on the budget by TWO routes, and only the second is live here:
+
+    * On a record carrying a real noise floor, that floor is this study's
+      independent variable. Measured with identical decay and only the floor scaled
+      by sqrt(40) (the 5,000:200,000 ray ratio), the noisier leg read T30 12-16 %
+      short at a -50 dB floor and ~51 % short at -30 dB — 3-10x the project's own
+      declared T30 JND (`d0b_t30_jnd_frac` = 0.05).
+    * On a gsound record there is no such floor: the record is zero-padded from its
+      native length, so `_lundeby_truncate` takes its silent-tail branch and the
+      index lands where the backend stopped writing. **That native length is itself
+      a function of the ray budget** — measured +5.4 % for a 40x change, same room
+      and seed — so the index still moves with the budget, by a different mechanism
+      than the one this machinery was originally written against.
+
+    Sharing the window removes the difference from the PAIRED comparison either way.
+    What it does not remove is that a reported ABSOLUTE is a function of the low
+    leg's budget; that is the open residual, and it needs extrapolated-tail
+    compensation rather than a shared window.
 
     The index is the MINIMUM over the reference legs, so no leg is ever integrated
     into its own noise floor. Where the shared window is too short to support a
