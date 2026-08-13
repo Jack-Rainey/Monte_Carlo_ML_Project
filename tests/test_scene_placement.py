@@ -401,7 +401,7 @@ class TestPropagationDelay:
                 source_pos=(1.0, 1.0, 1.5),
                 receiver_pos=(1.0 + distance, 1.0, 1.5),
             )
-            onset = _find_onset(sim.render(scene, 5000).ir[0], cfg.metric_onset_rel_db)
+            onset, _ = _find_onset(sim.render(scene, 5000).ir[0], cfg.metric_onset_rel_db)
             expected = round(distance / c * 48000)
             assert abs(onset - expected) <= 1, (
                 f"d={distance} m: onset {onset} vs expected {expected} at c={c} m/s"

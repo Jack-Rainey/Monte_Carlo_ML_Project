@@ -185,6 +185,7 @@ def _diagnostics_fingerprint(config: Config) -> dict:
         "d0b_min_scored_frac": config.d0b_min_scored_frac,
         "iso_eval_freqs": list(config.iso_eval_freqs),
         "metric_onset_rel_db": config.metric_onset_rel_db,
+        "metric_onset_tolerance_ms": config.metric_onset_tolerance_ms,
         "metric_band_resolvability_margin": config.metric_band_resolvability_margin,
         "metric_edt_variance_limited_s": config.metric_edt_variance_limited_s,
         "metric_min_decay_range_db": dict(config.metric_min_decay_range_db),
@@ -264,6 +265,7 @@ def _eval_fingerprint(config: Config) -> dict:
     return {
         "iso_eval_freqs": list(config.iso_eval_freqs),
         "metric_onset_rel_db": config.metric_onset_rel_db,
+        "metric_onset_tolerance_ms": config.metric_onset_tolerance_ms,
         "metric_band_resolvability_margin": config.metric_band_resolvability_margin,
         # Governs whether T30/EDT is SCORED AT ALL (AC-176), so it decides a
         # reported number and its caveat counts. In the fingerprint from the

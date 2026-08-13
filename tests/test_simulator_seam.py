@@ -459,7 +459,7 @@ class TestPlacementAxisIsAcousticallyLive:
 
         for d in (0.5, 2.0, 8.0):
             ir = self._render(d).ir[0]
-            assert int(np.argmax(np.abs(ir))) == _find_onset(ir, -20.0)
+            assert int(np.argmax(np.abs(ir))) == _find_onset(ir, -20.0)[0]
 
     def test_realized_drr_matches_the_published_closed_form(self) -> None:
         """SCAFFOLD SELF-CONSISTENCY, not metric validation — see the class
@@ -471,7 +471,7 @@ class TestPlacementAxisIsAcousticallyLive:
 
         for d in (0.5, 1.0, 2.0, 4.0, 8.0):
             ir = self._render(d).ir[0]
-            onset = _find_onset(ir, -20.0)
+            onset, _ = _find_onset(ir, -20.0)
             direct = float(ir[onset]) ** 2
             reverberant = float(np.sum(ir[onset + 1:].astype(np.float64) ** 2))
             realized = 10.0 * np.log10(direct / reverberant)

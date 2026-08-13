@@ -863,6 +863,9 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         "report_format": "markdown",
         "iso_eval_freqs": [500, 1000, 2000],
         "metric_onset_rel_db": -25.0,
+        # AC-181: decides where t=0 is, and t=0 sets the C50 split, the EDT anchor
+        # and the Schroeder start together. Probed, not exempted.
+        "metric_onset_tolerance_ms": 4.0,
         "metric_band_resolvability_margin": 0.07,
         # AC-176: governs whether T30/EDT is scored at all, so a change to it
         # must invalidate eval. Probed, not exempted.

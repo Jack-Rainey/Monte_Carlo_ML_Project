@@ -20,6 +20,32 @@ from .spatial import compute_spatial_metrics
 from .perceptual import compute_perceptual_metrics
 
 
+def _expected_onset_samples(meta_path: Path, sample_rate: int) -> int | None:
+    """`floor(|src - rcv| / c * fs)` for one scene, from its render provenance.
+
+    Both inputs are REQUIRED_PROVENANCE_KEYS the backend fills, so this reads what
+    the renderer actually did rather than recomputing from the scene spec under this
+    study's own speed of sound — gsound compiles 344.0 m/s and `amcd.acoustics`
+    declares 343.0, a difference that is small (0.09 ms over 10 m) but is exactly the
+    kind of "described vs rendered" divergence AC-24 exists about.
+
+    Returns None when the record does not carry them, which leaves `_find_onset` on
+    its pre-AC-181 detector-only path rather than fabricating a position: a run whose
+    renders predate these keys gets the old behaviour, not a wrong t=0.
+    """
+    if not meta_path.exists():
+        return None
+    with open(meta_path) as f:
+        meta = json.load(f)
+    # Either leg carries them and both describe the same geometry; `high` is the
+    # reference leg, so it is the one asked.
+    leg = meta.get("high", {})
+    distance_m, speed = leg.get("distance_m"), leg.get("speed_of_sound_m_s")
+    if distance_m is None or not speed:
+        return None
+    return int(float(distance_m) / float(speed) * sample_rate)
+
+
 def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     preprocessed_dir = run_dir / "preprocessed"
     predictions_dir = run_dir / "predictions"
@@ -104,6 +130,16 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         high_ir_path = renders_dir / scene_id / "high.npy"
         low_ir_path = carrier_dir / f"{scene_id}.npy"
 
+        # WHERE GEOMETRY SAYS THE DIRECT ARRIVAL IS (AC-181). Read from the RENDER's
+        # own meta rather than recomputed from the scene spec: `distance_m` and
+        # `speed_of_sound_m_s` are both required provenance keys, and the speed is
+        # the one the BACKEND used (gsound compiles 344.0 while this study's closed
+        # forms use 343.0), so the render record is the only place the two are
+        # guaranteed to describe the same propagation.
+        expected_onset = _expected_onset_samples(
+            renders_dir / scene_id / "meta.json", config.sample_rate
+        )
+
         if decoded_ir_path.exists() and high_ir_path.exists() and low_ir_path.exists():
             decoded_ir = np.load(decoded_ir_path)          # (C, T)
             high_ref_ir = np.load(high_ir_path)            # (C, T)
@@ -118,6 +154,10 @@ def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
                 band_resolvability_margin=config.metric_band_resolvability_margin,
                 min_decay_range_db=config.metric_min_decay_range_db,
                 octave_filter_order=config.metric_octave_filter.order,
+                expected_onset_samples=expected_onset,
+                onset_tolerance_samples=int(round(
+                    config.metric_onset_tolerance_ms * 1e-3 * config.sample_rate
+                )),
             )
             all_metrics.update(room_triples)
             nan_reasons.update(room_reasons)

@@ -252,9 +252,14 @@ def _butter_octave_filter(
     return sosfiltfilt(sos, padded, padtype="constant").astype(np.float32), guard
 
 
-def _find_onset(ir_w: np.ndarray, rel_db: float) -> int:
-    """Index of the direct-sound arrival: the first sample whose energy rises above
-    `rel_db` dB (negative) below the peak energy.
+def _find_onset(
+    ir_w: np.ndarray,
+    rel_db: float,
+    *,
+    expected_sample: int | None = None,
+    tolerance_samples: int = 0,
+) -> tuple[int, str | None]:
+    """(Index of the direct-sound arrival, why it is not where the detector said).
 
     ISO 3382 integration starts at the direct sound. Real geometric-acoustic renders
     carry a propagation delay (dist/c) of leading near-silence before the direct
@@ -262,18 +267,81 @@ def _find_onset(ir_w: np.ndarray, rel_db: float) -> int:
     start. Detected on the broadband W channel (propagation delay is frequency-
     independent). Returns 0 for a degenerate/zero IR or if nothing crosses (AC-02).
 
-    ASSUMPTION (AC-07): the threshold is relative to the GLOBAL peak, so the direct
-    sound must be the loudest arrival — true for normal IRs (the direct path is
-    shortest / least attenuated). A pathological IR whose direct sound sits > |rel_db|
-    below a later reflection would land onset on the reflection; revisit if real
-    renders exhibit occluded-direct geometries."""
+    THE DETECTOR'S ASSUMPTION IS THAT THE DIRECT SOUND IS LOUDEST, AND IT FAILS
+    (AC-07, now measured — AC-181). The threshold is `rel_db` below the GLOBAL peak,
+    so the direct arrival has to be the largest sample. Under a noise carrier it is
+    not guaranteed to be: upstream synthesizes as
+    `result[c, t] = normalized_sh[c] * carrier[t]` (binding.cpp:423), so the direct
+    arrival's REALIZED amplitude is its weight times a standard-normal draw at its
+    own bin, and a small draw puts it under the threshold its own peak set.
+
+    MEASURED over the late-field shape, 2000 trials per cell at `rel_db` = -20:
+
+        DRR      miss rate     worst error, gapless    worst error, 5 ms early gap
+        +20 dB      0.1 %            0.021 ms                   5.000 ms
+        +10 dB      0.2 %            0.042 ms                   5.021 ms
+          0 dB      0.7 %            0.104 ms                   5.042 ms
+         -5 dB      1.2 %            0.062 ms                   5.021 ms
+
+    The RATE is small; the CONSEQUENCE is not, and the two columns are why. Under the
+    scaffold's gapless late field — its diffuse tail begins AT the direct arrival, so
+    there is no reflection structure to land on (AC-43) — a miss costs a tenth of a
+    millisecond and nothing downstream can see it. Under a real render there IS an
+    early-reflection gap, and a miss lands on the far side of it: the whole mixing
+    time, i.e. exactly on the first strong reflection. That is 10 % of the C50 50 ms
+    window, it moves the EDT anchor, and it moves the Schroeder start. base.yaml's
+    placement support admits d >= r_c, i.e. DRR <= 0 dB, which is the 0.7-1.2 % band.
+
+    SO GEOMETRY ADJUDICATES. `expected_sample` is `floor(|src - rcv| / c * fs)` from
+    the scene and the backend's own declared speed — the direct arrival's position is
+    not an estimate, it is known. The detector still places it, within
+    `tolerance_samples`, because it is the thing that knows about filter smearing and
+    sub-sample timing; it is only overruled when it lands outside that window, and
+    then the reason is returned rather than swallowed.
+
+    Passing `expected_sample=None` keeps the pre-AC-181 behaviour and returns no
+    reason. That is for the standalone probes and known-answer tests, which
+    synthesize an IR with no geometry behind it — never for the reported path.
+
+    ONE CASE THIS DOES NOT COVER: an OCCLUDED direct path, where geometry says the
+    arrival is at `expected_sample` and no sound reaches there at all. The roadmap's
+    non-shoebox families (paper §6) can produce it, and a scene would have to declare
+    the occlusion for this to know. Today every declared family is a convex box with
+    an unobstructed line of sight, so `expected_sample` is exact.
+    """
     energy = ir_w.astype(np.float64) ** 2
     peak = float(energy.max()) if energy.size else 0.0
     if peak <= 0.0:
-        return 0
+        return 0, None
     threshold = peak * 10.0 ** (rel_db / 10.0)
-    above = np.where(energy >= threshold)[0]
-    return int(above[0]) if above.size else 0
+    above = np.flatnonzero(energy >= threshold)
+    detected = int(above[0]) if above.size else 0
+    if expected_sample is None:
+        return detected, None
+
+    expected = int(np.clip(expected_sample, 0, max(len(energy) - 1, 0)))
+    if abs(detected - expected) <= tolerance_samples:
+        return detected, None
+
+    # The detector disagrees with geometry by more than the tolerance. Re-search
+    # INSIDE the window rather than jumping straight to `expected`: the arrival is
+    # usually still there and above threshold, just not the first sample in the
+    # whole record that is (a louder later reflection having raised the bar is the
+    # AC-181 mechanism itself).
+    lo = max(expected - tolerance_samples, 0)
+    hi = min(expected + tolerance_samples + 1, len(energy))
+    local = np.flatnonzero(energy[lo:hi] >= threshold)
+    chosen = lo + int(local[0]) if local.size else expected
+    where = "within the window" if local.size else "nowhere in the window"
+    return chosen, (
+        f"onset detector landed at sample {detected} but geometry "
+        f"puts the direct arrival at {expected}, a disagreement of "
+        f"{abs(detected - expected)} samples against a {tolerance_samples}-sample "
+        f"tolerance. The threshold is {rel_db:g} dB below the GLOBAL peak, so a "
+        f"direct arrival whose carrier draw is small falls under a bar its own "
+        f"peak set, and t=0 lands on a reflection (AC-181). Using sample {chosen} "
+        f"instead — the first crossing {where}."
+    )
 
 
 def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int, order: int) -> np.ndarray:
@@ -472,6 +540,8 @@ def _shared_truncation_per_band(
     iso_eval_freqs: list[float],
     onset_rel_db: float,
     octave_filter_order: int,
+    expected_onset_samples: int | None = None,
+    onset_tolerance_samples: int = 0,
 ) -> list[tuple[int, str]]:
     """Per eval band, the truncation index SHARED by every leg of a paired
     comparison, plus the name of the leg that set it (AC-17).
@@ -521,7 +591,12 @@ def _shared_truncation_per_band(
             "an empty leg set would leave the integration limit undefined."
         )
     aligned = {
-        leg: ir[_find_onset(ir, onset_rel_db):] for leg, ir in reference_legs.items()
+        leg: ir[_find_onset(
+            ir, onset_rel_db,
+            expected_sample=expected_onset_samples,
+            tolerance_samples=onset_tolerance_samples,
+        )[0]:]
+        for leg, ir in reference_legs.items()
     }
     out: list[tuple[int, str]] = []
     for fc in iso_eval_freqs:
@@ -788,6 +863,13 @@ def channel_band_avg_metrics(
     band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-26/AC-27)
     min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db (ISO 3382-1 SNR, AC-176)
     octave_filter_order: int,  # config.metric_octave_filter.order (§3, F-143)
+    #: `floor(|src - rcv| / c * fs)` — where GEOMETRY says the direct arrival is
+    #: (AC-181). None = no geometry available (standalone probes), which keeps the
+    #: pre-AC-181 detector-only behaviour.
+    expected_onset_samples: int | None = None,
+    #: How far the energy detector may disagree with it before geometry adjudicates
+    #: (config.metric_onset_tolerance_ms, converted to samples).
+    onset_tolerance_samples: int = 0,
     trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> tuple[dict[str, float], dict[str, str]]:
     """Onset-align a W-channel IR to its direct arrival, then average ISO-3382 band
@@ -827,6 +909,8 @@ def channel_band_avg_metrics(
         band_resolvability_margin=band_resolvability_margin,
         min_decay_range_db=min_decay_range_db,
         octave_filter_order=octave_filter_order,
+        expected_onset_samples=expected_onset_samples,
+        onset_tolerance_samples=onset_tolerance_samples,
         trunc_idx_per_band=trunc_idx_per_band,
     )
     # Apply the floor here, so this unit's contract is exactly what it always was.
@@ -860,6 +944,13 @@ def channel_per_band_metrics(
     band_resolvability_margin: float,  # config.metric_band_resolvability_margin (§3, AC-26/AC-27)
     min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db (ISO 3382-1 SNR, AC-176)
     octave_filter_order: int,  # config.metric_octave_filter.order (§3, F-143)
+    #: `floor(|src - rcv| / c * fs)` — where GEOMETRY says the direct arrival is
+    #: (AC-181). None = no geometry available (standalone probes), which keeps the
+    #: pre-AC-181 detector-only behaviour.
+    expected_onset_samples: int | None = None,
+    #: How far the energy detector may disagree with it before geometry adjudicates
+    #: (config.metric_onset_tolerance_ms, converted to samples).
+    onset_tolerance_samples: int = 0,
     trunc_idx_per_band: list[tuple[int, str]] | None = None,
 ) -> list[tuple[dict[str, float], dict[str, str], dict[str, str]]]:
     """Onset-align a W-channel IR (AC-02), then compute per-eval-band ISO-3382
@@ -879,8 +970,18 @@ def channel_per_band_metrics(
             f"{len(iso_eval_freqs)} eval bands — the shared integration window must be "
             f"declared per band."
         )
-    onset = _find_onset(ir_w, onset_rel_db)  # align t=0 to the direct arrival
-    ir_w = ir_w[onset:]
+    # Align t=0 to the direct arrival, adjudicated by geometry where the scene
+    # supplies one (AC-181). The DISCLOSURE half is asked for separately by
+    # `compute_room_acoustic_metrics`, which knows the leg's name and can therefore
+    # attribute the reason; this function returns one triple per BAND and the onset
+    # is a property of the leg, so there is no per-band slot to put it in. Asking
+    # twice is safe rather than an AC-24 divergence: `_find_onset` is a pure
+    # function of its arguments, and both calls pass the same ones.
+    ir_w = ir_w[_find_onset(
+        ir_w, onset_rel_db,
+        expected_sample=expected_onset_samples,
+        tolerance_samples=onset_tolerance_samples,
+    )[0]:]
     return [
         _iso3382_band_metrics(
             ir_w, float(fc), sample_rate,
@@ -905,6 +1006,8 @@ def compute_room_acoustic_metrics(
     band_resolvability_margin: float,  # from config.metric_band_resolvability_margin (§3, AC-26/AC-27)
     min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db (ISO 3382-1 SNR, AC-176)
     octave_filter_order: int,  # from config.metric_octave_filter.order (§3, F-143)
+    expected_onset_samples: int | None = None,  # geometry's direct arrival (AC-181)
+    onset_tolerance_samples: int = 0,           # config.metric_onset_tolerance_ms
 ) -> tuple[
     dict[str, MetricTriple],
     dict[tuple[str, str], str],
@@ -965,12 +1068,27 @@ def compute_room_acoustic_metrics(
     scored row can record it (RD-44), not just the dropped ones.
     """
     physical_legs = ("low", "high")
+    # WHERE t=0 WENT, PER LEG, BEFORE ANY METRIC IS COMPUTED (AC-181). A misplaced
+    # onset moves the C50 50 ms split, the EDT anchor and the Schroeder start all at
+    # once, so it is a caveat on every metric of that leg rather than on one of them
+    # — which is why it is collected here and attached to all three below, not
+    # returned from the per-band unit.
+    onset_reasons = {
+        leg: _find_onset(
+            ir[0], onset_rel_db,
+            expected_sample=expected_onset_samples,
+            tolerance_samples=onset_tolerance_samples,
+        )[1]
+        for leg, ir in [("pred", pred_ir), ("high", high_ref_ir), ("low", low_ref_ir)]
+    }
     shared_trunc = _shared_truncation_per_band(
         {"low": low_ref_ir[0], "high": high_ref_ir[0]},
         sample_rate=sample_rate,
         iso_eval_freqs=iso_eval_freqs,
         onset_rel_db=onset_rel_db,
         octave_filter_order=octave_filter_order,
+        expected_onset_samples=expected_onset_samples,
+        onset_tolerance_samples=onset_tolerance_samples,
     )
     per_leg = {
         leg: channel_per_band_metrics(
@@ -979,6 +1097,8 @@ def compute_room_acoustic_metrics(
             band_resolvability_margin=band_resolvability_margin,
             min_decay_range_db=min_decay_range_db,
             octave_filter_order=octave_filter_order,
+            expected_onset_samples=expected_onset_samples,
+            onset_tolerance_samples=onset_tolerance_samples,
             trunc_idx_per_band=shared_trunc,
         )
         for leg, ir in [("pred", pred_ir), ("high", high_ref_ir), ("low", low_ref_ir)]
@@ -1209,6 +1329,19 @@ def compute_room_acoustic_metrics(
             # TIMES, C50 an early/late energy RATIO in dB.
             unit="dB" if metric == "C50" else "s",
         )
+    # Attach the onset disclosure to every metric of the leg it belongs to. APPEND
+    # for the F-M9 reason the resolvability disclosure does: `evaluator.py`'s drop
+    # sweep forwards exactly one reason per (metric, leg), so assigning would delete
+    # whatever is already there.
+    for leg, reason in onset_reasons.items():
+        if reason is None:
+            continue
+        for metric in ("T30", "EDT", "C50"):
+            prior = nan_reasons.get((metric, leg))
+            nan_reasons[(metric, leg)] = (
+                reason if prior is None else f"{prior} | ALSO: {reason}"
+            )
+
     window = {
         f"{fc:g}": (idx, src)
         for fc, (idx, src) in zip(iso_eval_freqs, shared_trunc)

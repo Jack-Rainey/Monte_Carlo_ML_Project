@@ -389,6 +389,37 @@ iso_eval_freqs: [500, 1000]
 # start-of-response convention (not an arbitrary gate). (RD-05/AC-08 provenance)
 metric_onset_rel_db: -20.0
 
+# How far the energy-threshold onset detector may disagree with GEOMETRY before
+# geometry adjudicates (AC-181). The direct arrival's position is not an estimate:
+# it is |src - rcv| / c, and the render records both. The detector still places it
+# within this window, because it is the thing that knows about filter smearing and
+# sub-sample timing; outside the window it has landed on a reflection and is
+# overruled, with the disagreement written to the drop log.
+#
+# WHY IT IS NEEDED. The threshold is relative to the GLOBAL peak, so the direct
+# arrival must be the loudest sample. Upstream synthesizes every path onto one noise
+# carrier, so the arrival's realized amplitude is its weight times a standard-normal
+# draw at its own bin, and a small draw puts it under a bar its own peak set.
+# Measured over the late-field shape, 2000 trials/cell at -20 dB:
+#
+#     DRR      miss rate    worst error (gapless)   worst error (5 ms early gap)
+#     +20 dB     0.1 %            0.021 ms                  5.000 ms
+#       0 dB     0.7 %            0.104 ms                  5.042 ms
+#      -5 dB     1.2 %            0.062 ms                  5.021 ms
+#
+# The rate is small and the consequence is not. Under the dry_run scaffold the
+# diffuse tail begins AT the direct arrival, so a miss costs a tenth of a
+# millisecond and nothing can see it; under a real render there is an
+# early-reflection gap and a miss lands on the far side of it — the whole mixing
+# time, 10 % of the C50 50 ms window, and the EDT anchor with it. This config's
+# placement support admits d >= r_c, i.e. DRR <= 0 dB, which is the 0.7-1.2 % band.
+#
+# 1.0 ms = 48 samples at 48 kHz. Wide enough for the octave filter's own smearing
+# and for the ~0.09 ms the two declared speeds of sound differ by over 10 m
+# (343.0 vs gsound's 344.0), and far narrower than any mixing time a declared room
+# produces — so it separates "the detector placed it" from "the detector missed it".
+metric_onset_tolerance_ms: 1.0
+
 # ── The octave-band filter the reported metrics are computed through ──────────
 #
 # The ORDER is an experiment parameter, not an implementation detail (F-143). It

@@ -877,6 +877,16 @@ class Config(BaseModel):
     # Direct-arrival onset threshold (dB below peak) for metric integration start (§3)
     metric_onset_rel_db: float
 
+    #: How far the energy-threshold onset detector may disagree with the geometric
+    #: direct delay before geometry adjudicates, in ms (AC-181).
+    #:
+    #: Experiment-governing: it decides where t=0 is, and t=0 sets the C50 50 ms
+    #: split, the EDT anchor and the Schroeder start together. A detector-only onset
+    #: lands on a reflection whenever the direct arrival's carrier draw is small —
+    #: 0.7-1.2 % of scenes at the DRR this config's placement support admits, and
+    #: when it happens the error is the room's whole mixing time.
+    metric_onset_tolerance_ms: float
+
     #: The octave-band filter every reported ISO-3382 metric is computed through:
     #: its ORDER, and the out-of-band rejection that order realizes (F-143/RD-186).
     metric_octave_filter: "MetricOctaveFilter"

@@ -2034,3 +2034,125 @@ class TestTheHeadroomFloorIsPinnedAgainstBandLeakage:
             "1000 Hz octave metric, against the ~-17.4 dB the headroom floor is "
             "derived from. Re-derive _DERIVED_FLOOR_DB before trusting it (AC-105)."
         )
+
+
+class TestGeometryAdjudicatesTheOnset:
+    """AC-181 — `_find_onset` thresholds below the GLOBAL peak, so it assumes the
+    direct sound is the loudest sample, and under a noise carrier it is not.
+
+    Upstream synthesizes every path onto one carrier
+    (`result[c, t] = normalized_sh[c] * carrier[t]`, binding.cpp:423), so the direct
+    arrival's realized amplitude is its weight times a standard-normal draw at its
+    own bin. A small draw puts it under a threshold its own peak set, and t=0 lands
+    on a reflection — moving the C50 50 ms split, the EDT anchor and the Schroeder
+    start together.
+
+    The rate is 0.7-1.2 % at the DRR base.yaml's placement support admits; the
+    ERROR when it happens is the room's whole mixing time. These are known-answer
+    tests over a constructed miss rather than a rate measurement, because the rate
+    is not what makes it a defect.
+    """
+
+    _SR = 48000
+    _REL_DB = -20.0
+    _DELAY = 480          # 10 ms — the geometric direct arrival
+    _REFLECTION = 720     # 15 ms — a 5 ms early-reflection gap after it
+    _TOL = 48             # 1 ms, base.yaml's metric_onset_tolerance_ms
+
+    def _ir_whose_direct_is_quiet(self) -> np.ndarray:
+        """Direct arrival at `_DELAY`, 30 dB BELOW a reflection at `_REFLECTION`.
+
+        Silence between them, which is what a real render's early-reflection gap
+        looks like and what makes a missed onset land far away rather than one
+        sample late.
+        """
+        ir = np.zeros(self._SR // 4, dtype=np.float32)
+        ir[self._DELAY] = 0.03           # -30.5 dB re the reflection
+        ir[self._REFLECTION] = 1.0
+        ir[self._REFLECTION + 1:] = 0.01 * np.random.default_rng(7).standard_normal(
+            len(ir) - self._REFLECTION - 1
+        )
+        return ir
+
+    def test_without_geometry_the_detector_lands_on_the_reflection(self) -> None:
+        """The defect itself, reproduced. -30.5 dB is below the -20 dB threshold,
+        so the direct arrival does not cross a bar the reflection set."""
+        from amcd.evaluation.room_acoustic import _find_onset
+
+        onset, reason = _find_onset(self._ir_whose_direct_is_quiet(), self._REL_DB)
+        assert onset == self._REFLECTION, onset
+        assert reason is None, "no geometry was supplied, so there is nothing to check"
+
+    def test_with_geometry_the_onset_is_the_direct_arrival(self) -> None:
+        from amcd.evaluation.room_acoustic import _find_onset
+
+        onset, reason = _find_onset(
+            self._ir_whose_direct_is_quiet(), self._REL_DB,
+            expected_sample=self._DELAY, tolerance_samples=self._TOL,
+        )
+        assert onset == self._DELAY, (
+            f"onset landed at {onset}, {1000 * (onset - self._DELAY) / self._SR:.2f} ms "
+            f"after the direct arrival — on the reflection (AC-181)"
+        )
+        assert reason is not None and "AC-181" in reason, reason
+
+    def test_a_correctly_detected_onset_is_left_alone_and_says_nothing(self) -> None:
+        """The guard must not fire on the normal case, or every scene would carry a
+        caveat and the disclosure would mean nothing."""
+        from amcd.evaluation.room_acoustic import _find_onset
+
+        ir = np.zeros(self._SR // 4, dtype=np.float32)
+        ir[self._DELAY] = 1.0
+        ir[self._REFLECTION] = 0.3
+        onset, reason = _find_onset(
+            ir, self._REL_DB, expected_sample=self._DELAY, tolerance_samples=self._TOL
+        )
+        assert onset == self._DELAY and reason is None
+
+    def test_the_detector_still_places_it_inside_the_window(self) -> None:
+        """Geometry adjudicates; it does not override. Filter smearing and
+        sub-sample timing move the true crossing by a few samples, and within the
+        tolerance the DETECTOR's answer is kept — `expected` is an integer floor of
+        a real-valued delay, so pinning to it exactly would be its own small error.
+        """
+        from amcd.evaluation.room_acoustic import _find_onset
+
+        ir = np.zeros(self._SR // 4, dtype=np.float32)
+        ir[self._DELAY + 3] = 1.0        # 3 samples inside the 48-sample window
+        onset, reason = _find_onset(
+            ir, self._REL_DB, expected_sample=self._DELAY, tolerance_samples=self._TOL
+        )
+        assert onset == self._DELAY + 3 and reason is None
+
+    def test_the_reason_reaches_every_metric_of_the_leg_it_belongs_to(self) -> None:
+        """A misplaced t=0 moves T30's Schroeder start, EDT's anchor and C50's split
+        at once, so it is a caveat on all three — not on whichever one happens to
+        drop.
+        """
+        from amcd.evaluation.room_acoustic import compute_room_acoustic_metrics
+
+        quiet = self._ir_whose_direct_is_quiet()
+        clean = np.zeros_like(quiet)
+        clean[self._DELAY] = 1.0
+        clean[self._DELAY + 1:] = 0.05 * np.random.default_rng(9).standard_normal(
+            len(clean) - self._DELAY - 1
+        )
+
+        def stack(w):
+            return np.stack([w] + [np.zeros_like(w)] * 15)
+
+        _triples, reasons, _window, _acct = compute_room_acoustic_metrics(
+            stack(quiet), stack(clean), stack(clean),
+            sample_rate=self._SR, iso_eval_freqs=_ISO, onset_rel_db=self._REL_DB,
+            band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND,
+            octave_filter_order=_ORDER,
+            expected_onset_samples=self._DELAY, onset_tolerance_samples=self._TOL,
+        )
+        for metric in ("T30", "EDT", "C50"):
+            assert "AC-181" in reasons.get((metric, "pred"), ""), (
+                f"{metric} carries no onset caveat for the leg whose t=0 moved: "
+                f"{reasons.get((metric, 'pred'))!r}"
+            )
+            assert "AC-181" not in reasons.get((metric, "high"), ""), (
+                f"{metric} caveats the high leg, whose onset was detected correctly"
+            )
