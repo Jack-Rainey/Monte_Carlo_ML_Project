@@ -284,6 +284,79 @@ def _band_intersected_pair(
     return oracle_vals, ref_vals, reasons
 
 
+def _d0b_level_sweep(
+    *, rep, high_db, carrier, high_ref_ir, config, iso_eval_freqs, gains_db,
+) -> dict[str, dict]:
+    """AC-37 (c): the oracle's T30 error as a function of the scene's ABSOLUTE LEVEL.
+
+    `min_db` is an absolute floor on the encoded band energy, not a level below the
+    scene's own peak, and `decode` rescales the carrier's band-frame power to
+    `10**(env/10)`. So wherever true power sits below the floor, the decode BOOSTS
+    the carrier up to it and injects a non-decaying energy floor into the prediction
+    — inside the shared Schroeder window the ISO metrics are integrated over. Quiet
+    scenes are the ones at risk, and how quiet is a property of the render's level
+    convention rather than of the model.
+
+    `encode`'s headroom guard refuses a scene that would breach the JND (AC-37 (a)),
+    and the known-answer test pins where that boundary is. This is the third half the
+    user asked for: the SHIPPED artifact says how much margin the real dataset has,
+    per split, rather than the margin existing only in a test.
+
+    NO RE-RENDER, AND THE ARITHMETIC IS EXACT. Scaling a waveform by `g` scales band
+    ENERGY by `g**2`, so the encoded dB envelope shifts by exactly the gain in dB —
+    the sweep re-clamps the shifted envelope at `min_db` and decodes that. The
+    carrier is not scaled because `decode` rescales its band power to the envelope's
+    target regardless, and the reference T30 is not recomputed because the ISO
+    estimator is gain-invariant by construction (the Lundeby limit is taken relative
+    to the record's own peak).
+
+    Returns {gain_db: {t30_rel_error, headroom_db, breaches_jnd}} for one scene.
+    """
+    import torch
+
+    out: dict[str, dict] = {}
+    ref_t30 = channel_band_avg_metrics(
+        high_ref_ir[0], sample_rate=config.sample_rate,
+        iso_eval_freqs=iso_eval_freqs, onset_rel_db=config.metric_onset_rel_db,
+        band_resolvability_margin=config.metric_band_resolvability_margin,
+        min_decay_range_db=config.metric_min_decay_range_db,
+        octave_filter_order=config.metric_octave_filter.order,
+    )[0]["T30"]
+    for gain_db in gains_db:
+        shifted = torch.clamp(high_db + float(gain_db), min=rep.min_db)
+        # The guard's own operand, so the number reported here is the number
+        # `encode` would have judged (AC-69: the wrong reduction next to the right
+        # one is how the definition drifts).
+        peak = torch.amax(shifted, dim=2) - rep.min_db
+        headroom = float(peak[:, rep.headroom_band_indices].min())
+        oracle_ir = rep.decode(shifted, carrier)
+        shared = _shared_truncation_per_band(
+            {"reference": high_ref_ir[0], "oracle": oracle_ir[0]},
+            sample_rate=config.sample_rate, iso_eval_freqs=iso_eval_freqs,
+            onset_rel_db=config.metric_onset_rel_db,
+            octave_filter_order=config.metric_octave_filter.order,
+        )
+        oracle_m, ref_m, _reasons = _band_intersected_pair(
+            oracle_ir[0], high_ref_ir[0], config=config,
+            iso_eval_freqs=iso_eval_freqs, shared_trunc=shared,
+        )
+        o_t30, r_t30 = oracle_m["T30"], ref_m["T30"]
+        rel = (
+            abs(o_t30 - r_t30) / r_t30
+            if not (np.isnan(o_t30) or np.isnan(r_t30) or r_t30 <= 0.0)
+            else float("nan")
+        )
+        out[f"{gain_db:g}"] = {
+            "t30_rel_error": rel,
+            "headroom_db": headroom,
+            # NaN is not a pass. A gain whose oracle could not be scored says so,
+            # rather than counting toward "no breach".
+            "breaches_jnd": bool(rel > config.d0b_t30_jnd_frac) if rel == rel else None,
+        }
+    out["reference_t30_s"] = {"value": float(ref_t30)}
+    return out
+
+
 def _run_d0b(
     config: Config,
     preprocessed_dir: Path,
@@ -409,6 +482,16 @@ def _run_d0b(
                 "oracle": oracle_metrics,
                 "reference": ref_metrics,
                 "residual": residuals,
+                # AC-37 (c): how much absolute-level margin this scene has before
+                # `min_db` starts injecting an energy floor into the decode. The
+                # residual above is measured at the scene's NATIVE level, where the
+                # defect is inert; this is what says how far from inert it is.
+                "level_sweep": _d0b_level_sweep(
+                    rep=rep, high_db=high_db, carrier=carrier,
+                    high_ref_ir=high_ref_ir, config=config,
+                    iso_eval_freqs=iso_eval_freqs,
+                    gains_db=config.d0b_level_sweep_db,
+                ),
                 # The window both legs were integrated over, and which leg set it
                 # (AC-17/RD-44) — a residual is only interpretable alongside it.
                 "iso_integration_window": {

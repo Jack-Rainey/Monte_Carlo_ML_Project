@@ -362,3 +362,72 @@ class TestD0bEnumeratesDeclaredSplits:
         d0b = json.loads((tmp_path / "diagnostics" / "d0b_oracle.json").read_text())
         declared = [s for s in cfg.splits if s in d0b["per_split"]]
         assert list(d0b["per_split"])[: len(declared)] == declared
+
+
+class TestD0bDisclosesTheAbsoluteLevelMargin:
+    """AC-37 (c) — how much level margin the dataset has before `min_db` starts
+    injecting an energy floor into the decode.
+
+    The residual D0b reports is measured at each scene's NATIVE level, where the
+    defect is inert (worst |dT30| 0.25 % over every declared corner). That inertness
+    is a property of THIS render's level convention, not of the pipeline, so the
+    artifact has to say how far from inert the dataset actually is — a dataset
+    clearing `encode`'s guard by 2 dB and one clearing it by 40 dB are different
+    datasets and the residual alone cannot tell them apart.
+    """
+
+    def _sweep(self, tmp_path: Path, canonical: bool = False) -> dict:
+        cfg = Config.load(*CANONICAL_DRY_RUN) if canonical else tiny_config()
+        _run_to_diagnostics(cfg, tmp_path, QUIET)
+        return _d0b(tmp_path)["per_scene"]
+
+    def test_every_scored_scene_carries_a_sweep(self, tmp_path: Path) -> None:
+        per_scene = self._sweep(tmp_path)
+        assert per_scene, "D0b scored no scene, so this proves nothing"
+        for sid, rec in per_scene.items():
+            assert "level_sweep" in rec, f"{sid} has no level sweep"
+            assert "reference_t30_s" in rec["level_sweep"], sid
+
+    def test_the_error_grows_as_the_headroom_falls(self, tmp_path: Path) -> None:
+        """The mechanism, asserted rather than assumed: the injected floor is what
+        the sweep is measuring, so lowering a scene onto `min_db` must make the
+        definitionally-perfect oracle worse."""
+        # The CANONICAL config, not tiny: tiny's records are too short for the ISO
+        # SNR bound to admit a T30 at all, so every cell is NaN and the assertion
+        # below would compare nothing against nothing.
+        per_scene = self._sweep(tmp_path, canonical=True)
+        rec = next(
+            r["level_sweep"] for r in per_scene.values()
+            if all(
+                v["t30_rel_error"] == v["t30_rel_error"]
+                for g, v in r["level_sweep"].items() if g != "reference_t30_s"
+            )
+        )
+        cells = sorted(
+            ((float(g), v) for g, v in rec.items() if g != "reference_t30_s"),
+            reverse=True,
+        )
+        headrooms = [v["headroom_db"] for _g, v in cells]
+        assert headrooms == sorted(headrooms, reverse=True), (
+            f"headroom does not fall with the gain: {headrooms}"
+        )
+        assert cells[-1][1]["t30_rel_error"] > cells[0][1]["t30_rel_error"], (
+            f"the quietest cell is no worse than the loudest, so this sweep is not "
+            f"measuring the min_db floor at all: {cells}"
+        )
+
+    def test_a_gain_that_cannot_be_scored_is_not_counted_as_passing(
+        self, tmp_path: Path
+    ) -> None:
+        """NaN is not a pass. A cell whose oracle could not be scored says so —
+        otherwise an unmeasurable level would read as a cleared one."""
+        per_scene = self._sweep(tmp_path)
+        for sid, rec in per_scene.items():
+            for gain, cell in rec["level_sweep"].items():
+                if gain == "reference_t30_s":
+                    continue
+                err = cell["t30_rel_error"]
+                if err != err:                       # NaN
+                    assert cell["breaches_jnd"] is None, (sid, gain, cell)
+                else:
+                    assert cell["breaches_jnd"] in (True, False), (sid, gain, cell)

@@ -310,6 +310,31 @@ d0b_c50_jnd_db: 1.0         # 1 dB absolute
 # per-metric scored-vs-attempted counts, which are reported either way.
 d0b_min_scored_frac: 0.8
 
+# ── D0b absolute-level sweep (AC-37) ─────────────────────────────────────────
+# `min_db` is an ABSOLUTE floor on encoded band energy, and `decode` rescales the
+# carrier's band power to `10**(env/10)` — so wherever true power sits below the
+# floor the decode BOOSTS the carrier up to it, injecting a non-decaying energy
+# floor into the prediction inside the shared Schroeder window. Quiet scenes are
+# the ones at risk, and how quiet is a property of the render's level convention,
+# not of the model.
+#
+# `encode` REFUSES a scene that would breach the T30 JND (min_db_headroom_db in
+# configs/representations/spectrogram.yaml), so this sweep does not gate anything.
+# It DISCLOSES the margin: for each scene it shifts the encoded envelope by each
+# gain below, re-clamps at `min_db`, decodes and measures the oracle's T30 error.
+# A dataset whose scenes clear the guard by 2 dB and one that clears it by 40 dB
+# are very different datasets, and only this says which one was rendered.
+#
+# Exact without a re-render: scaling a waveform by g scales band ENERGY by g^2, so
+# the dB envelope shifts by exactly the gain, and the reference T30 is
+# gain-invariant by construction.
+#
+# The ladder brackets the measured knee — at this project's own level convention
+# the oracle reads +0.01 % at 0 dB, +1.27 % at -20, +126.8 % at -30 and +1029.7 %
+# at -40 — so it is dense where the answer changes and stops where `encode` would
+# have refused anyway.
+d0b_level_sweep_db: [0.0, -10.0, -20.0, -25.0, -30.0]
+
 # ── Ray-budget convergence tolerance (RD-17, RD-263) ──────────────────────────
 # The high leg (`high_ray_budget`) is treated as a CONVERGED REFERENCE by every
 # paired-improvement metric, by D0a's headroom and by D0b's carrier test, and until

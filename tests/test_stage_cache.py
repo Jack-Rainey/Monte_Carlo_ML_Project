@@ -885,6 +885,9 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         "d0b_edt_jnd_frac": 0.07,
         "d0b_c50_jnd_db": 1.5,
         "d0b_min_scored_frac": 0.5,
+        # AC-37: the sweep IS part of what d0b_oracle.json publishes, so a change
+        # to the ladder changes the diagnostics artifact.
+        "d0b_level_sweep_db": [0.0, -15.0],
         # AC-187: the convergence verdict is RENDERED in the report (per-row caveat,
         # footer, CSV column), so a cached report must not serve a stale one. It was
         # exempt only while nothing read it.

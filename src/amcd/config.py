@@ -864,6 +864,13 @@ class Config(BaseModel):
     #: and the survivors are not a random subset.
     d0b_min_scored_frac: float
 
+    #: Gains (dB) the D0b probe re-encodes each scene at, to disclose how much
+    #: ABSOLUTE-LEVEL margin the dataset has before `min_db` injects an energy floor
+    #: into the decode (AC-37). Not a gate — `encode` already refuses a breaching
+    #: scene — but a dataset clearing the guard by 2 dB and one clearing it by 40 dB
+    #: are different datasets, and nothing else says which was rendered.
+    d0b_level_sweep_db: list[float]
+
     #: What "the high leg is a CONVERGED REFERENCE" means, declared rather than
     #: eyeballed (RD-17, RD-263). Every paired-improvement metric, D0a's headroom
     #: and D0b's carrier test treat `high_ray_budget` as ground truth, and nothing
