@@ -214,55 +214,35 @@ class TestCodeVersionSeesTheWorkingTree:
     state the guard exists for, since this project's loop is edit → run → review →
     commit and AC-17 was a code-only change to `room_acoustic.py`."""
 
-    def test_editing_metric_code_changes_evals_version(self) -> None:
+    def test_editing_metric_code_changes_evals_version(self, tmp_path) -> None:
         """The reproduction in the row: edit `evaluation/room_acoustic.py`, re-run
         `amcd eval` on the same run_dir, and get `[skip] eval (cached)` with
         `metrics.parquet` served under the new code."""
-        import amcd.provenance as prov
-        from amcd.pipeline import _code_version
+        before, after = _code_versions_after_editing(
+            "amcd/evaluation/room_acoustic.py", ("eval",), tmp_path
+        )
+        assert after["eval"] != before["eval"], (
+            "an uncommitted edit to metric code did not move eval's "
+            "code_version, so a cached metrics.parquet would be served"
+        )
 
-        target = Path(prov.__file__).resolve().parent / "evaluation" / "room_acoustic.py"
-        original = target.read_bytes()
-        before = _code_version("eval")
-        try:
-            target.write_bytes(original + b"\n# F-55 probe\n")
-            assert _code_version("eval") != before, (
-                "an uncommitted edit to metric code did not move eval's "
-                "code_version, so a cached metrics.parquet would be served"
-            )
-        finally:
-            target.write_bytes(original)
-        assert _code_version("eval") == before, "restore did not return the version"
-
-    def test_a_core_module_edit_reaches_every_scope(self) -> None:
+    def test_a_core_module_edit_reaches_every_scope(self, tmp_path) -> None:
         """`config.py` parameterizes every stage, so it is in every scope."""
-        import amcd.provenance as prov
+        stages = tuple(STAGE_CODE_SCOPE)
+        before, after = _code_versions_after_editing(
+            "amcd/config.py", stages, tmp_path
+        )
+        for stage in stages:
+            assert after[stage] != before[stage], stage
 
-        target = Path(prov.__file__).resolve().parent / "config.py"
-        original = target.read_bytes()
-        before = {s: prov.code_version(sc) for s, sc in STAGE_CODE_SCOPE.items()}
-        try:
-            target.write_bytes(original + b"\n# core probe\n")
-            for stage, scope in STAGE_CODE_SCOPE.items():
-                assert prov.code_version(scope) != before[stage], stage
-        finally:
-            target.write_bytes(original)
-
-    def test_an_out_of_scope_edit_does_not_invalidate_a_stage(self) -> None:
+    def test_an_out_of_scope_edit_does_not_invalidate_a_stage(self, tmp_path) -> None:
         """The reason the scope is declared rather than whole-package: a guard that
         refuses a cached stage for visibly irrelevant reasons teaches the operator
         to reach for `--force`, which disables it entirely."""
-        import amcd.provenance as prov
-        from amcd.pipeline import _code_version
-
-        target = Path(prov.__file__).resolve().parent / "reporting" / "tables.py"
-        original = target.read_bytes()
-        before = _code_version("train")
-        try:
-            target.write_bytes(original + b"\n# out-of-scope probe\n")
-            assert _code_version("train") == before
-        finally:
-            target.write_bytes(original)
+        before, after = _code_versions_after_editing(
+            "amcd/reporting/tables.py", ("train",), tmp_path
+        )
+        assert after["train"] == before["train"]
 
     def test_each_stage_declares_the_subpackage_its_own_entry_point_lives_in(
         self,
@@ -500,41 +480,26 @@ class TestTheTableProducingStagesAreCacheProtected:
         ],
     )
     def test_editing_the_code_that_produces_the_artifact_moves_its_version(
-        self, stage: str, module: str
+        self, stage: str, module: str, tmp_path
     ) -> None:
         """The generalisation of the three reproductions: for each newly wired
         stage, an edit to the module that computes its output must move its key."""
-        import amcd.provenance as prov
-        from amcd.pipeline import _code_version
+        before, after = _code_versions_after_editing(
+            f"amcd/{module}", (stage,), tmp_path
+        )
+        assert after[stage] != before[stage], (
+            f"editing {module} did not move {stage}'s code_version, so a "
+            f"cached artifact would be served under the changed code"
+        )
 
-        target = Path(prov.__file__).resolve().parent / module
-        original = target.read_bytes()
-        before = _code_version(stage)
-        try:
-            target.write_bytes(original + b"\n# F-63/F-64 probe\n")
-            assert _code_version(stage) != before, (
-                f"editing {module} did not move {stage}'s code_version, so a "
-                f"cached artifact would be served under the changed code"
-            )
-        finally:
-            target.write_bytes(original)
-        assert _code_version(stage) == before, "restore did not return the version"
-
-    def test_an_encoder_edit_refuses_preprocess_and_not_only_train(self) -> None:
+    def test_an_encoder_edit_refuses_preprocess_and_not_only_train(self, tmp_path) -> None:
         """F-64's sharp edge: the refusal must name the stage whose artifacts are
         actually stale. A message naming `train` sends the operator to `--force`
         train, which rebuilds the wrong thing and exits 0."""
-        import amcd.provenance as prov
-        from amcd.pipeline import _code_version
-
-        target = Path(prov.__file__).resolve().parent / "representations" / "spectrogram.py"
-        original = target.read_bytes()
-        before = _code_version("preprocess")
-        try:
-            target.write_bytes(original + b"\n# encoder probe\n")
-            assert _code_version("preprocess") != before
-        finally:
-            target.write_bytes(original)
+        before, after = _code_versions_after_editing(
+            "amcd/representations/spectrogram.py", ("preprocess",), tmp_path
+        )
+        assert after["preprocess"] != before["preprocess"]
 
 
 class TestTheExpensiveArtifactIsCacheProtected:
@@ -648,6 +613,47 @@ class TestTheDatasetFingerprintsAreHostIndependent:
             _render_fingerprint(Config.load(Path("configs/base.yaml"))),
             sort_keys=True, default=str,
         )
+
+
+
+def _code_versions_after_editing(rel: str, stages, tmp_path) -> tuple[dict, dict]:
+    """`code_version` for `stages` before and after appending a line to `rel`,
+    computed against a COPY of the package in a separate interpreter.
+
+    The obvious way to test "does an edit here invalidate that stage" is to edit
+    the installed source and restore it in a `finally`. These two tests did, and
+    that writes to TRACKED FILES: an interrupt, a crash, or a failing assertion
+    inside the block leaves the working tree dirty with a probe comment in
+    `src/amcd/` — and the next run's `code_version` then measures the leftover
+    (F-217). A test must not be able to change the thing it measures.
+
+    So the package is copied, edited in the copy, and hashed by a subprocess that
+    imports from there. Nothing under `src/` is ever opened for writing.
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    root = tmp_path / "pkg"
+    shutil.copytree(Path("src"), root / "src")
+    shutil.copytree(Path("configs"), root / "configs")
+    probe = root / "probe.py"
+    probe.write_text(
+        f"import sys, json; sys.path.insert(0, {str(root / 'src')!r})\n"
+        "from amcd.pipeline import _code_version\n"
+        f"print(json.dumps({{s: _code_version(s) for s in {list(stages)!r}}}))\n"
+    )
+
+    def versions() -> dict:
+        out = subprocess.run([sys.executable, "probe.py"], cwd=root,
+                             capture_output=True, text=True)
+        assert out.stdout.strip(), out.stderr[-500:]
+        return json.loads(out.stdout)
+
+    before = versions()
+    target = root / "src" / rel
+    target.write_text(target.read_text() + "\n# scope probe\n")
+    return before, versions()
 
 
 class TestDeclaredScopeCoversWhatTheStageImports:
@@ -772,35 +778,23 @@ class TestDeclaredScopeCoversWhatTheStageImports:
         for stage in ("eval", "infer"):
             assert "data" in STAGE_CODE_SCOPE[stage]
 
-    def test_patching_denormalize_moves_eval_and_infer(self) -> None:
-        import amcd.provenance as prov
-        from amcd.pipeline import _code_version
+    def test_patching_denormalize_moves_eval_and_infer(self, tmp_path) -> None:
+        stages = ("eval", "infer", "train")
+        before, after = _code_versions_after_editing(
+            "amcd/data/normalization.py", stages, tmp_path
+        )
+        for stage in stages:
+            assert after[stage] != before[stage], stage
 
-        target = Path(prov.__file__).resolve().parent / "data" / "normalization.py"
-        original = target.read_bytes()
-        before = {s: _code_version(s) for s in ("eval", "infer", "train")}
-        try:
-            target.write_bytes(original + b"\n# F-66 probe\n")
-            for stage in ("eval", "infer", "train"):
-                assert _code_version(stage) != before[stage], stage
-        finally:
-            target.write_bytes(original)
-
-    def test_the_package_init_is_in_every_scope(self) -> None:
+    def test_the_package_init_is_in_every_scope(self, tmp_path) -> None:
         """`amcd/__init__.py` is imported through by every stage and was in no
         scope, so an edit to it invalidated nothing."""
-        import amcd.provenance as prov
-        from amcd.pipeline import _code_version
-
-        target = Path(prov.__file__).resolve().parent / "__init__.py"
-        original = target.read_bytes()
-        before = {s: _code_version(s) for s in STAGE_CODE_SCOPE}
-        try:
-            target.write_bytes(original + b"\n# init probe\n")
-            for stage in STAGE_CODE_SCOPE:
-                assert _code_version(stage) != before[stage], stage
-        finally:
-            target.write_bytes(original)
+        stages = tuple(STAGE_CODE_SCOPE)
+        before, after = _code_versions_after_editing(
+            "amcd/__init__.py", stages, tmp_path
+        )
+        for stage in stages:
+            assert after[stage] != before[stage], stage
 
 
 class TestEveryConfigFieldIsCoveredOrDeclaredExempt:

@@ -1103,9 +1103,14 @@ class TestGsoundProvenanceFill:
 
         Skips when the upstream checkout is absent (the F-93 pattern).
         """
-        source = Path(
-            "/Volumes/T7/Monte_Carlo_Research/v3/external/GSound-SIR"
-            "/ray_generator/src/pygsound/src/Context.cpp"
+        # Derived from the repo root, never hardcoded (F-215): a `/Volumes/...`
+        # literal skips on the project's declared second host and in every lane
+        # worktree — i.e. exactly where band identity could silently differ, so the
+        # test would be absent precisely where it is needed.
+        source = (
+            Path(__file__).resolve().parent.parent
+            / "external" / "GSound-SIR" / "ray_generator" / "src" / "pygsound"
+            / "src" / "Context.cpp"
         )
         if not source.exists():
             pytest.skip(f"pinned upstream checkout absent at {source}")
