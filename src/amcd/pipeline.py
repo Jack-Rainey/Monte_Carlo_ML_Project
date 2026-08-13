@@ -311,8 +311,24 @@ def _report_fingerprint(config: Config) -> dict:
     """
     return {
         "report_format": config.report_format,
+        # THE OPERAND DOMAIN THE UNITS ARE RENDERED FROM (F-162). `report` reads
+        # `preprocessed/meta.json` `value_domain` to decide whether an
+        # operand-domain metric prints as dB^2 or a.u.^2, and declared none of it —
+        # so flipping the domain left a cached report rendering the old unit beside
+        # unchanged numbers. Taken from the REPRESENTATION's own declaration, which
+        # is what preprocess stamps, so this stays a function of the config; the
+        # reporting layer cross-checks the stamp against it and refuses on
+        # disagreement rather than trusting either alone.
+        "value_domain": _representation_value_domain(config),
         "code_version": _code_version("report"),
     }
+
+
+def _representation_value_domain(config: Config) -> str:
+    """The domain the configured representation encodes in, without building it."""
+    from .registry import representation_registry
+
+    return str(representation_registry.get(config.representation.name).value_domain)
 
 
 #: Per stage, the package sources its OUTPUT is a function of — the code half of a

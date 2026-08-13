@@ -1491,6 +1491,8 @@ class TestRenderWorkerContract:
             "specular_depth": 50,
             "sample_rate": 48000,
             "normalize_ir": False,
+            "receipt_name": "amcd_gsound_install.json",
+            "receipt_sha_key": "commit_sha",
             "precise_early_reflections": False,
             "early_reflection_threshold": 0.01,
             "ambisonics_order": 3,

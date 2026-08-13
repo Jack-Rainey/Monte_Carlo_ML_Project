@@ -117,13 +117,35 @@ class TestReportedImprovementsCarryTheirUnit:
 
     def test_an_operand_domain_metric_takes_the_stamped_domains_unit(self) -> None:
         """`energy_mse` is an operand-domain MSE (evaluation/signal.py), so its
-        unit is the representation's — squared — not a fixed string."""
+        unit is the representation's — squared — not a fixed string.
+
+        End-to-end through the DECLARED domain only. The amplitude case is asserted
+        against `_unit_for` below rather than by stamping a domain the configured
+        representation does not declare: since F-162 the report cross-checks the
+        stamp against that declaration and refuses when they disagree, which is
+        the point — a run_dir stamped `amplitude` under a `db` representation is
+        exactly the mislabelling that check exists to catch.
+        """
         db = _render([_summary_row("energy_mse")], value_domain="db")
-        amp = _render([_summary_row("energy_mse")], value_domain="amplitude")
         assert "dB²" in next(l for l in db.splitlines() if l.startswith("energy_mse"))
-        # `a.u.²`, not `amp²` — the amplitude domain is raw samples in arbitrary
-        # units, and `amp` reads as the ampere (AC-125).
-        assert "a.u.²" in next(l for l in amp.splitlines() if l.startswith("energy_mse"))
+
+    def test_each_operand_domain_has_its_own_rendered_unit(self) -> None:
+        """`a.u.²`, not `amp²` — the amplitude domain is raw samples in arbitrary
+        units, and `amp` reads as the ampere (AC-125)."""
+        from amcd.reporting.tables import _unit_for
+
+        token = _PRODUCER_UNITS["energy_mse"]
+        assert _unit_for("energy_mse", token, "db") == "dB²"
+        assert _unit_for("energy_mse", token, "amplitude") == "a.u.²"
+
+    def test_a_stamp_that_contradicts_the_configured_representation_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """F-162: the stamp decides the unit, and it is an artifact of a stage that
+        may have run under a different config. Trusting it alone lets the table
+        label numbers produced in one domain with the unit of another."""
+        with pytest.raises(ValueError, match="value_domain"):
+            _render([_summary_row("energy_mse")], value_domain="amplitude")
 
     def test_a_metric_with_no_declared_unit_is_refused_by_name(self) -> None:
         """The guard against the NEXT metric, not just today's five: a new metric

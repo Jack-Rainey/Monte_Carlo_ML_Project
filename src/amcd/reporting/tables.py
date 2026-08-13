@@ -64,8 +64,16 @@ def _unit_for(metric: str, declared: str, value_domain: str) -> str:
         ) from None
 
 
-def _stamped_value_domain(run_dir: Path) -> str:
-    """The domain preprocess encoded in, from its own stamp."""
+def _stamped_value_domain(run_dir: Path, config=None) -> str:
+    """The domain preprocess encoded in, from its own stamp.
+
+    Cross-checked against the CONFIGURED representation's own declaration when a
+    config is supplied (F-162). The stamp decides whether an operand-domain metric
+    prints as dB^2 or a.u.^2, and it is an artifact of a stage that may have run
+    under a different config — so the two are compared rather than either being
+    trusted alone. `_report_fingerprint` carries the config side, which is what
+    makes a domain change invalidate a cached report at all.
+    """
     meta_path = run_dir / "preprocessed" / "meta.json"
     if not meta_path.exists():
         raise FileNotFoundError(
@@ -75,7 +83,7 @@ def _stamped_value_domain(run_dir: Path) -> str:
     with open(meta_path) as f:
         meta = json.load(f)
     try:
-        return meta["value_domain"]
+        stamped = meta["value_domain"]
     except KeyError:
         # A pre-stamp preprocess run — a real population, and the sibling consumer
         # in evaluation/ already fails loud on it. Say the same thing here rather
@@ -85,6 +93,21 @@ def _stamped_value_domain(run_dir: Path) -> str:
             f"the unit the reported metrics are measured in cannot be established. "
             f"Re-run preprocess."
         ) from None
+
+    if config is not None:
+        from ..registry import representation_registry
+
+        declared = str(representation_registry.get(config.representation.name).value_domain)
+        if stamped != declared:
+            raise ValueError(
+                f"{meta_path} stamps value_domain={stamped!r} but the configured "
+                f"representation {config.representation.name!r} declares "
+                f"{declared!r}. The reported units are rendered from this, so the "
+                f"two disagreeing means the table would label numbers produced in "
+                f"one domain with the unit of another. Re-run preprocess under this "
+                f"config, or point at the run_dir that matches it."
+            )
+    return stamped
 
 
 def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
@@ -102,11 +125,12 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     df = pd.DataFrame(summary)
 
     col_w = {"metric": 22, "n": 8, "pred": 10, "imp": 10, "ci": 22, "mdes": 10,
+             "kind": 16,
              "unit": 6, "improved": 14, "caveat": 18}
 
     # The domain the operand-domain metrics are measured in, read once from
     # preprocess's own stamp rather than per row.
-    value_domain = _stamped_value_domain(run_dir)
+    value_domain = _stamped_value_domain(run_dir, config)
 
     # Resolve the unit for EVERY metric present, up front — not lazily per
     # rendered row (F-163/AC-130). `_metric_row` returns early for an unscored
@@ -173,6 +197,12 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             f"{mdes_str:>{col_w['mdes']}} "
             # AC-48 — the footer line states which columns this labels.
             f"{units[row['metric']]:<{col_w['unit']}} "
+            # F-166: the unit says dB, the KIND says what the dB is measured
+            # FROM. `Imp mean` is pred-low for `maximize` and
+            # &#124;low-high&#124; - &#124;pred-high&#124; for `match_reference`,
+            # and the two share a unit — so without this a reader cannot tell
+            # which reference point a number carries.
+            f"{row.get('kind', '?'):<{col_w['kind']}} "
             f"{improved_str:<{col_w['improved']}} "
             f"{_caveats(row):<{col_w['caveat']}}"
         ).rstrip()
@@ -188,6 +218,7 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         f"{ci_label:<{col_w['ci']}} "
         f"{'MDES':>{col_w['mdes']}} "
         f"{'Unit':<{col_w['unit']}} "
+        f"{'Kind':<{col_w['kind']}} "
         f"{'% Improved':<{col_w['improved']}} "
         f"{'Caveats':<{col_w['caveat']}}"
     ).rstrip()
@@ -260,6 +291,16 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     summary_txt = "\n".join(lines)
 
     (report_dir / "summary.txt").write_text(summary_txt)
+
+    # THE CSV CARRIES THE SAME DISCLOSURE AS THE TEXT TABLE (AC-129). summary.txt
+    # gained a Unit column and this file, written five lines later from the same
+    # rows, shipped 21 unitless columns — so the machine-readable artifact, which is
+    # the one a downstream analysis actually opens, was the one that could not say
+    # whether a number was seconds or decibels. `kind` travels with it for the same
+    # reason (F-166): unit and reference point are different questions and a
+    # dB-valued improvement answers only the first.
+    df = df.copy()
+    df["unit"] = df["metric"].map(units)
     df.to_csv(report_dir / "metrics_table.csv", index=False)
 
     # Supplementary bundle: copy config stamp + versions. Provenance, same gate

@@ -25,17 +25,23 @@ from pathlib import Path
 import numpy as np
 
 
-def _installed_sha():
-    """The upstream commit this env was built from, per its install receipt."""
-    receipt = Path(sysconfig.get_paths()["purelib"]) / "amcd_gsound_install.json"
+def _installed_sha(receipt_name, sha_key):
+    """The upstream commit this env was built from, per its install receipt.
+
+    The receipt's filename and key are PASSED IN rather than repeated here (F-123).
+    This file cannot import `amcd`, so a literal would be a third copy of a name
+    already defined in `gsound_sir.py` and in `scripts/setup_gsound_sir.py` — and
+    the parent already sends a JSON request, so it can send these too.
+    """
+    receipt = Path(sysconfig.get_paths()["purelib"]) / receipt_name
     if not receipt.exists():
         raise SystemExit(
-            "no amcd_gsound_install.json in %s - this render env was not installed "
+            "no %s in %s - this render env was not installed "
             "by scripts/setup_gsound_sir.py, so the upstream commit it contains is "
             "unknown and no render from it would be reproducible. Re-run the "
-            "installer against this interpreter." % receipt.parent
+            "installer against this interpreter." % (receipt_name, receipt.parent)
         )
-    return json.loads(receipt.read_text())["commit_sha"]
+    return json.loads(receipt.read_text())[sha_key]
 
 
 PATH_ARRAYS = ("distances", "intensities", "listener_directions", "source_directions",
@@ -140,7 +146,7 @@ def main(request_path):
 
     # Provenance BEFORE physics: never spend an emulated render on an env whose
     # upstream commit does not match the pin.
-    installed = _installed_sha()
+    installed = _installed_sha(req["receipt_name"], req["receipt_sha_key"])
     if installed != req["commit_sha"]:
         raise SystemExit(
             "installed GSound-SIR commit %s != config-pinned %s. The render env and "

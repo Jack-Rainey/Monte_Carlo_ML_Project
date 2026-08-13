@@ -46,12 +46,11 @@ _N_BANDS = 8
 #: would take a sys.path hack, i.e. an assumption about repo layout inside package
 #: code. Two small constants beat that.
 #:
-#: THE WORKER DOES NOT USE THEM (F-123). `_WORKER_SRC` is a raw string compiled in
-#: a separate interpreter, so it cannot close over module globals and inlines both
-#: literals itself. These two names are therefore the PARENT-side copy only, and
-#: the worker's inlined pair is a third. Interpolating them into `_WORKER_SRC`
-#: would make one source of truth of the two; until that happens, a change here
-#: must be made in the worker string as well.
+#: SENT TO THE WORKER IN ITS REQUEST (F-123). The worker cannot import `amcd`, so
+#: it used to inline both names — a third copy of each. It now reads them from the
+#: JSON request it already receives, leaving `scripts/setup_gsound_sir.py` as the
+#: only other definition, and that one is unavoidable: package code cannot import
+#: `scripts/`, which has no `__init__.py` and is not installed.
 _RECEIPT_NAME = "amcd_gsound_install.json"
 _RECEIPT_SHA_KEY = "commit_sha"
 
@@ -683,6 +682,10 @@ class GsoundSirSimulator:
             "diffuse_depth": int(self.params["diffuse_depth"]),
             "specular_depth": int(self.params["specular_depth"]),
             "sample_rate": int(self.sample_rate),
+            # Sent rather than inlined in the worker (F-123): it cannot import
+            # amcd, so a literal there would be a third copy of this name.
+            "receipt_name": _RECEIPT_NAME,
+            "receipt_sha_key": _RECEIPT_SHA_KEY,
             "normalize_ir": bool(self.params["normalize_ir"]),
             "precise_early_reflections": bool(self.params["precise_early_reflections"]),
             "early_reflection_threshold": float(self.params["early_reflection_threshold"]),
