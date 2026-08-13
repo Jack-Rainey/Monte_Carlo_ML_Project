@@ -3,7 +3,11 @@
 The `gsound_sir` render backend needs an **x86_64** interpreter: GSound's ray tracer is
 x86-only. Every other stage (training, evaluation, stats) runs native on whatever the host
 is. That boundary lives entirely behind the simulator seam — the `amcd` package contains no
-platform branches, and the render interpreter is selected at runtime with `--sim-python`.
+platform branches, and the render interpreter is named by the simulator config key
+`render_python` (`configs/simulators/gsound_sir.yaml`). There is no CLI flag for it: it is
+host-scoped, so it is supplied by a host-local config layer that is not committed, and is
+redacted from canonical provenance. `null` means "use `sys.executable`", which is correct
+on a native x86_64 host.
 
 Setup is two steps:
 
@@ -13,9 +17,7 @@ Setup is two steps:
    `scripts/setup_gsound_sir.py`.
 
 > This document covers step 1 and the invocation of step 2. The narrative of *why* the
-> build needs its two workarounds, and how `--sim-python` threads through the pipeline, is
-> expanded when the backend itself lands (gate plan Step 7). The workarounds themselves are
-> already encoded in the installer's module docstring.
+> build needs its two workarounds is encoded in the installer's module docstring.
 
 ## 1. Create the render environment
 
@@ -200,8 +202,21 @@ scene.getPathData(..., energy_percentage=100.0, max_rays=0, use_gpu=False)
 ```
 
 The per-pair dict is `result["path_data"][i]`; `result[0]` raises `KeyError: 0`.
-Path retention is native upstream, so `path_retention {mode: all|top_percent|top_k,
-value}` maps directly onto `energy_percentage` / `max_rays` with no custom trimming.
+
+Path retention is native upstream in the API sense — `path_retention {mode:
+all|top_percent|top_k, value}` names the same quantities as `energy_percentage` /
+`max_rays` — but this backend does **not** use it. Upstream applies retention
+inside `getPathData`, which is the same call that supplies the paths the IR is
+synthesized from, so filtering there would build the IR from the retained subset
+and confound the ray-budget axis under study. Measured when that happened: the IR
+was synthesized from 5,000 of 501,492 paths (43.1 % of path energy) and the native
+record came back 9,502 samples instead of 46,333.
+
+So the worker calls `getPathData(energy_percentage=100.0, max_rays=0)` once, feeds
+the full set to synthesis, and applies retention to the saved ARTIFACT afterwards,
+reproducing upstream's own algorithm (`Scene.cpp:193-224`) in `_retain`
+(`src/amcd/simulators/gsound_sir.py`). Using upstream's filter instead would need a
+second propagation run purely to recover the unfiltered set.
 
 ### PathData schema (pinned by the actual keys of `path_data[i]`)
 

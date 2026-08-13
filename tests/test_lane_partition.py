@@ -374,9 +374,22 @@ def test_the_partition_covers_exactly_the_ledgers_open_rows(path: Path, spec: di
     red between every fold and the next partition, and the pressure is then to
     weaken the check rather than to record the rows. `unassigned:` keeps the
     coverage identity total while saying plainly that these await a partition.
+
+    A SERIAL cycle (`lanes: []`) is exempt, and the exemption is the point rather
+    than a loophole: the defect this guards against is a row falling into the gap
+    between two lanes' scopes, and a cycle with no lanes has no gaps — every OPEN
+    row is the integrator's by construction. Enumerating them anyway makes the
+    partition a second copy of the ledger's id list, which then has to be resynced
+    after every single deletion, and a list maintained only to satisfy a check is
+    the bookkeeping this project keeps having to delete.
     """
     if path.stem != _CURRENT_CYCLE:
         pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
+    if not spec["lanes"]:
+        pytest.skip(
+            f"{path.name} is a serial cycle (lanes: []) — every OPEN row is the "
+            "integrator's, so there is no inter-lane gap for a row to fall into."
+        )
 
     planned: set[str] = set()
     for lane in spec["lanes"]:

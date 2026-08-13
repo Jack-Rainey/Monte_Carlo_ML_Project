@@ -247,7 +247,7 @@ low_ray_budget: { sweep: [1000, 2000, 5000, 20000] }
 
 | Role | Parameters |
 |---|---|
-| fixed | sample_rate 48k, ir_duration 3.0s, base_seed 42, high_ray_budget 200k, QC thresholds (onset 2 ms, min energy, max path-file 128 MB), normalization scheme |
+| fixed | sample_rate 48k, ir_duration **per config** (base.yaml 4.25 s, research_i.yaml 3.0 s RI-pinned — see §11.2), base_seed 42, high_ray_budget 200k, QC thresholds (onset 2 ms, min energy, max path-file 128 MB), normalization scheme |
 | tuned (on valid) | learning_rate, batch_size, loss-term weights, Huber δ, model depth/width/kernel/dilation, early-stopping patience |
 | swept (research) | low **diffuse** ray budget (was fixed 5k), retained-path count k, band resolution (representation study); ambisonic_order = fixed-3 v1 but sweep-capable |
 

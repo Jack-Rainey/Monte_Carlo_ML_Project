@@ -697,7 +697,10 @@ def main(argv: list[str] | None = None) -> int:
 
     print("\nDone. Pin this in configs/simulators/gsound_sir.yaml:\n")
     print(f"  commit_sha: {sha}\n")
-    print(f"And pass the render interpreter to the pipeline:\n\n  --sim-python {env_python}\n")
+    # There is no `--sim-python` flag: the interpreter is a HOST fact, so it is a
+    # simulator config key supplied by an uncommitted host layer, not a CLI switch.
+    print("And name this interpreter in a host-local config layer (not committed):\n")
+    print(f"  simulator:\n    params:\n      render_python: {env_python}\n")
     return 0
 
 

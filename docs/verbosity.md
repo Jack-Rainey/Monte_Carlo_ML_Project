@@ -74,7 +74,7 @@ table is total.
 | `cli.py` | `Run dir:` (timing) | `Config.stamp` trio (provenance) |
 | `pipeline.py` | `[run ]`/`[skip]` (progress); `[done] (Xs)` (timing); `[FAIL]` (error → stderr, always) | `timings.json` (provenance); `stages/*.done` sentinels **never gated** |
 | gen-scenes | generated-count summary (progress) | — (scene specs canonical) |
-| render | rendered-count summary (progress) | — (IR pair **and** `renders/<id>/meta.json` provenance are canonical, RD-16) |
+| render | rendered-count summary (progress) | — (IR pair, `renders/<id>/meta.json` provenance **and** `renders/<id>/paths_{low,high}.parquet` are canonical, RD-16) |
 | preprocess | count summary (progress); tensor shape (metrics); empty-split `WARNING` (warning → stderr, always) | — (all outputs canonical) |
 | diagnostics | D0a + D0b tables and verdicts (metrics) | — (`d0a_gap.json`/`d0b_oracle.json` are the stage's results: canonical) |
 | train | epoch lines, early-stop (progress); device, best valid loss (metrics) | `train_log.csv` (metrics); `best.pt` canonical |
