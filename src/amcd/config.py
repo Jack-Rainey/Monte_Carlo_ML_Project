@@ -778,6 +778,14 @@ class Config(BaseModel):
     # Stats — bootstrap CI (design_spec §9)
     bootstrap_n_resamples: int
     bootstrap_alpha: float
+    #: Smallest n at which a percentile bootstrap CI is reported as a CI rather
+    #: than as an uncalibrated interval (F-M7/F-105). Below it the requested
+    #: percentile falls INSIDE the sample extremes — at n = 3,
+    #: P(bootstrap mean == an extreme) = 3^-3 = 3.7 % against alpha/2 = 2.5 % — so
+    #: the interval cannot attain its nominal coverage no matter how many
+    #: resamples are drawn. Config-declared because it is a reporting threshold on
+    #: an experiment quantity, not a library detail.
+    bootstrap_min_n_for_calibrated_ci: int
     bootstrap_power: float
 
     # Recorded role metadata (populated by load(); not a YAML field).

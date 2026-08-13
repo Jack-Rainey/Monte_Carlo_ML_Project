@@ -296,6 +296,9 @@ def _stats_fingerprint(config: Config) -> dict:
         "bootstrap_n_resamples": config.bootstrap_n_resamples,
         "bootstrap_alpha": config.bootstrap_alpha,
         "bootstrap_power": config.bootstrap_power,
+        # Decides whether a reported interval is labelled uncalibrated, which is a
+        # disclosure ON the reported table, so moving it must re-render (F-M7).
+        "bootstrap_min_n_for_calibrated_ci": config.bootstrap_min_n_for_calibrated_ci,
         "seed_bootstrap": config.seed("bootstrap"),
         "code_version": _code_version("stats"),
     }

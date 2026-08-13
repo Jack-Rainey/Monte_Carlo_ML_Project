@@ -29,18 +29,31 @@ def bootstrap_ci(
     n_resamples: int,
     alpha: float,
     rng: np.random.Generator,
+    min_n_for_calibrated_ci: int,
 ) -> dict[str, float]:
     """Bootstrap percentile CI (robust to non-normal metric distributions).
 
     All parameters are explicit — no defaults — so the caller (run_stats) always
     supplies config-declared values and a seeded RNG.
+
+    BELOW `min_n_for_calibrated_ci` THE INTERVAL IS RETURNED AND FLAGGED, NOT
+    SUPPRESSED (F-M7/F-105). A percentile bootstrap cannot attain its nominal
+    coverage at small n because the requested percentile falls inside the sample
+    extremes: at n = 3, P(a bootstrap mean equals a sample extreme) = 3^-3 = 3.7 %
+    against the 2.5 % the alpha/2 tail asks for, so the "95 % CI" is the sample
+    range and more resamples cannot change that. The value is still the best
+    interval available, so it is reported with `ci_calibrated: False` rather than
+    dropped — suppressing it would hide the population rather than the overclaim.
     """
     n = len(values)
+    calibrated = n >= min_n_for_calibrated_ci
     if n == 0:
-        return {"mean": float("nan"), "ci_lower": float("nan"), "ci_upper": float("nan"), "std": float("nan")}
+        return {"mean": float("nan"), "ci_lower": float("nan"), "ci_upper": float("nan"),
+                "std": float("nan"), "ci_calibrated": False}
     if n == 1:
         v = float(values[0])
-        return {"mean": v, "ci_lower": v, "ci_upper": v, "std": 0.0}
+        return {"mean": v, "ci_lower": v, "ci_upper": v, "std": 0.0,
+                "ci_calibrated": False}
 
     boot_means = np.array([
         values[rng.integers(0, n, n)].mean()
@@ -54,6 +67,7 @@ def bootstrap_ci(
         # unbiased estimator is required at this design's small per-split n — ddof=0
         # biases σ down by √((n−1)/n) (≈ 0.82 at n=3), overstating detectability (F-09).
         "std": float(values.std(ddof=1)),
+        "ci_calibrated": calibrated,
     }
 
 
@@ -200,6 +214,7 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             n_resamples=config.bootstrap_n_resamples,
             alpha=config.bootstrap_alpha,
             rng=_substream_rng(bootstrap_seed, split_name, metric_name, "pred"),
+            min_n_for_calibrated_ci=config.bootstrap_min_n_for_calibrated_ci,
         )
 
         # Inferential (design_spec §9): the per-scene PAIRED improvement for
@@ -221,6 +236,7 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             n_resamples=config.bootstrap_n_resamples,
             alpha=config.bootstrap_alpha,
             rng=_substream_rng(bootstrap_seed, split_name, metric_name, "improvement"),
+            min_n_for_calibrated_ci=config.bootstrap_min_n_for_calibrated_ci,
         )
         mdes_val = mdes(
             imp_ci["std"], len(paired),
@@ -284,6 +300,10 @@ def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             # rather than a set so a producer disagreeing with itself is a loud
             # pandas error, not a silently-picked winner.
             "unit": group["unit"].iloc[0] if "unit" in group else "",
+            # Whether the reported interval can reach its nominal coverage at this
+            # n (F-M7). False is not a drop — the interval is still the best one
+            # available — it is a label the table must render.
+            "ci_calibrated": bool(imp_ci["ci_calibrated"]),
             "n_estimator_variance_limited": _count_true(
                 group.get("estimator_variance_limited")
             ),

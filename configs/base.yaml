@@ -387,6 +387,17 @@ metric_edt_variance_limited_s: 0.15
 # ── Stats: bootstrap CI (design_spec §9) ──────────────────────────────────────
 bootstrap_n_resamples: 1000
 bootstrap_alpha: 0.05
+# Below this n a percentile bootstrap CI cannot reach its nominal coverage: the
+# requested percentile lands inside the sample extremes, so the interval is the
+# sample range and no number of resamples fixes it. At n = 3 the probability that
+# a bootstrap mean equals a sample extreme is 3^-3 = 3.7 %, against the 2.5 % the
+# alpha/2 tail asks for.
+#
+# 4 is the smallest n at which the tail is attainable, not a judgement about
+# adequacy — a 4-scene CI is honest and wide. It matters because the dry-run and
+# smoke configs report 3-scene splits, so the intervals in those tables were
+# labelled "95 % CI" while being sample ranges.
+bootstrap_min_n_for_calibrated_ci: 4
 bootstrap_power: 0.8
 
 # ISO 3382-1 SNR ADMISSIBILITY, in dB of USABLE decay, per reported metric (AC-176).

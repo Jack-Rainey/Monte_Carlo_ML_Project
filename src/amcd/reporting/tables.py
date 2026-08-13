@@ -162,6 +162,11 @@ def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             # Not a drop: the value is scored, but its ESTIMATOR carries 24-31 %
             # sd in this range, which a bare point estimate does not convey.
             parts.append(f"{row['n_estimator_variance_limited']} high-variance")
+        if row.get("ci_calibrated") is False:
+            # The interval is reported, not suppressed — but a percentile bootstrap
+            # below the declared n cannot reach its nominal coverage, so calling it
+            # a "95 % CI" is the overclaim (F-M7/F-105).
+            parts.append("CI uncalibrated at this n")
         if row.get("n_resolvability_limited"):
             # Also not a drop: the PHYSICAL legs reported a value from a band their
             # own octave filter cannot resolve. Scored and disclosed rather than

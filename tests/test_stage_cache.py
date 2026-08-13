@@ -874,6 +874,7 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         "d0b_min_scored_frac": 0.5,
         "bootstrap_n_resamples": 500,
         "bootstrap_alpha": 0.1,
+        "bootstrap_min_n_for_calibrated_ci": 6,
         "bootstrap_power": 0.9,
     }
 

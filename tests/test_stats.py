@@ -42,7 +42,8 @@ def _achieved_power(ncp: float, df: int, t_crit: float) -> float:
 
 def test_bootstrap_ci_reports_sample_std_not_population() -> None:
     vals = np.array([1.0, 2.0, 4.0])
-    ci = bootstrap_ci(vals, n_resamples=200, alpha=0.05, rng=np.random.default_rng(0))
+    ci = bootstrap_ci(vals, n_resamples=200, alpha=0.05,
+                      rng=np.random.default_rng(0), min_n_for_calibrated_ci=4)
     assert ci["std"] == pytest.approx(float(np.std(vals, ddof=1)))
     # The pre-fix population std (ddof=0) is smaller — guard against its return.
     assert ci["std"] != pytest.approx(float(np.std(vals, ddof=0)))
