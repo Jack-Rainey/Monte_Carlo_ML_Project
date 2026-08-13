@@ -55,13 +55,15 @@ from ..evaluation.room_acoustic import (
 )
 from ..representations import build_representation
 from ..simulators.base import simulator_models_early_reflections
-from ..runtime import Verbosity, emit
+from ..runtime import RunContext, Verbosity, emit
 
 # Per-metric JND tolerances (ISO 3382 difference limens) are config-declared —
 # see config.d0b_t30_jnd_frac / d0b_edt_jnd_frac / d0b_c50_jnd_db.
 
 
-def run_diagnostics(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
+def run_diagnostics(config: Config, run_dir: Path, ctx: RunContext) -> None:
+    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
+    verbosity = ctx.verbosity
     preprocessed_dir = run_dir / "preprocessed"
     renders_dir = run_dir / "renders"
     diag_dir = run_dir / "diagnostics"

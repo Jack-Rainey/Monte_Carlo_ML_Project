@@ -227,7 +227,7 @@ class TestDeclaredButEmptySplitIsReported:
 
         from amcd.config import Config
         from amcd.pipeline import Pipeline
-        from amcd.runtime import Verbosity
+        from amcd.runtime import RunContext, Verbosity
 
         # split_assignment 104 with n_id 6 starves test_id while train/valid survive,
         # so the run completes and the split's absence is the only thing under test.
@@ -237,7 +237,7 @@ class TestDeclaredButEmptySplitIsReported:
             *CANONICAL_DRY_RUN, overlay
         )
         run_dir = tmp_path / "run"
-        Pipeline(cfg, run_dir, Verbosity(1, 0)).run_all()
+        Pipeline(cfg, run_dir, RunContext(Verbosity(1, 0))).run_all()
 
         counts = json.loads((run_dir / "preprocessed" / "meta.json").read_text())
         assert counts["split_counts"]["test_id"] == 0, "fixture must actually starve test_id"

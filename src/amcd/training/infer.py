@@ -14,10 +14,12 @@ from ..data.normalization import denormalize
 from ..representations import build_representation
 from ..models.cnn import build_model  # noqa: F401 — import also triggers registration
 from ..device import select_device
-from ..runtime import Verbosity, emit
+from ..runtime import RunContext, emit
 
 
-def run_infer(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
+def run_infer(config: Config, run_dir: Path, ctx: RunContext) -> None:
+    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
+    verbosity = ctx.verbosity
     preprocessed_dir = run_dir / "preprocessed"
     checkpoint_dir = run_dir / "checkpoints"
     predictions_dir = run_dir / "predictions"

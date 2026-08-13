@@ -25,19 +25,19 @@ import numpy as np
 
 from amcd.config import Config
 from amcd.pipeline import Pipeline
-from amcd.runtime import Verbosity
+from amcd.runtime import RunContext, Verbosity
 
 from tests.conftest import CANONICAL_DRY_RUN, QUIET, tiny_config
 
 #: Shows the `metrics` ladder category, which is where both probes print their
 #: verdict tables. Warnings reach stderr at every level (F-24), so QUIET is enough
 #: for the drop warnings — this exists only for the D0b verdict line.
-SHOW_METRICS = Verbosity(save=0, show=3)
+SHOW_METRICS = RunContext(Verbosity(save=0, show=3))
 
 
-def _run_to_diagnostics(cfg: Config, run_dir: Path, verbosity: Verbosity) -> None:
+def _run_to_diagnostics(cfg: Config, run_dir: Path, ctx: RunContext) -> None:
     for stage in ("gen-scenes", "render", "preprocess", "diagnostics"):
-        Pipeline(cfg, run_dir, verbosity).run_stage(stage)
+        Pipeline(cfg, run_dir, ctx).run_stage(stage)
 
 
 def _run_to_preprocess(cfg: Config, run_dir: Path) -> None:

@@ -18,6 +18,15 @@ to no-hidden-defaults, and `Config` never carries it (RD-09; CLAUDE.md
 a frozen `Verbosity(save, show)` from `cli.py` through `Pipeline` into every
 stage function (F-22) — never a module global.
 
+Since RD-20 it travels inside a frozen `RunContext`, and stage functions are
+dispatched as `(config, run_dir, ctx)`. `config` carries what a run PRODUCES and
+`ctx` what governs how it RUNS; the split is the same one that keeps `Verbosity`
+out of `Config`. The point of the wrapper is that the next runtime-only value —
+the roadmap's Blender preview needs to know whether it has a display, and the
+render backend's host interpreter is resolved per machine — is a field on one
+class rather than a ninth signature change. Internal helpers still take a bare
+`Verbosity`; only the stage ENTRY POINTS take the context.
+
 ## The category ladder
 
 Both axes share one monotonic ladder (`amcd/runtime.py:CATEGORY_LEVELS`):

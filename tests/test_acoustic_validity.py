@@ -172,11 +172,11 @@ class TestRealizedRecordLengthGate:
         cfg = Config.load(*_RI).model_copy(deep=True)
         cfg.scenes.max_frac_below_iso_t30_decay_range = 0.01  # 530 scenes -> at most 5
         # 1 of 30 in the small split is 3.3 % per-split but 0.19 % overall: allowed.
-        _disclose_and_gate_record_length(cfg, report(0, 1), QUIET)
+        _disclose_and_gate_record_length(cfg, report(0, 1), QUIET.verbosity)
         # 16 of 500 is 3.2 % per-split — the rate a per-split gate would have to
         # permit — but 3.0 % overall: refused.
         with pytest.raises(ValueError, match="16 of 530"):
-            _disclose_and_gate_record_length(cfg, report(16, 0), QUIET)
+            _disclose_and_gate_record_length(cfg, report(16, 0), QUIET.verbosity)
 
     def test_a_plumbing_overlay_declares_that_it_claims_no_fidelity(self) -> None:
         """test_tiny/dry_run declare 1.0 — stated, not silently exempted."""

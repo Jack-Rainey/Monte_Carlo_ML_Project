@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 
 from .pipeline import STAGES, Pipeline
-from .runtime import Verbosity, emit
+from .runtime import RunContext, Verbosity, emit
 
 
 def _make_run_dir(label: str) -> Path:
@@ -92,7 +92,10 @@ def _invoke(
     if verbosity.saves("provenance"):
         cfg.stamp(run_dir, device=str(select_device()))
     emit(verbosity, "timing", f"Run dir: {run_dir.resolve()}")
-    pipeline = Pipeline(cfg, run_dir, verbosity, force=force)
+    # The CLI is where the runtime context is ASSEMBLED — it is the layer that
+    # knows the machine and the invocation, which is exactly what RunContext
+    # carries and Config must not (RD-20).
+    pipeline = Pipeline(cfg, run_dir, RunContext(verbosity), force=force)
     if stage is None:
         pipeline.run_all()
     else:

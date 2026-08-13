@@ -21,7 +21,7 @@ import scipy.stats
 
 from ..config import Config
 from ..evaluation.metric_row import KIND_LEGS, MetricTriple, paired_improvement
-from ..runtime import Verbosity, emit
+from ..runtime import RunContext, emit
 
 
 def bootstrap_ci(
@@ -178,7 +178,9 @@ def _count_true(mask) -> int:
     return int(mask.fillna(False).astype(bool).sum())
 
 
-def run_stats(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
+def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
+    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
+    verbosity = ctx.verbosity
     metrics_path = run_dir / "metrics" / "metrics.parquet"
     if not metrics_path.exists():
         raise FileNotFoundError(f"No metrics found at {metrics_path}. Run eval first.")

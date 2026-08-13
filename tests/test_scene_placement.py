@@ -639,7 +639,7 @@ class TestPerSplitOverLimitWarning:
         self, ri_config: Config, capsys
     ) -> None:
         # 1 of 30 is 3.3 % per split but 0.19 % overall: the gate allows it.
-        _disclose_and_gate_record_length(self._cfg(ri_config), self._report(0, 1), QUIET)
+        _disclose_and_gate_record_length(self._cfg(ri_config), self._report(0, 1), QUIET.verbosity)
         warnings = capsys.readouterr().err
 
         assert "test_placement_shift" in warnings
@@ -651,7 +651,7 @@ class TestPerSplitOverLimitWarning:
     ) -> None:
         """Evidence a failing run still names the splits responsible."""
         with pytest.raises(ValueError):
-            _disclose_and_gate_record_length(self._cfg(ri_config), self._report(16, 1), QUIET)
+            _disclose_and_gate_record_length(self._cfg(ri_config), self._report(16, 1), QUIET.verbosity)
         warnings = capsys.readouterr().err
 
         assert "test_placement_shift" in warnings and "train" in warnings
@@ -661,7 +661,7 @@ class TestPerSplitOverLimitWarning:
     ) -> None:
         """QUIET is show=0. Warnings bypass the ladder entirely (F-24), which is
         what makes "always-emitted" true rather than aspirational."""
-        _disclose_and_gate_record_length(self._cfg(ri_config), self._report(0, 1), QUIET)
+        _disclose_and_gate_record_length(self._cfg(ri_config), self._report(0, 1), QUIET.verbosity)
         assert "WARNING" in capsys.readouterr().err
 
     def test_a_split_with_no_characterized_scene_is_named_as_undefined(
@@ -687,7 +687,7 @@ class TestPerSplitOverLimitWarning:
         Falling through would be F-71's own defect one level up — a silent pass at
         exactly the outdoor/partially-open configuration the RD-64 seam enables."""
         report = {"test_openfield": _scored_entry(0, 0, n_none=3)}
-        _disclose_and_gate_record_length(tiny_config(), report, QUIET)
+        _disclose_and_gate_record_length(tiny_config(), report, QUIET.verbosity)
         warnings = capsys.readouterr().err
 
         assert "UNSCORED, not passed" in warnings
@@ -938,7 +938,7 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
             "absorption_convention": {"effective_alpha": "1-sqrt(1-alpha)"},
         }
         with pytest.raises(ValueError, match="absorption_convention") as exc:
-            _disclose_and_gate_record_length(tiny_config(), report, QUIET)
+            _disclose_and_gate_record_length(tiny_config(), report, QUIET.verbosity)
         assert "_NON_SPLIT_REPORT_KEYS" in str(exc.value), (
             "the error must say how to declare the key, not merely that it failed"
         )
@@ -960,7 +960,7 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
         with pytest.raises(ValueError, match="3 of 4 scenes"):
             gen._disclose_and_gate_record_length(
                 tiny_config(scenes={"max_frac_below_iso_t30_decay_range": 0.5}),
-                report, QUIET,
+                report, QUIET.verbosity,
             )
         assert "absorption_convention" not in capsys.readouterr().err
 
@@ -990,7 +990,7 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
         report = {"test_geometry_shift": _scored_entry(2, 2)}
 
         with pytest.raises(ValueError, match="test_geometry_shift") as exc:
-            gen._disclose_and_gate_record_length(tiny_config(), report, QUIET)
+            gen._disclose_and_gate_record_length(tiny_config(), report, QUIET.verbosity)
         assert "silent drop" in str(exc.value)
 
     def test_a_disagreeing_published_denominator_is_refused(self) -> None:
@@ -1004,7 +1004,7 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
             "decay_range_below_iso_t30": {"count": 0}}}}
 
         with pytest.raises(ValueError, match="have diverged"):
-            _disclose_and_gate_record_length(tiny_config(), report, QUIET)
+            _disclose_and_gate_record_length(tiny_config(), report, QUIET.verbosity)
 
 
 class TestTheGateNamesWhatItActuallyScored:
@@ -1044,7 +1044,7 @@ class TestTheGateNamesWhatItActuallyScored:
         reach — which is exactly why it would go unnoticed."""
         report = {"test_mixed": _scored_entry(4, 0, n_none=6)}
 
-        _disclose_and_gate_record_length(tiny_config(), report, QUIET)  # passes
+        _disclose_and_gate_record_length(tiny_config(), report, QUIET.verbosity)  # passes
         warnings = capsys.readouterr().err
 
         assert "scored 4 of 10 scenes" in warnings
@@ -1107,7 +1107,7 @@ class TestTheMixedCharacterizedSplit:
         cfg = tiny_config(scenes={"max_frac_below_iso_t30_decay_range": 0.5})
 
         with pytest.raises(ValueError, match="4 of 4 scenes") as exc:
-            _disclose_and_gate_record_length(cfg, report, QUIET)
+            _disclose_and_gate_record_length(cfg, report, QUIET.verbosity)
         assert "6 of 10 scenes are excluded" in str(exc.value)
 
 

@@ -13,7 +13,7 @@ import torch
 
 from ..config import Config
 from ..representations import build_representation
-from ..runtime import Verbosity, emit
+from ..runtime import RunContext, emit
 from ..simulators.base import SceneSpec
 
 #: The `compute_stats` keys actually applied to the saved tensors, as (mean, std).
@@ -63,7 +63,9 @@ def _spectral_slope_db_per_decade(
     return float(_np.polyfit(logf[finite], peak[finite], 1)[0])
 
 
-def run_preprocess(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
+def run_preprocess(config: Config, run_dir: Path, ctx: RunContext) -> None:
+    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
+    verbosity = ctx.verbosity
     scenes_dir = run_dir / "scenes"
     renders_dir = run_dir / "renders"
     out_dir = run_dir / "preprocessed"

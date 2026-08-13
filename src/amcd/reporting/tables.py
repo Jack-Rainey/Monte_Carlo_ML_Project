@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..config import Config
-from ..runtime import Verbosity, emit
+from ..runtime import RunContext, emit
 from ..simulators.base import simulator_models_early_reflections
 
 
@@ -252,7 +252,9 @@ def _unconverged_reference_footer(config: Config, unapplied: list[str]) -> list[
     return lines
 
 
-def run_report(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
+def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
+    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
+    verbosity = ctx.verbosity
     stats_dir = run_dir / "stats"
     report_dir = run_dir / "report"
     report_dir.mkdir(parents=True, exist_ok=True)

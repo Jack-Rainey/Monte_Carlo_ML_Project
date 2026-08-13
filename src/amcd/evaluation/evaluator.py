@@ -12,7 +12,7 @@ import torch
 
 from ..config import Config
 from ..data.normalization import denormalize
-from ..runtime import Verbosity, emit
+from ..runtime import RunContext, emit
 from .metric_row import KIND_LEGS, MetricDrop, MetricTriple, metric_improvement
 from .signal import compute_signal_metrics
 from .room_acoustic import compute_room_acoustic_metrics
@@ -46,7 +46,9 @@ def _expected_onset_samples(meta_path: Path, sample_rate: int) -> int | None:
     return int(float(distance_m) / float(speed) * sample_rate)
 
 
-def run_eval(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
+def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
+    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
+    verbosity = ctx.verbosity
     preprocessed_dir = run_dir / "preprocessed"
     predictions_dir = run_dir / "predictions"
     renders_dir = run_dir / "renders"

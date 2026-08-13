@@ -12,11 +12,13 @@ from ..config import Config
 from ..data.dataset import EnergyDataset
 from ..models.cnn import build_model  # noqa: F401 — import also triggers registration
 from ..device import select_device
-from ..runtime import Verbosity, emit
+from ..runtime import RunContext, emit
 from .loss import build_criterion
 
 
-def run_train(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
+def run_train(config: Config, run_dir: Path, ctx: RunContext) -> None:
+    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
+    verbosity = ctx.verbosity
     preprocessed_dir = run_dir / "preprocessed"
     checkpoint_dir = run_dir / "checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)

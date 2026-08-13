@@ -4,7 +4,10 @@
 and prints, never what it produces — it is a runtime output level, not an
 experiment-governing value (CLAUDE.md "Output verbosity is not an experiment
 value"). It is threaded explicitly cli → Pipeline → every stage function
-(F-22); it is never a module global. Canonical results, inter-stage inputs,
+(F-22); it is never a module global. Since RD-20 it rides inside `RunContext`
+(below) across that boundary, and stage functions are dispatched as
+`(config, run_dir, ctx)`; helpers below the entry point still take a bare
+`Verbosity`. Canonical results, inter-stage inputs,
 and stage sentinels are written at EVERY save level, including 0 — only
 observability artifacts may sit behind `saves()` (F-23).
 
@@ -111,3 +114,28 @@ def emit(verbosity: Verbosity, category: str, msg: str) -> None:
         return
     if verbosity.shows(category):
         print(msg)
+
+
+@dataclass(frozen=True)
+class RunContext:
+    """Everything a stage needs that is NOT an experiment value.
+
+    ONE ARGUMENT INSTEAD OF A GROWING LIST (RD-20). Stage functions are dispatched
+    as `(config, run_dir, ctx)`. `config` carries every value that governs what a run
+    PRODUCES; this carries what governs how it RUNS. The two are different in kind,
+    and keeping the second out of `Config` is the rule `Verbosity` already states —
+    an output level is not an experiment-governing value.
+
+    It exists because widening the dispatch signature is a nine-stage-plus-tests
+    touch, and `verbosity` was already the second such value after `run_dir`. The
+    roadmap makes a third foreseeable: §6's Blender preview needs to know whether it
+    has a display, and the render backend's host interpreter is resolved per machine.
+    Neither is added here — a field with no consumer would be inventing its shape —
+    but adding one is now a change to this class rather than to nine signatures.
+
+    FROZEN, because a stage must not be able to change how a later stage runs. A
+    mutable context passed down a nine-stage chain is a channel by which stage 3
+    could silence stage 7, and nothing would record it.
+    """
+
+    verbosity: Verbosity

@@ -24,7 +24,7 @@ from typing import Callable
 from . import provenance
 from .config import Config
 from .simulators.base import simulator_code_scope, simulator_host_scoped_params
-from .runtime import Verbosity, emit
+from .runtime import RunContext, emit
 
 STAGES = ["gen-scenes", "render", "preprocess", "diagnostics", "train", "infer", "eval", "stats", "report"]
 
@@ -618,7 +618,7 @@ def _render_leaf(value) -> str:
     return "<absent>" if value is _ABSENT else repr(value)
 
 
-def _dispatch(stage: str) -> Callable[[Config, Path, Verbosity], None]:
+def _dispatch(stage: str) -> Callable[[Config, Path, RunContext], None]:
     if stage == "gen-scenes":
         from .scenes.generator import run_gen_scenes
         return run_gen_scenes
@@ -650,10 +650,17 @@ def _dispatch(stage: str) -> Callable[[Config, Path, Verbosity], None]:
 
 
 class Pipeline:
-    def __init__(self, config: Config, run_dir: Path, verbosity: Verbosity, force: bool = False) -> None:
+    def __init__(
+        self, config: Config, run_dir: Path, ctx: RunContext, force: bool = False
+    ) -> None:
         self.config = config
         self.run_dir = run_dir
-        self.verbosity = verbosity
+        #: Everything a stage needs that is not an experiment value (RD-20). Passed
+        #: to `_dispatch`'s callables whole, so adding a runtime value later is a
+        #: change to `RunContext` rather than to nine stage signatures.
+        self.ctx = ctx
+        #: Convenience for this class's own `emit` calls; `ctx` is what stages get.
+        self.verbosity = ctx.verbosity
         self.force = force
 
     def _recorded_fingerprint(self, stage: str) -> tuple[str, dict | None]:
@@ -861,7 +868,7 @@ class Pipeline:
 
             emit(self.verbosity, "progress", f"\n[run ] {stage}")
             fn = _dispatch(stage)
-            fn(self.config, self.run_dir, self.verbosity)
+            fn(self.config, self.run_dir, self.ctx)
         except Exception as exc:
             emit(self.verbosity, "error", f"[FAIL] {stage}: {exc}")
             raise

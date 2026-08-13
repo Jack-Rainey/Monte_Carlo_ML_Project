@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from ..config import Config
-from ..runtime import Verbosity, emit
+from ..runtime import RunContext, emit
 from .base import (
     IRResult,
     SceneSpec,
@@ -167,7 +167,9 @@ def _canonical_meta(
     }
 
 
-def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
+def run_render(config: Config, run_dir: Path, ctx: RunContext) -> None:
+    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
+    verbosity = ctx.verbosity
     scenes_dir = run_dir / "scenes"
     renders_dir = run_dir / "renders"
     renders_dir.mkdir(parents=True, exist_ok=True)

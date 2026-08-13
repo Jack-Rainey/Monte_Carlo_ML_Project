@@ -23,7 +23,7 @@ import numpy as np
 import yaml
 
 from amcd.config import Config, _BASE_YAML, _merge_layer
-from amcd.runtime import Verbosity
+from amcd.runtime import RunContext, Verbosity
 from amcd.simulators.base import SceneSpec
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -67,7 +67,11 @@ def tiny_cli_args() -> list[str]:
 # violate the no-values-in-conftest rule. save=0 doubles as a standing check
 # of the F-23 guarantee: every canonical artifact tests rely on must exist at
 # the lowest save level.
-QUIET = Verbosity(save=0, show=0)
+#: The runtime context every stage function and `Pipeline` takes (RD-20). A
+#: `RunContext`, not a bare `Verbosity`: the dispatch signature is
+#: `(config, run_dir, ctx)`, and a test that passed the verbosity directly
+#: would be asserting against a signature the pipeline does not use.
+QUIET = RunContext(Verbosity(save=0, show=0))
 
 
 def tiny_config(**overrides) -> Config:

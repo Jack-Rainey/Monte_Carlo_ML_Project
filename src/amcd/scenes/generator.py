@@ -36,7 +36,7 @@ from ..acoustics import (
     sabine_rt60,
 )
 from ..config import Config, Margins, PlacementRegime
-from ..runtime import Verbosity, emit
+from ..runtime import RunContext, emit
 from ..simulators.base import (
     SceneSpec,
     simulator_max_eval_freq_hz,
@@ -844,7 +844,7 @@ def _summarize(values: list[float]) -> dict:
     }
 
 
-def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
+def run_gen_scenes(config: Config, run_dir: Path, ctx: RunContext) -> None:
     """Generate the config's scene specs; write them and `placement_report.json`.
 
     Clears stale `scene_*.json` first (F-27), then writes one spec per scene plus
@@ -854,6 +854,8 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     breach `scenes.max_frac_below_iso_t30_decay_range`. No stage sentinel is written in
     that case, so render will not proceed past it.
     """
+    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
+    verbosity = ctx.verbosity
     out_dir = run_dir / "scenes"
     out_dir.mkdir(parents=True, exist_ok=True)
 
