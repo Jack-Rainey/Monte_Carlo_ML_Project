@@ -522,13 +522,16 @@ def _validate_min_separation_declared(SimClass, name: str, validated: dict) -> f
     return float(floor)
 
 
-def simulator_realized_support_s(config, t60_s: float, window_s: float) -> float:
-    """Seconds of usable record the active backend will produce for a `t60_s` decay.
+def simulator_realized_support_s(config, t60_s: float, volume_m3: float,
+                                 surface_m2: float, window_s: float) -> float:
+    """Seconds of usable record the active backend will produce for this room.
 
     The record-length gate needs this BEFORE any render exists, and it is a backend
-    fact, not a scene fact: gsound's adaptive energy trim closes the record as a
-    sub-linear function of the decay (AC-184), while the scaffold fills its whole
-    window. `ir_duration` is neither — it is the window the pipeline allocates, and
+    fact, not a scene fact: gsound's adaptive energy trim closes the record when it
+    runs out of paths to trace, while the scaffold fills its whole window. Geometry
+    AND decay are both passed because different backends bind on different things —
+    gsound measurably does not use `t60_s` (AC-186), and one that did must be able
+    to say so without this signature changing. `ir_duration` is neither — it is the window the pipeline allocates, and
     gating against it asks whether the decay fits a buffer rather than whether the
     backend will fill that buffer.
 
@@ -542,25 +545,28 @@ def simulator_realized_support_s(config, t60_s: float, window_s: float) -> float
     name = config.simulator.name
     SimClass = simulator_registry.get(name)
     validated = SimClass.Params(**config.simulator.params).model_dump()
-    return _validate_realized_support_declared(SimClass, name, validated, t60_s, window_s)
+    return _validate_realized_support_declared(
+        SimClass, name, validated, t60_s, volume_m3, surface_m2, window_s)
 
 
 def _validate_realized_support_declared(
-    SimClass, name: str, validated: dict, t60_s: float, window_s: float
+    SimClass, name: str, validated: dict, t60_s: float, volume_m3: float,
+    surface_m2: float, window_s: float
 ) -> float:
     """Raise unless `SimClass` declares a usable `realized_support_s`."""
     getter = getattr(SimClass, "realized_support_s", None)
     if not callable(getter):
         raise TypeError(
             f"simulator {name!r} does not declare the required classmethod "
-            f"`realized_support_s(params, t60_s, window_s) -> float`. Every backend "
+            f"`realized_support_s(params, t60_s, volume_m3, surface_m2, window_s) "
+            f"-> float`. Every backend "
             f"must state "
             f"how much record it will actually produce for a given decay, so scene "
             f"generation can refuse an unmeasurable scene BEFORE a render. A backend "
             f"that fills its whole window says so by returning that window "
             f"(amcd.simulators.base.Simulator)."
         )
-    support = getter(validated, t60_s, window_s)
+    support = getter(validated, t60_s, volume_m3, surface_m2, window_s)
     if not isinstance(support, (int, float)) or isinstance(support, bool) or support <= 0:
         raise ValueError(
             f"simulator {name!r} declared realized_support_s={support!r} for "

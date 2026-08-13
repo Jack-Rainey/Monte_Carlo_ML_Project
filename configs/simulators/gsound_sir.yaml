@@ -145,65 +145,77 @@ path_retention:
 # numbers must stay reproducible.
 absorption_convention: pre_compensate
 
-# ── THE RECORD THIS BACKEND CAN ACTUALLY FILL (AC-175, AC-184, AC-56) ─────────
+# ── THE RECORD THIS BACKEND CAN ACTUALLY FILL (AC-186, AC-175, AC-56) ─────────
 #
-# Two separate limits, and the SECOND one binds. Both are backend facts, declared
-# here for the same reason `speed_of_sound_m_s` is: a comment goes stale silently,
-# a declaration gets falsified against what the render reports.
+# `ir_duration` is the window the pipeline ALLOCATES. It is not what this backend
+# fills, and the record-length gate has to know the difference: gating a scene
+# against the buffer asks whether the decay fits an array, not whether the
+# renderer will produce a record long enough to measure the decay in.
 #
-# 1. THE COMPILED CAP. `prop_request.maxIRLength = 3.0` is compiled into pygsound's
-#    Context (Context.cpp:33) and is NOT settable -- module.cpp:60-69 is the
-#    complete exposed set. Every propagation bound derives from it
-#    (`maxDistance = maxIRLength * c`), so no path delay can exceed it. With the
-#    auralizer's 2048-sample FILTER_TAIL_PADDING the native record is at most
-#    146048 samples = 3.043 s. `ir_duration: 4.25` is therefore 1.40x longer than
-#    anything this backend can produce, and 29.4% of every record is guaranteed
-#    zeros.
+# TWO LIMITS, and the adaptive energy trim binds first:
+#
+#   1. `max_ir_length_s` below — pygsound compiles `maxIRLength = 3.0 s` and does
+#      not expose it, so no render can exceed it whatever `ir_duration` says.
+#   2. The trim, predicted by the law declared here.
+#
+# WHAT SETS THE TRIM, MEASURED (AC-186). The predecessor of this law was
+# `c * T60**k`, fitted on renders whose rooms were all produced by scaling one
+# shoebox — so room size and decay time moved together and either could appear to
+# drive the record. A crossed probe (`scripts/support_law_probe.py`, 21 renders,
+# `experiments/support_law/`) separates them:
+#
+#   * T60 DOES NOTHING. Holding geometry fixed and moving absorption across the
+#     declared `mixed` support (alpha 0.05 vs 0.80, a 16x change in T60), realized
+#     support moves by 0.00 % / 0.49 % / 0.00 % at V = 21.6 / 150 / 600 m3. An
+#     energy trim closes the record when it runs out of PATHS; how fast the decay
+#     dies does not change how many paths there are.
+#   * `diffuse_depth` IS FIRST-ORDER. Same room, depths 50 / 100 / 200 give
+#     0.9022 / 1.2392 / 2.3403 s -- `depth**0.688`. The old law had no depth term,
+#     so it was silently valid at exactly one value of a knob that moves the answer
+#     2.6x across its plausible range. This is also what makes `diffuse_depth`
+#     physically a TIME bound rather than a ray-budget knob (AC-55).
+#   * SURFACE AREA, NOT VOLUME. Adding volume to a depth+surface fit moves its
+#     exponent to +0.067 and the residual not at all; surface alone carries +0.464.
+#     More surface is more reflecting area at a given reflection order.
+#
+#       predicted_support_s = coefficient * diffuse_depth**a * surface_m2**b
+#
+# THE SHIPPED COEFFICIENT IS A CONSERVATIVE ENVELOPE, NOT THE CENTRAL FIT. A
+# central fit puts half its residuals on the over-predicting side, and an
+# over-predicting gate admits scenes whose record cannot hold their decay -- the
+# failure this gate exists to prevent. The least-squares fit is c = 0.004906; it is
+# multiplied by 0.8689, the minimum realized/predicted ratio over the fit set, so
+# every one of those renders satisfies `realized >= predicted`. Margin: 13.1 %,
+# mean realized/predicted 1.155.
+#
+# FITTED AT `low_ray_budget` (5,000), and the budget is declared because support
+# rises slightly with it (measured 1.01-1.05x at 200,000). The low leg is the
+# conservative end for a gate that must not over-predict.
+#
+# RESIDUALS, and the honest limits. Shoeboxes fit to ~3 %; the three corridor cells
+# run -13 % to +13 %, so the law is weakest on the long-thin family, which is
+# exactly `test_geometry_shift`. Worse, ONE corridor cell is not a deterministic
+# function of geometry at all: `corr_thin_tall` (30 x 1.5 x 3.5 m) returned 1.8887 s
+# at 5,000 rays and 1.2621 s at 200,000 -- support FELL 33 % for 40x the rays, while
+# every other cell rose 1-5 %. Until that is understood, a corridor scene's
+# admission is provisional and the envelope above is what protects it.
+#
+# Every render FALSIFIES this prediction against realized `native_ir_samples` and
+# reports the residual (`_support_falsification`), exactly as `speed_of_sound_m_s`
+# is falsified against the paths, so a prediction that over-reads surfaces as a
+# defect in THIS declaration rather than governing the dataset unchallenged.
+predicted_support_coefficient_s: 0.004263
+predicted_support_depth_exponent: 0.6876
+predicted_support_surface_exponent: 0.4638
+predicted_support_fitted_at_ray_budget: 5000
+
+# The compiled ceiling: `prop_request.maxIRLength = 3.0` (Context.cpp:33), not
+# settable through `module.cpp`. With the auralizer's FILTER_TAIL_PADDING the
+# native record is at most 3.043 s, so under base.yaml's `ir_duration: 4.25` the
+# trim branch of `_fit_to_window` is UNREACHABLE and `max_discarded_tail_db` /
+# `truncation_qc_flag` are structurally dead here (AC-56). They are live under
+# configs/research_i.yaml, whose `ir_duration` is 3.0 s.
 max_ir_length_s: 3.0
-#
-# 2. THE ADAPTIVE ENERGY TRIM, which binds FIRST and is the one that matters
-#    (AC-184, measured on four real renders retained in experiments/ac175_probe/).
-#    No rendered scene came near the 3.0 s cap: native records were 0.676 / 1.199 /
-#    1.951 s for T60_nominal 0.093 / 0.417 / 4.200 s. Upstream trims on accumulated
-#    energy (Context.cpp:19,21 IR_THRESHOLD / ADAPTIVE_IR_LENGTH), and that grows far
-#    slower than the decay: T60 swept 45.2x while the record grew only 2.89x.
-#
-#    So the captured fraction of a scene's own decay COLLAPSES as the room gets more
-#    reverberant -- 436.5 / 172.3 / 27.9 dB at nominal alpha -- and for the largest
-#    declared room the record is SHORTER THAN THE T30 IT IS MEASURING
-#    (native_s / T30_fitted = 0.594). A declared CONSTANT cannot express this,
-#    because the deficit is a function of T60.
-#
-#    THE FORM. Realized support is NOT a fixed number of T60-multiples: measured
-#    over the three retained renders those multiples run 5.027 / 1.564 / 0.235, a
-#    21x spread, so a constant multiple is refuted by the data it would be fitted
-#    to. What does hold is a power law in the scene's own T60 --
-#
-#        predicted_support_s = coefficient * T60_eff ** exponent
-#
-#    -- least squares on log-log, n = 3, residuals +4.91 / -7.96 / +3.57 %. The
-#    sub-unity exponent IS the finding: support grows far more slowly than the
-#    decay it has to contain, so the deficit is worst for exactly the reverberant
-#    scenes this study is about.
-#
-#    n = 3 is thin, and the honest treatment is not to hide that but to make every
-#    render check it: gen-scenes gates on the PREDICTION (it runs before any render
-#    exists), and every render FALSIFIES the prediction against realized
-#    `native_ir_samples` and reports the residual, exactly as `speed_of_sound_m_s`
-#    is falsified against the paths. A prediction that over-reads is a defect in
-#    THIS declaration, and the render is where it surfaces.
-predicted_support_coefficient_s: 1.1806
-predicted_support_t60_exponent: 0.2541
-#
-#    What this predicts, as captured decay range (60 * support / T60_eff):
-#      T60_eff 0.134 s -> 301.6 dB   T30 admissible
-#      T60_eff 0.767 s ->  93.8 dB   T30 admissible
-#      T60_eff 8.294 s ->  14.1 dB   REFUSED -- below ISO 3382-1's 45 dB for T30
-#
-#    The refusal is the correct and intended outcome, not a failure of the fix: the
-#    largest declared rooms are not T30-measurable on this backend, and AC-176's
-#    estimator-side bound is what makes that explicit instead of returning a
-#    plausible 3.28 s for a room whose record is shorter than its own decay.
 
 # ── AIR ABSORPTION IS REALIZED AT alpha_ISO / 4 (AC-66) ───────────────────────
 #

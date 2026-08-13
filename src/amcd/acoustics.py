@@ -34,26 +34,52 @@ def box_volume_and_surface(dims: tuple[float, float, float]) -> tuple[float, flo
     return lx * ly * lz, 2.0 * (lx * ly + ly * lz + lx * lz)
 
 
-def predicted_support_s(t60_s: float, coefficient_s: float, exponent: float) -> float:
-    """How many seconds of record a backend is predicted to produce for a `t60_s`
-    decay: `coefficient_s * t60_s ** exponent`.
+def predicted_support_s(
+    reflection_depth: float,
+    surface_m2: float,
+    coefficient_s: float,
+    depth_exponent: float,
+    surface_exponent: float,
+) -> float:
+    """How many seconds of record a backend is predicted to produce:
+    `coefficient_s * reflection_depth**depth_exponent * surface_m2**surface_exponent`.
 
-    The functional form, not the coefficients — those are a backend fact and are
-    declared per simulator in config, because a different raytracer trims its
-    record differently. An `exponent` below 1 means support grows more slowly than
-    the decay it must contain, so the captured fraction falls as rooms get more
-    reverberant; that is the AC-184 finding, and it is why a single declared record
-    length cannot express this bound.
+    NOT A FUNCTION OF T60, AND THAT IS THE MEASUREMENT (AC-186). The predecessor of
+    this formula was `c * T60**k`, fitted on renders whose rooms were all produced
+    by scaling one shoebox, so room size and decay time moved together and either
+    could appear to drive the record. A crossed probe separates them: holding
+    geometry fixed and moving absorption across the declared `mixed` support —
+    α 0.05 vs 0.80, a 16x change in T60 — moves realized support by **0.00 %,
+    0.49 %, 0.00 %** at three room sizes. An energy trim closes the record when it
+    runs out of PATHS, and how fast a room's decay dies does not change how many
+    paths there are to trace.
+
+    What does drive it, measured over the same probe:
+
+    * `reflection_depth` — the backend's own bound on reflection order
+      (gsound's `diffuse_depth`). At fixed geometry, support runs 0.9022 / 1.2392 /
+      2.3403 s over depths 50 / 100 / 200, i.e. `depth**0.688`. The shipped
+      predecessor had no depth term at all, so it was silently valid at exactly one
+      value of a config knob that moves the answer 2.6x across its plausible range.
+    * `surface_m2` — surface area, not volume. Adding volume to a depth+surface fit
+      moves its exponent to +0.067 and the residual not at all, while surface alone
+      carries +0.464. More surface is more reflecting area for a given order.
+
+    The COEFFICIENTS are a backend fact, declared per simulator in config, because a
+    different raytracer trims its record differently — and a backend that genuinely
+    trims on decay says so by declaring the exponents its own probe measures.
 
     Lives here rather than in `simulators/gsound_sir.py` so the gen-scenes gate and
     the render-time falsification evaluate one formula, for the AC-24 reason the
     T60s do.
     """
-    if t60_s <= 0.0:
-        raise ValueError(f"t60_s must be positive; got {t60_s!r}.")
+    if reflection_depth <= 0.0:
+        raise ValueError(f"reflection_depth must be positive; got {reflection_depth!r}.")
+    if surface_m2 <= 0.0:
+        raise ValueError(f"surface_m2 must be positive; got {surface_m2!r}.")
     if coefficient_s <= 0.0:
         raise ValueError(f"coefficient_s must be positive; got {coefficient_s!r}.")
-    return coefficient_s * t60_s**exponent
+    return coefficient_s * reflection_depth**depth_exponent * surface_m2**surface_exponent
 
 
 def sabine_rt60(volume_m3: float, surface_m2: float, absorption: float) -> float:

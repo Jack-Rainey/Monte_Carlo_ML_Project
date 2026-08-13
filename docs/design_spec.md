@@ -401,38 +401,52 @@ headroom and D0b's carrier test all treat that leg as ground truth, and nothing 
 ever checked it. It is a tolerance check over a handful of scenes, never a
 CI-backed convergence claim, and must be reported as such.
 
-### 11.2 GSound-SIR's T30 ceiling is a renderer limitation (user decision, 2026-08-12)
+### 11.2 The reverberant corner is not measurable on GSound-SIR (user decision, 2026-08-12; numbers re-derived 2026-08-13)
 
-**T30 stops being ISO-3382-1-admissible above Sabine T60 ≈ 1.85 s on this
-backend, and lengthening the record does not help.** Upstream's adaptive energy
-trim closes the IR as a sub-linear power of the decay —
-`support_s ≈ 1.1806 · T60^0.2541`, fitted on the retained renders in
-`experiments/ac175_probe/` — so the captured decay range `60·support/T60` falls
-below the 45 dB the standard requires for T30 at that point. Measured identical
-at 3.0 s, 4.25 s and 30 s of `ir_duration`: the binding limit is the trim, not the
-buffer.
+**Part of the declared population cannot be scored on this backend, and lengthening
+the record does not help.** Upstream's adaptive energy trim closes the IR before the
+decay has fallen far enough for an ISO-3382-1 T30 fit, so the captured decay range
+`60·support/T60` drops below the standard's 45 dB at the reverberant end. Measured
+identical at 3.0 s, 4.25 s and 30 s of `ir_duration`: the binding limit is the trim,
+not the buffer.
+
+**What sets the trim was measured wrong until 2026-08-13, and the correction
+matters.** The first law was `support ≈ c·T60^k`, fitted on renders whose rooms were
+all scalings of one shoebox — so room size and decay time moved together and either
+could appear to drive the record. A crossed probe
+(`scripts/support_law_probe.py`, 21 renders, `experiments/support_law/`) separates
+them and refutes T60 outright: holding geometry fixed and moving absorption across
+the declared `mixed` support, a **16× change in T60 moves realized support by
+0.00 % / 0.49 % / 0.00 %**. What does drive it is the backend's reflection-order
+bound and the room's surface area — `support ≈ c·diffuse_depth^0.688·S^0.464`,
+declared in `configs/simulators/gsound_sir.yaml` as a conservative lower envelope.
+So the admissible region is **not a T60 ceiling at all**; the earlier "T30 stops being
+admissible above T60 ≈ 1.85 s" is withdrawn.
 
 **Decision: this is accepted as a limitation OF GSOUND-SIR.** The study does not
 reshape its declared population around it. Consequences, all deliberate:
 
-- Affected scenes still render. Their T30 comes back **unscored with a reason**
-  from the estimator's own ISO bound (AC-176) — never as a truncation-biased
-  number — and the per-split scored-vs-attempted counts carry that into the
-  report.
-- The realized censoring is small because the unmeasurable corner is the product
-  of two independent extremes: **17/600 = 2.8 % of `base.yaml`**, **27/720 = 3.8 %
-  of the Research I reproduction**, concentrated in the reverberant splits and
-  zero in the near-anechoic `test_material_shift`.
-- `scenes.max_t60_over_ir_duration_frac` is 0.05 in both configs. It is now a
-  **regression tripwire on the censoring rate**, not an admissibility gate — it
-  trips if the rate roughly doubles.
+- Affected scenes still render. Their T30 comes back **unscored with a reason** from
+  the estimator's own ISO bound (AC-176) — never as a truncation-biased number — and
+  the per-split scored-vs-attempted counts carry that into the report.
+- **`configs/base.yaml`: 23/600 = 3.83 %** censored (was reported as 2.8 % under the
+  refuted law, which under-counted the censoring it exists to bound). Concentrated in
+  the reverberant splits, zero in the near-anechoic `test_material_shift`.
+- **`configs/research_i.yaml`: 40/720 = 5.56 %, which EXCEEDS its own declared
+  `max_t60_over_ir_duration_frac` of 0.05, so `gen-scenes` now REFUSES it.** The
+  Research I population is not fully admissible on this backend. That is an open
+  research decision — raise the tolerance with a stated reason, or accept the
+  reproduction over a declared subpopulation — and it is deliberately not resolved by
+  tuning the number, because the gate exists to surface exactly this.
+- `scenes.max_t60_over_ir_duration_frac` is a **regression tripwire on the censoring
+  rate**, not an admissibility gate: it trips if the rate roughly doubles.
 - Any E1/E2 claim over the reverberant end is a claim over a **censored
   subpopulation**, and must be reported as such.
 
 **This strengthens the case for the custom renderer** in `research_I_paper.md` §6
-future work: a raytracer whose record length is a declared parameter rather than
-an emergent property of an energy heuristic would remove this ceiling outright.
-Recorded here so the eventual recommendation rests on a measurement.
+future work: a raytracer whose record length is a declared parameter rather than an
+emergent property of an energy heuristic would remove this ceiling outright. Recorded
+here so the eventual recommendation rests on a measurement.
 
 ## 12. Environment (cross-platform is a project requirement)
 

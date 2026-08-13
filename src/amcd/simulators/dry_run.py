@@ -70,7 +70,8 @@ class DryRunSimulator:
         return float(params["min_source_receiver_distance_m"])
 
     @classmethod
-    def realized_support_s(cls, params: dict, t60_s: float, window_s: float) -> float:
+    def realized_support_s(cls, params: dict, t60_s: float, volume_m3: float,
+                           surface_m2: float, window_s: float) -> float:
         """Required pre-render declaration (`Simulator`).
 
         The scaffold synthesizes directly into the full window, so it fills whatever

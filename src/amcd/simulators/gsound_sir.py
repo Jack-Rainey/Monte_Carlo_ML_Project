@@ -508,7 +508,12 @@ class GsoundSirSimulator:
         #: render is where it surfaces — which is what makes an n=3 fit safe to
         #: ship rather than a guess nobody re-checks.
         predicted_support_coefficient_s: float
-        predicted_support_t60_exponent: float
+        predicted_support_depth_exponent: float
+        predicted_support_surface_exponent: float
+        #: Declared so the law states its own operating point: realized support
+        #: rises with the ray budget, so a coefficient carries an implicit budget
+        #: unless it says which one it was fitted at (AC-185).
+        predicted_support_fitted_at_ray_budget: int
 
         #: AIR ABSORPTION IS REALIZED AT alpha_ISO/4 (AC-66) — AC-54's domain
         #: confusion at a second call site, which pre-compensating surface alpha
@@ -613,23 +618,31 @@ class GsoundSirSimulator:
         return float(params["source_radius"]) + float(params["listener_radius"])
 
     @classmethod
-    def realized_support_s(cls, params: dict, t60_s: float, window_s: float) -> float:
-        """Required pre-render declaration (`Simulator`) — AC-184, AC-175, AC-56.
+    def realized_support_s(cls, params: dict, t60_s: float, volume_m3: float,
+                           surface_m2: float, window_s: float) -> float:
+        """Required pre-render declaration (`Simulator`) — AC-186, AC-175, AC-56.
 
-        Two limits, and the ADAPTIVE ENERGY TRIM binds first. It closes the record
-        as a sub-linear power of the decay, so the captured fraction falls as rooms
-        get more reverberant; the compiled 3.0 s `maxIRLength` is only a ceiling on
-        top of that and no rendered scene has come near it.
+        Two limits, and the ADAPTIVE ENERGY TRIM binds first: the compiled 3.0 s
+        `maxIRLength` is a ceiling on top of it that no rendered scene has come
+        near.
 
-        Both coefficients are config-declared and falsified per render against
+        `t60_s` and `volume_m3` are in the signature and unused HERE, deliberately.
+        The gate still needs T60 to turn this answer into a decay range
+        (`60 * support / T60`), and a backend whose trim really does track decay —
+        which this one measurably does not — must be able to say so without the
+        seam changing shape. Passing them and ignoring them is the declaration.
+
+        All three coefficients are config-declared and falsified per render against
         realized `native_ir_samples` (`_support_falsification`), so a prediction
         that over-reads surfaces as a defect in the declaration rather than
         governing the dataset unchallenged.
         """
         trim_s = predicted_support_s(
-            t60_s,
+            float(params["diffuse_depth"]),
+            surface_m2,
             float(params["predicted_support_coefficient_s"]),
-            float(params["predicted_support_t60_exponent"]),
+            float(params["predicted_support_depth_exponent"]),
+            float(params["predicted_support_surface_exponent"]),
         )
         return min(trim_s, float(params["max_ir_length_s"]), float(window_s))
 
@@ -800,9 +813,11 @@ class GsoundSirSimulator:
         )
         t60_s = sabine_rt60(volume, surface, alpha_realized)
         predicted_s = predicted_support_s(
-            t60_s,
+            float(self.params["diffuse_depth"]),
+            surface,
             float(self.params["predicted_support_coefficient_s"]),
-            float(self.params["predicted_support_t60_exponent"]),
+            float(self.params["predicted_support_depth_exponent"]),
+            float(self.params["predicted_support_surface_exponent"]),
         )
         realized_s = n_native / float(self.sample_rate)
         return {

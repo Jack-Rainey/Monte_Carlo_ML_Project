@@ -374,7 +374,7 @@ def _room_acoustics(
     # the decay range that record therefore holds. Resolved through the caller's
     # seam, so this module stays backend-agnostic (RD-144). Sabine, not Eyring: the
     # longer T60 gives the smaller decay range, which errs toward refusing.
-    support_s = float(realized_support_s(t60_sabine))
+    support_s = float(realized_support_s(t60_sabine, volume, surface))
     available_decay_db = 60.0 * support_s / t60_sabine
     # Room constant, critical distance and diffuse-field DRR come from
     # `amcd.acoustics` for the AC-24 reason the T60s already did (RD-75): the
@@ -829,8 +829,9 @@ def run_gen_scenes(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
     # passed down as a plain callable, so `_room_acoustics` never touches the
     # registry and this module still names no backend (RD-144). Validation of the
     # declaration happens on the first call, before any scene is written.
-    def support_of(t60_s: float) -> float:
-        return simulator_realized_support_s(config, t60_s, config.ir_duration)
+    def support_of(t60_s: float, volume_m3: float, surface_m2: float) -> float:
+        return simulator_realized_support_s(
+            config, t60_s, volume_m3, surface_m2, config.ir_duration)
 
     scenes_cfg = config.scenes
     id_axes = dict(scenes_cfg.id_regime)  # {geometry, placement, material}

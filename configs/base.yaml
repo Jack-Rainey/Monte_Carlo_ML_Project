@@ -89,13 +89,21 @@ scenes:
   # BACKEND'S REALIZED SUPPORT, not against `ir_duration`. Under `dry_run` the two
   # coincide, because the scaffold fills its whole window. Under `gsound_sir` they
   # do not, and a config that passed at 4.25 s can fail here — correctly.
-  # 0.05 against a MEASURED 2.8% (17/600), i.e. it permits the known censoring and
-  # still trips if that roughly doubles. It is NOT 0.0 any more, and the reason is
-  # a user decision of 2026-08-12 recorded at design_spec 11.2: GSound-SIR's
-  # adaptive energy trim makes T30 inadmissible above T60 ~ 1.85 s at ANY window,
-  # so a handful of the most reverberant draws cannot be scored on this backend.
-  # That is accepted as a documented limitation of the renderer rather than
-  # something to design the population around.
+  # 0.05 against a MEASURED 3.83% (23/600) under the corrected support law, i.e. it
+  # permits the known censoring and still trips if that roughly doubles. It is NOT
+  # 0.0 any more, and the reason is a user decision of 2026-08-12 recorded at
+  # design_spec 11.2: GSound-SIR's adaptive energy trim leaves the reverberant
+  # corner of this population unmeasurable, and that is accepted as a documented
+  # limitation of the renderer rather than something to design the population
+  # around.
+  #
+  # The rate was 2.8% (17/600) until 2026-08-13 and the difference is not drift:
+  # the law behind it predicted realized support from T60, and a crossed probe
+  # measured T60's effect on the record at 0.00-0.49% (AC-186). The old law
+  # under-counted the very censoring this key exists to bound. Note that
+  # configs/research_i.yaml now measures 5.56% against the same 0.05 and is
+  # REFUSED — see design_spec 11.2; that is an open research decision, not a
+  # number to be tuned until it passes.
   #
   # It is NOT hidden by this number. Those scenes still render; their T30 comes back
   # unscored WITH A REASON from the estimator's own ISO bound (AC-176), and the

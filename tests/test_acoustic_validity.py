@@ -70,11 +70,16 @@ class TestRealizedRecordLengthGate:
     def test_base_discloses_its_censoring_rather_than_refusing(self, tmp_path: Path) -> None:
         """The user decision of 2026-08-12 (design_spec 11.2), enforced.
 
-        GSound-SIR's adaptive energy trim makes T30 inadmissible above T60 ~ 1.85 s.
-        That is accepted as a limitation OF THE RENDERER, so the gate does not abort
-        — it bounds the censoring RATE, and the censoring itself is disclosed per
-        split and carried by the estimator's own unscored-with-a-reason path
-        (AC-176). Measured 17/600 = 2.8 %, against a declared tolerance of 0.05.
+        GSound-SIR's adaptive energy trim leaves the reverberant corner of the
+        declared population unmeasurable. That is accepted as a limitation OF THE
+        RENDERER, so the gate does not abort — it bounds the censoring RATE, and the
+        censoring itself is disclosed per split and carried by the estimator's own
+        unscored-with-a-reason path (AC-176).
+
+        Measured 23/600 = 3.83 % under the corrected support law (AC-186), against a
+        declared tolerance of 0.05. The predecessor law gave 17/600 = 2.8 %; it was
+        fitted on rooms that were all scalings of one shoebox and had the wrong
+        independent variable, so it under-counted the censoring it exists to bound.
         """
         cfg = Config.load(_BASE)
         assert cfg.scenes.max_t60_over_ir_duration_frac == 0.05
@@ -83,34 +88,44 @@ class TestRealizedRecordLengthGate:
         censored = sum(e["record_decay_range"]["decay_range_below_iso_t30"]["count"]
                        for e in report.values())
         total = sum(e["n_scenes"] for e in report.values())
-        assert (censored, total) == (17, 600)
+        assert (censored, total) == (23, 600)
         assert 0 < censored / total < cfg.scenes.max_t60_over_ir_duration_frac
 
     def test_the_censoring_is_reported_per_split_not_only_in_aggregate(
         self, tmp_path: Path
     ) -> None:
-        """A pooled 2.8 % would hide that it is concentrated in the reverberant
+        """A pooled 3.83 % would hide that it is concentrated in the reverberant
         splits — which is exactly where the study's interest lies."""
         run_gen_scenes(Config.load(_BASE), tmp_path, QUIET)
         report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
         per_split = {s: e["record_decay_range"]["decay_range_below_iso_t30"]["count"]
                      for s, e in report.items()}
-        assert per_split["id"] == 16
+        assert per_split["id"] == 22
         assert per_split["test_geometry_shift"] == 1
         # Near-anechoic by construction: nothing there is long enough to censor.
         assert per_split["test_material_shift"] == 0
 
-    def test_research_i_discloses_its_own_larger_rate(self, tmp_path: Path) -> None:
-        """RI's 3.0 s record was always known not to cover its 4.09 s corner; the
-        realized shortfall is simply larger than the old instrument could see.
-        27/720 = 3.8 %."""
+    def test_research_i_is_refused_by_its_own_declared_tolerance(
+        self, tmp_path: Path
+    ) -> None:
+        """THE RESEARCH I POPULATION IS NOT ADMISSIBLE ON THIS BACKEND, and this
+        pins that rather than papering over it.
+
+        RI's 3.0 s record was always known not to cover its 4.09 s corner. Under the
+        corrected support law (AC-186) the realized shortfall is 40/720 = 5.56 %,
+        above RI's own declared `max_t60_over_ir_duration_frac` of 0.05, so
+        `gen-scenes` REFUSES rather than generating a dataset whose reverberant tail
+        cannot be scored.
+
+        This is a live research decision, not a defect to be tuned away: either the
+        tolerance is raised with a stated reason, or RI's declared population is
+        accepted as partly unmeasurable on GSound-SIR. Loosening the number to make
+        the gate pass would hide exactly what the gate was built to surface, so the
+        test asserts the refusal and its measured rate.
+        """
         cfg = Config.load(*_RI)
-        run_gen_scenes(cfg, tmp_path, QUIET)
-        report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
-        censored = sum(e["record_decay_range"]["decay_range_below_iso_t30"]["count"]
-                       for e in report.values())
-        assert (censored, sum(e["n_scenes"] for e in report.values())) == (27, 720)
-        assert censored / 720 < cfg.scenes.max_t60_over_ir_duration_frac
+        with pytest.raises(ValueError, match=r"40 of 720 scenes \(5\.556%\)"):
+            run_gen_scenes(cfg, tmp_path, QUIET)
 
     def test_exceeding_the_declared_tolerance_fails_loudly(self, tmp_path: Path) -> None:
         """A 0.1 s record against base's geometry: every scene is over."""
@@ -165,7 +180,9 @@ class TestDiffuseFieldValidityFlags:
         return _room_acoustics(
             dims, alpha, distance,
             alpha_limit=kw.get("alpha_limit", 0.3),
-            realized_support_s=kw.get("realized_support_s", lambda _t60: kw.get("ir_duration_s", 3.0)),
+            realized_support_s=kw.get(
+                "realized_support_s",
+                lambda _t60, _v, _s: kw.get("ir_duration_s", 3.0)),
             iso_t30_decay_range_db=kw.get("iso_t30_decay_range_db", 45.0),
             characterization=kw.get("characterization", "sabine"),
         )
@@ -217,7 +234,7 @@ class TestReceiverInsideCriticalDistance:
         r_c = critical_distance(surface, alpha)
         return _room_acoustics(
             dims, alpha, d_over_rc * r_c,
-            alpha_limit=0.3, realized_support_s=lambda _t60: 3.0, iso_t30_decay_range_db=45.0, characterization="sabine",
+            alpha_limit=0.3, realized_support_s=lambda _t60, _v, _s: 3.0, iso_t30_decay_range_db=45.0, characterization="sabine",
         )
 
     def test_half_the_critical_distance_flags(self) -> None:
@@ -259,7 +276,7 @@ class TestNonEnclosureGeometryIsNotCharacterized:
     def test_a_non_enclosure_gets_a_reason_not_a_number(self) -> None:
         room = _room_acoustics(
             (10.0, 8.0, 3.5), 0.2, 3.0,
-            alpha_limit=0.3, realized_support_s=lambda _t60: 3.0, iso_t30_decay_range_db=45.0, characterization="none",
+            alpha_limit=0.3, realized_support_s=lambda _t60, _v, _s: 3.0, iso_t30_decay_range_db=45.0, characterization="none",
         )
         for key in ("t60_sabine_s", "critical_distance_m", "drr_db", "d_over_rc"):
             assert key not in room, (
@@ -326,68 +343,103 @@ class TestValidityReachesTheReport:
 
 
 class TestRealizedRecordSupport:
-    """AC-184: the record gsound produces is a sub-linear FUNCTION of the decay.
+    """AC-186: the record gsound produces is set by REFLECTION DEPTH and SURFACE
+    AREA, and not at all by the decay.
 
-    Pinned against the three renders retained in `experiments/ac175_probe/`, which
-    are the only real measurements of this backend's adaptive energy trim. The
-    declaration these tests guard is `predicted_support_*` in
+    Pinned against `experiments/support_law/`, a crossed probe built to separate
+    variables the earlier artifacts could not: every room in those was a scaling of
+    one shoebox, so size and decay moved together and either could appear to drive
+    the record. The declaration these tests guard is `predicted_support_*` in
     `configs/simulators/gsound_sir.yaml`; the render falsifies it per scene, and
-    these assert the fit it was derived from still holds.
+    these assert the measurements it was derived from still hold.
     """
 
-    PROBE = Path(__file__).resolve().parents[1] / "experiments" / "ac175_probe" / "ac175_results.json"
+    PROBE = Path(__file__).resolve().parents[1] / "experiments" / "support_law" / "support_law_results.json"
 
     @pytest.fixture(scope="class")
     @classmethod
     def probe(cls) -> list[dict]:
         if not cls.PROBE.exists():
             pytest.skip(f"retained render artifacts absent: {cls.PROBE}")
-        return json.loads(cls.PROBE.read_text())
+        return json.loads(cls.PROBE.read_text())["rows"]
 
     @pytest.fixture(scope="class")
     @classmethod
-    def declared(cls) -> tuple[float, float]:
+    def declared(cls) -> dict:
         import yaml
         params = yaml.safe_load(
             (Path(__file__).resolve().parents[1] / "configs" / "simulators" / "gsound_sir.yaml").read_text()
         )
-        return (
-            float(params["predicted_support_coefficient_s"]),
-            float(params["predicted_support_t60_exponent"]),
-        )
+        return {
+            "coefficient": float(params["predicted_support_coefficient_s"]),
+            "depth_exponent": float(params["predicted_support_depth_exponent"]),
+            "surface_exponent": float(params["predicted_support_surface_exponent"]),
+            "budget": int(params["predicted_support_fitted_at_ray_budget"]),
+        }
 
-    def test_a_constant_number_of_t60_multiples_is_refuted(self, probe: list[dict]) -> None:
-        """The form AC-184's remedy was first written against, and why it changed.
+    def test_the_decay_does_not_move_the_record(self, probe: list[dict]) -> None:
+        """THE measurement that refuted the previous law's independent variable.
 
-        If support were a fixed multiple of T60 these would cluster; they span 21x.
+        Same geometry, absorption at the two ends of the declared `mixed` support —
+        a 16x change in T60 — and the record does not move. A law in T60 has to
+        explain this and cannot.
         """
-        multiples = [s["native_s"] / s["T60_alpha_eff"] for s in probe]
-        assert max(multiples) / min(multiples) > 20.0
-
-    def test_the_declared_power_law_predicts_every_retained_render(
-        self, probe: list[dict], declared: tuple[float, float]
-    ) -> None:
-        coefficient, exponent = declared
-        for scene in probe:
-            predicted = predicted_support_s(scene["T60_alpha_eff"], coefficient, exponent)
-            residual = (predicted - scene["native_s"]) / scene["native_s"]
-            assert abs(residual) < 0.10, (
-                f"{scene['scene']}: predicted {predicted:.4f} s against realized "
-                f"{scene['native_s']:.4f} s ({residual:+.2%})"
+        by_room: dict[float, list[dict]] = {}
+        for row in probe:
+            if row["group"] == "shoebox" and row["ray_budget"] == 5000:
+                by_room.setdefault(row["surface_area_m2"], []).append(row)
+        pairs = [sorted(v, key=lambda r: r["t60_sabine_s"])
+                 for v in by_room.values() if len(v) == 2]
+        assert pairs, "the crossed absorption cells are missing from the probe"
+        for lo, hi in pairs:
+            assert hi["t60_sabine_s"] / lo["t60_sabine_s"] > 5.0, (
+                "these two cells do not differ in T60, so they cannot test it"
+            )
+            drift = abs(hi["realized_support_s"] / lo["realized_support_s"] - 1.0)
+            assert drift < 0.02, (
+                f"support moved {drift:.2%} across a "
+                f"{hi['t60_sabine_s'] / lo['t60_sabine_s']:.1f}x change in T60"
             )
 
-    def test_support_grows_more_slowly_than_the_decay(self, declared: tuple[float, float]) -> None:
-        """The sub-unity exponent IS the finding — an exponent >= 1 would mean the
-        record keeps up with reverberance, which is the thing AC-184 refuted."""
-        assert 0.0 < declared[1] < 1.0
+    def test_the_record_tracks_reflection_depth(self, probe: list[dict]) -> None:
+        """`diffuse_depth` is a TIME bound (AC-55), which is why it is in the law."""
+        depths = sorted((r for r in probe if r["group"] == "depth"),
+                        key=lambda r: r["diffuse_depth"])
+        assert len(depths) >= 3, "the depth sweep is missing from the probe"
+        supports = [r["realized_support_s"] for r in depths]
+        assert supports == sorted(supports), "support must rise with reflection depth"
+        assert supports[-1] / supports[0] > 2.0, (
+            "a 4x change in reflection depth moved the record by less than 2x — "
+            "the depth term in the declared law would not be justified"
+        )
 
-    def test_the_largest_declared_room_is_not_t30_measurable(
-        self, probe: list[dict], declared: tuple[float, float]
+    def test_the_declaration_never_over_predicts_a_retained_render(
+        self, probe: list[dict], declared: dict
     ) -> None:
-        """The consequence that gates the dataset: at the reverberant end the record
-        holds ~14 dB of decay against ISO 3382-1's 45 dB for T30, so the honest
-        output is unscored-with-a-reason (AC-176), not a plausible 3.28 s."""
-        coefficient, exponent = declared
-        long = max(probe, key=lambda s: s["T60_alpha_eff"])
-        captured_db = 60.0 * predicted_support_s(long["T60_alpha_eff"], coefficient, exponent) / long["T60_alpha_eff"]
-        assert captured_db < 45.0
+        """The shipped coefficient is a conservative ENVELOPE, not a central fit.
+
+        Over-prediction is the direction that matters: it admits a scene whose
+        record cannot hold its decay, which is what the gate exists to prevent. A
+        central fit would put half of these below 1.0 by construction.
+        """
+        checked = 0
+        for row in probe:
+            if row["ray_budget"] != declared["budget"]:
+                continue
+            predicted = predicted_support_s(
+                row["diffuse_depth"], row["surface_area_m2"],
+                declared["coefficient"], declared["depth_exponent"],
+                declared["surface_exponent"],
+            )
+            assert row["realized_support_s"] >= predicted, (
+                f"{row['scene_id']}: predicted {predicted:.4f} s but the render "
+                f"realized only {row['realized_support_s']:.4f} s — the gate would "
+                f"have admitted this scene against a record it did not get"
+            )
+            checked += 1
+        assert checked, "no render at the declared fit budget"
+
+    def test_the_law_states_the_budget_it_was_fitted_at(self, declared: dict) -> None:
+        """Realized support rises with the ray budget, so a coefficient without a
+        declared operating point carries an implicit one (AC-185)."""
+        assert declared["budget"] > 0
