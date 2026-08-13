@@ -1237,7 +1237,7 @@ class TestHostScopedParamsStayOutOfProvenance:
             source_pos=(1.0, 1.0, 1.5), receiver_pos=(4.0, 3.0, 1.5),
         )
         leg = IRResult(ir=np.zeros((16, 8), dtype=np.float32), meta={})
-        recorded = _canonical_meta(cfg, scene, leg, leg)
+        recorded = _canonical_meta(cfg, scene, leg, leg, artifact_sha256={"low.npy": "0"*64})
 
         params = recorded["simulator"]["params"]
         assert "render_python" not in params
@@ -1961,3 +1961,60 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
                 "convention has leaked into the backend-agnostic scene population "
                 "(RD-144). It belongs in configs/simulators/<name>.yaml."
             )
+
+
+class TestRenderArtifactsHaveAVerifier:
+    """F-116/F-118: digests that nothing reads, and a stale file nothing reports.
+
+    `rng_seeded: false` puts reproducibility on the CACHED ARTIFACTS rather than on
+    re-render bit-identity, so `artifact_sha256` is what stands between a truncated
+    IR and a reported number computed from it. It had exactly one writer and no
+    reader outside a test that recomputed the digest itself — which checks the
+    digest function, not the files.
+    """
+
+    @staticmethod
+    def _scene_dir(tmp_path: Path) -> Path:
+        from amcd.simulators.render import _sha256
+
+        scene = tmp_path / "renders" / "scene_0000"
+        scene.mkdir(parents=True)
+        (scene / "low.npy").write_bytes(b"low-artifact-bytes")
+        (scene / "high.npy").write_bytes(b"high-artifact-bytes")
+        digests = {n: _sha256(scene / n) for n in ("low.npy", "high.npy")}
+        (scene / "meta.json").write_text(json.dumps({"artifact_sha256": digests}))
+        return scene
+
+    def test_intact_artifacts_report_nothing(self, tmp_path: Path) -> None:
+        from amcd.simulators.render import verify_render_artifacts
+
+        self._scene_dir(tmp_path)
+        assert verify_render_artifacts(tmp_path / "renders") == []
+
+    def test_a_modified_artifact_is_reported(self, tmp_path: Path) -> None:
+        from amcd.simulators.render import verify_render_artifacts
+
+        scene = self._scene_dir(tmp_path)
+        (scene / "low.npy").write_bytes(b"low-artifact-byteS")   # one bit
+        problems = verify_render_artifacts(tmp_path / "renders")
+        assert [u for u, _ in problems] == ["scene_0000/low.npy"], problems
+
+    def test_a_missing_artifact_is_reported(self, tmp_path: Path) -> None:
+        from amcd.simulators.render import verify_render_artifacts
+
+        scene = self._scene_dir(tmp_path)
+        (scene / "high.npy").unlink()
+        assert [u for u, _ in verify_render_artifacts(tmp_path / "renders")] == [
+            "scene_0000/high.npy"
+        ]
+
+    def test_an_empty_integrity_record_is_reported_not_treated_as_passing(
+        self, tmp_path: Path
+    ) -> None:
+        """An absent record used to render as `{}`, and an empty record iterates
+        zero times — so it passes every check by having nothing to check."""
+        from amcd.simulators.render import verify_render_artifacts
+
+        scene = self._scene_dir(tmp_path)
+        (scene / "meta.json").write_text(json.dumps({"artifact_sha256": {}}))
+        assert verify_render_artifacts(tmp_path / "renders")

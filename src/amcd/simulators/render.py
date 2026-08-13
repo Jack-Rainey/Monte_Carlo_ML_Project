@@ -35,12 +35,57 @@ from .base import (
 
 
 def _sha256(path: Path) -> str:
-    """Digest one written artifact, streamed — an IR pair is ~26 MB per scene."""
+    """Digest one written artifact, streamed — an IR pair is ~26 MB per scene.
+
+    A WITHIN-HOST INTEGRITY CHECK, NOT A CROSS-HOST IDENTITY (F-117). For `.npy`
+    this is the array bytes and travels; for `.parquet` it is the CONTAINER's
+    bytes, which carry the writer's version, compression choices and row-group
+    layout — so the same `PathData` written by a different pyarrow gives a
+    different digest. That is fine for what these exist to catch, a truncated or
+    corrupted file beside its own meta.json, and wrong for "is this the same data
+    as on the other host". Comparing path artifacts across hosts means comparing
+    the arrays and the descriptor, not this number.
+
+    Read by `verify_render_artifacts`, which the render stage calls over the scene
+    directories it keeps.
+    """
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def verify_render_artifacts(renders_dir: Path) -> list[tuple[str, str]]:
+    """Re-digest every recorded artifact and return `(unit, reason)` for each
+    mismatch or absence.
+
+    `rng_seeded: false` puts reproducibility on the CACHED ARTIFACTS rather than on
+    re-render bit-identity, so the digests are what stands between a truncated or
+    silently-modified IR and a reported number computed from it. They were written
+    and never read by any code path (F-116) — the only reader was a test that
+    recomputed them itself, which checks the digest function rather than the files.
+
+    Returns rather than raises: the caller decides whether a corrupt artifact is
+    fatal, and a list of every bad scene beats stopping at the first.
+    """
+    problems: list[tuple[str, str]] = []
+    for scene_dir in sorted(p for p in renders_dir.iterdir() if p.is_dir()):
+        meta_path = scene_dir / "meta.json"
+        if not meta_path.exists():
+            problems.append((scene_dir.name, "no meta.json, so nothing records what it should contain"))
+            continue
+        recorded = json.loads(meta_path.read_text()).get("artifact_sha256")
+        if not recorded:
+            problems.append((scene_dir.name, "meta.json carries no artifact_sha256"))
+            continue
+        for name, digest in sorted(recorded.items()):
+            artifact = scene_dir / name
+            if not artifact.exists():
+                problems.append((f"{scene_dir.name}/{name}", "recorded in meta.json but absent"))
+            elif _sha256(artifact) != digest:
+                problems.append((f"{scene_dir.name}/{name}", "content does not match its recorded sha256"))
+    return problems
 
 
 def _preflight_separations(config: Config, scenes: list[SceneSpec]) -> None:
@@ -82,7 +127,7 @@ def _canonical_meta(
     scene: SceneSpec,
     low: IRResult,
     high: IRResult,
-    artifact_sha256: dict[str, str] | None = None,
+    artifact_sha256: dict[str, str],
 ) -> dict:
     """The provenance record for one scene's rendered pair.
 
@@ -107,7 +152,10 @@ def _canonical_meta(
     return {
         "scene_id": scene.scene_id,
         "simulator": {"name": config.simulator.name, "params": params},
-        "artifact_sha256": artifact_sha256 or {},
+        # REQUIRED, not defaulted (F-116): `artifact_sha256 or {}` rendered an
+        # absent record as an empty one, indistinguishable from "this render wrote
+        # nothing" — and an empty integrity record reads as a passing one.
+        "artifact_sha256": artifact_sha256,
         "sample_rate": config.sample_rate,
         "n_samples": config.n_samples,
         "n_channels": config.n_channels,
@@ -157,6 +205,32 @@ def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
             pruned += 1
     if pruned:
         emit(verbosity, "progress", f"  Pruned {pruned} orphan render dir(s) from {renders_dir}")
+
+    # Whole ORPHAN dirs are gone; a stale file INSIDE a kept dir is not (F-118).
+    # Switching `path_retention` to `all` and back leaves the old
+    # `paths_{leg}.parquet` in place, and nothing downstream distinguishes it from
+    # one this run wrote — it is absent from `artifact_sha256`, so provenance is
+    # silent about it. Report rather than delete: an unexpected file in an
+    # expensive artifact directory is something an operator should see, and
+    # deleting it would destroy the evidence of whatever wrote it.
+    for kept in sorted(renders_dir.iterdir()):
+        if not kept.is_dir() or kept.name not in current_ids:
+            continue
+        meta_path = kept / "meta.json"
+        if not meta_path.exists():
+            continue
+        recorded = set(json.loads(meta_path.read_text()).get("artifact_sha256", {}))
+        unexpected = sorted(
+            f.name for f in kept.iterdir()
+            if f.is_file() and f.name != "meta.json" and f.name not in recorded
+            and not f.name.startswith("._")
+        )
+        if unexpected:
+            emit(verbosity, "warning",
+                 f"  WARNING: {kept} holds {unexpected}, which this run did not "
+                 f"write and meta.json does not record. A file no digest covers is "
+                 f"outside provenance — most likely left by an earlier run under a "
+                 f"different `path_retention` (F-118).")
 
     # (scene_id, reason) for every scene the backend refused. Collected rather than
     # raised in place (F-125), for the reason `_preflight_separations` states above:
@@ -230,6 +304,12 @@ def run_render(config: Config, run_dir: Path, verbosity: Verbosity) -> None:
         # Digest what this scene produced, AFTER the last write and BEFORE meta.json,
         # which is the file that carries them (F-90).
         digests = {name: _sha256(out_dir / name) for name in sorted(written)}
+        if not digests:
+            raise ValueError(
+                f"scene {scene.scene_id!r} wrote no artifacts, so its meta.json "
+                f"would carry an empty `artifact_sha256` — indistinguishable from "
+                f"a render whose integrity record was simply never populated."
+            )
 
         # Canonical provenance — never verbosity-gated (RD-16). Diagnostic extras
         # (Step 4's per-criterion QC record) attach behind `saves("diagnostics")`
