@@ -395,3 +395,51 @@ class TestTheManifestIsTheDataset:
         meta = json.loads((tmp_path / "preprocessed" / "meta.json").read_text())
         assert meta["admitted_sha256"] == manifest["admitted_sha256"]
         assert meta["admitted_sha256"] == admitted_digest(manifest["admitted"])
+
+    def test_a_corrupted_admitted_render_is_refused_before_training(
+        self, tmp_path: Path
+    ) -> None:
+        """`verify_render_artifacts` existed with no production caller while its
+        docstring said "the caller decides whether a corrupt artifact is fatal".
+
+        Nothing else checks: `_reusable` covers only a re-run of `render`, and only
+        without `--force`. A `low.npy` truncated by a full disk between render and
+        preprocess was encoded, trained on and evaluated in silence.
+        """
+        cfg = tiny_config(scenes={"n_id": 4})
+        _pipeline(cfg, tmp_path).run_stage("gen-scenes")
+        _pipeline(cfg, tmp_path).run_stage("render")
+
+        manifest = json.loads((tmp_path / "renders" / "manifest.json").read_text())
+        victim = manifest["admitted"][0]
+        target = tmp_path / "renders" / victim / "low.npy"
+        target.write_bytes(target.read_bytes()[:-64])   # truncated, as a full disk does
+
+        with pytest.raises(RuntimeError, match="no longer match the digests"):
+            _pipeline(cfg, tmp_path).run_stage("preprocess")
+
+    def test_a_corrupted_EXCLUDED_render_does_not_fail_the_run(
+        self, tmp_path: Path
+    ) -> None:
+        """The check runs over the admitted set only. An excluded scene's artifacts
+        are not in the dataset, so their integrity cannot invalidate it — and
+        failing on them would make a QC exclusion look like corruption."""
+        cfg = tiny_config(scenes={"n_id": 6}, max_excluded_frac_per_split=1.0)
+        _pipeline(cfg, tmp_path).run_stage("gen-scenes")
+        _pipeline(cfg, tmp_path).run_stage("render")
+
+        manifest_path = tmp_path / "renders" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        victim = manifest["admitted"].pop()
+        manifest["excluded"].append(
+            {"scene_id": victim, "category": "refused", "reason": "simulated"}
+        )
+        manifest["admitted_sha256"] = admitted_digest(manifest["admitted"])
+        manifest_path.write_text(json.dumps(manifest))
+
+        target = tmp_path / "renders" / victim / "low.npy"
+        target.write_bytes(target.read_bytes()[:-64])
+
+        _pipeline(cfg, tmp_path).run_stage("preprocess")
+        splits = json.loads((tmp_path / "preprocessed" / "splits.json").read_text())
+        assert victim not in splits

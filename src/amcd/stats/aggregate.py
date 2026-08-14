@@ -105,6 +105,27 @@ def _two_sided_power(ncp: float, t_crit: float, df: int) -> float:
     return float(value)
 
 
+def mdes_reason(std: float, n: int, power: float) -> str | None:
+    """Why MDES is unavailable, or None when it is computable.
+
+    `N/A` had three causes and named none of them, and only one — small n — was
+    inferable from the table's `n sc/att` column. The dangerous one is
+    `std == 0`: zero between-scene variance collapses the bootstrap CI to a point
+    interval excluding zero, so the row reads as a significant improvement while
+    the single column that would flag it prints `N/A`. This project logs every
+    unscored quantity as (unit, reason); MDES was the exception.
+    """
+    if std == 0:
+        return (
+            "zero between-scene variance — every scene improved by the same "
+            "amount, so the CI beside this is a point interval and its exclusion "
+            "of zero is arithmetic, not evidence"
+        )
+    if n <= 2:
+        return f"n={n}: one degree of freedom is essentially unpowered (MDES ~11 sigma)"
+    return None
+
+
 def mdes(std: float, n: int, power: float, alpha: float) -> float:
     """Minimum detectable effect size for a two-sided one-sample t-test.
 
@@ -279,6 +300,9 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
             ),
             min_n_for_calibrated_ci=config.bootstrap_min_n_for_calibrated_ci,
         )
+        mdes_why = mdes_reason(
+            imp_ci["std"], len(paired), config.bootstrap_power
+        )
         mdes_val = mdes(
             imp_ci["std"], len(paired),
             power=config.bootstrap_power, alpha=config.bootstrap_alpha,
@@ -321,6 +345,9 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
             "improvement_ci_upper": imp_ci["ci_upper"],
             "improvement_std": imp_ci["std"],
             "improvement_mdes": mdes_val,
+            # Why it is unavailable, or None. A bare N/A conflated three
+            # causes and one of them reads as significance.
+            "improvement_mdes_reason": mdes_why,
             # The bound over the ATTEMPTED population. Identical to the scored
             # columns whenever no scene was pred-unscored, which is the common
             # case — the two diverging is the signal, and
@@ -397,6 +424,7 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
                 "improvement_ci_upper": float("nan"),
                 "improvement_std": float("nan"),
                 "improvement_mdes": float("nan"),
+                "improvement_mdes_reason": "nothing scored in this split",
                 "n_attempted_scorable": 0,
                 "n_pred_unscored_imputed": 0,
                 "improvement_mean_attempted": float("nan"),

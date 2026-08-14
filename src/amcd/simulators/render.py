@@ -45,6 +45,8 @@ from ..runtime import RunContext, emit
 from . import qc
 from .base import (
     IRResult,
+    _sha256,
+    verify_render_artifacts,  # noqa: F401 — re-exported for existing importers
     SceneRefused,
     SceneSpec,
     admitted_digest,
@@ -183,44 +185,8 @@ def _enforce_attrition_bounds(config: Config, manifest: dict) -> None:
         )
 
 
-def _sha256(path: Path) -> str:
-    """Digest one written artifact, streamed — an IR pair is ~26 MB per scene.
-
-    A within-host integrity check, not a cross-host identity: a `.parquet`
-    digest covers the container, whose bytes carry the writer's pyarrow version
-    and compression choices as well as the data.
-    """
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
-def verify_render_artifacts(renders_dir: Path) -> list[tuple[str, str]]:
-    """Re-digest every artifact `meta.json` records, returning `(unit, reason)`
-    for each mismatch or absence.
-
-    Returns rather than raises: the caller decides whether a corrupt artifact is
-    fatal, and a list of every bad scene beats stopping at the first.
-    """
-    problems: list[tuple[str, str]] = []
-    for scene_dir in sorted(p for p in renders_dir.iterdir() if p.is_dir()):
-        meta_path = scene_dir / "meta.json"
-        if not meta_path.exists():
-            problems.append((scene_dir.name, "no meta.json, so nothing records what it should contain"))
-            continue
-        recorded = json.loads(meta_path.read_text()).get("artifact_sha256")
-        if not recorded:
-            problems.append((scene_dir.name, "meta.json carries no artifact_sha256"))
-            continue
-        for name, digest in sorted(recorded.items()):
-            artifact = scene_dir / name
-            if not artifact.exists():
-                problems.append((f"{scene_dir.name}/{name}", "recorded in meta.json but absent"))
-            elif _sha256(artifact) != digest:
-                problems.append((f"{scene_dir.name}/{name}", "content does not match its recorded sha256"))
-    return problems
 
 
 def _preflight_separations(config: Config, scenes: list[SceneSpec]) -> None:

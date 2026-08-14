@@ -14,7 +14,11 @@ import torch
 from ..config import Config
 from ..representations import build_representation
 from ..runtime import RunContext, emit
-from ..simulators.base import SceneSpec, admitted_digest
+from ..simulators.base import (
+    SceneSpec,
+    admitted_digest,
+    verify_render_artifacts,
+)
 
 #: The `compute_stats` keys actually applied to the saved tensors, as (mean, std).
 #: ONE declaration, read both by the `normalize()` calls and by what `meta.json`
@@ -102,6 +106,35 @@ def _admitted_scenes(
 
     excluded = {e["scene_id"]: e for e in manifest["excluded"]}
     admitted = [s for s in generated if s.scene_id not in excluded]
+
+    # RE-DIGEST WHAT WE ARE ABOUT TO TRAIN ON. The manifest says which renders the
+    # dataset is made of; it says nothing about whether those bytes are still the
+    # bytes the render stage wrote. Nothing else checks: `_reusable` covers only a
+    # re-run of `render`, and only when `--force` is absent. A `low.npy` truncated
+    # by a full disk or corrupted on the external volume between the two stages
+    # would otherwise be encoded, trained on and evaluated in silence.
+    #
+    # Minutes against a ~14 h render, and it runs over the ADMITTED set only —
+    # verifying an excluded scene's artifacts would fail a run over renders the
+    # dataset does not contain.
+    # `unit` is "<scene_id>/<artifact>", so the scene is its first path segment —
+    # matching the whole string against scene ids silently matched nothing.
+    admitted_ids = {s.scene_id for s in admitted}
+    corrupt = [
+        (unit, reason)
+        for unit, reason in verify_render_artifacts(renders_dir)
+        if unit.split("/", 1)[0] in admitted_ids
+    ]
+    if corrupt:
+        raise RuntimeError(
+            "renders admitted to the dataset no longer match the digests their own "
+            "meta.json records, so the bytes are not the ones the render stage "
+            "wrote:\n"
+            + "\n".join(f"    {unit}: {reason}" for unit, reason in corrupt[:10])
+            + ("\n    ..." if len(corrupt) > 10 else "")
+            + "\nRe-render the affected scenes (`--force` rebuilds; every scene "
+            "that still verifies is reused)."
+        )
 
     listed = set(manifest["admitted"])
     if {s.scene_id for s in admitted} != listed:

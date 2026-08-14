@@ -150,6 +150,18 @@ class TestLossActivity:
     """Invariant #7: all loss terms should be non-NaN and non-zero on a synthetic batch."""
 
     def test_huber_loss_nonzero(self) -> None:
+        """`rep.loss` has NO production caller — this is its only one repo-wide,
+        and it passes a raw-dB δ against unit-variance operands, a domain the
+        trainer never uses. The assertion below is therefore weak by construction
+        and is not evidence that the SHIPPED loss is active.
+
+        Kept deliberately, and narrowly: `rep.loss` is a declared seam on the
+        representation interface, and a seam that raises or returns zero would be
+        a defect whether or not anything calls it today. What actually guards the
+        trainer's loss is `test_huber_delta_meaningful_in_training_domain` below,
+        which runs on `build_criterion`'s operands. Ledger F-06 tracks unifying
+        the two at E2, after which this test should follow the surviving one.
+        """
         from amcd.representations import build_representation
 
         cfg = _make_minimal_config()

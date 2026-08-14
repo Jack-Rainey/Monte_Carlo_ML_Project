@@ -355,6 +355,15 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
         because the count is what a reader takes away.
         """
         parts = []
+        # A missing reason round-trips through pandas as NaN, not None, so the
+        # type is checked rather than the truthiness.
+        why = row.get("improvement_mdes_reason")
+        if isinstance(why, str) and why:
+            parts.append(
+                "MDES zero-var" if "zero between-scene variance" in why
+                else "MDES n<3" if "degree of freedom" in why
+                else "MDES n/a"
+            )
         if row.get("n_partial_band"):
             parts.append(f"{row['n_partial_band']} partial-band")
         if row.get("n_pred_band_unresolved"):
@@ -405,6 +414,9 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
         ci_str = f"[{row['improvement_ci_lower']:.4f}, {row['improvement_ci_upper']:.4f}]"
         improved_str = f"{row['pct_improved']:.1f}% ({row['n_improved']}/{row['n_scored']})"
         mdes_val = row["improvement_mdes"]
+        # An unavailable MDES says WHY in the caveat column rather than printing a
+        # bare N/A. `zero-var` is the one that matters: it means the CI beside this
+        # row is a point interval, so its exclusion of zero is arithmetic.
         mdes_str = f"{mdes_val:.4f}" if mdes_val == mdes_val else "N/A"
         line = (
             f"{row['metric']:<{col_w['metric']}} "
