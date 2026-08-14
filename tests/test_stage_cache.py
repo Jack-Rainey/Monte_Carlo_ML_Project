@@ -1025,6 +1025,10 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         "max_refused_frac": 0.15,
         "max_excluded_frac_per_split": 0.25,
         "metric_edt_variance_limited_s": 0.3,
+        "metric_decay_range_fit": {
+            "window": [0.10, 0.55], "smoothing_cycles": 12.0,
+            "min_smoothing_s": 0.004, "max_kernel_frac": 0.08,
+        },
         # The D0a/D0b thresholds ARE the verdict `diagnostics` publishes — "signal
         # to learn at this ray budget", "carrier ceiling clears" — so a change to
         # any of them must invalidate it. They were exempt only while that stage

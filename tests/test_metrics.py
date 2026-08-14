@@ -37,6 +37,9 @@ _ISO_SNR_BOUND = {"T30": 45.0, "EDT": 20.0}
 #: probe holding its own copy would keep asserting against the old filter while
 #: claiming to describe the shipped one — the `_base_scalar` precedent below.
 _ORDER = Config.load(Path("configs/base.yaml")).metric_octave_filter.order
+#: The shipped decay-range fit, read from the config rather than re-declared here:
+#: a second copy would drift from the values the pipeline actually estimates with.
+_FIT = Config.load(Path("configs/base.yaml")).metric_decay_range_fit
 
 #: Realized out-of-band leakage bounds, likewise read rather than pinned.
 #: Keyed by octaves outside the band.
@@ -68,7 +71,7 @@ def _metrics(ir_w: np.ndarray) -> dict:
     values, _reasons = channel_band_avg_metrics(
         ir_w, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=_NO_FLOOR,
-        min_decay_range_db=_NO_SNR_BOUND,
+        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
     )
     return values
@@ -127,7 +130,7 @@ def test_c50_nan_carries_lundeby_truncation_reason() -> None:
     values, reasons = channel_band_avg_metrics(
         ir, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=_NO_FLOOR,
-        min_decay_range_db=_NO_SNR_BOUND,
+        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
     )
     assert np.isnan(values["C50"]), "fixture must actually produce an unscored C50"
@@ -182,7 +185,7 @@ def test_paired_metrics_share_a_band_set_across_legs() -> None:
     # Fixture must bite: low's 1000 Hz band C50 is NaN, its 500 Hz band finite.
     low_bands = channel_per_band_metrics(
         low, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND,
+        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER)
     assert np.isfinite(low_bands[0][0]["C50"]) and np.isnan(low_bands[1][0]["C50"])
 
@@ -190,7 +193,7 @@ def test_paired_metrics_share_a_band_set_across_legs() -> None:
         pred[None, :], high[None, :], low[None, :],
         sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=_NO_FLOOR,
-        min_decay_range_db=_NO_SNR_BOUND,
+        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
     )
     c50 = triples["C50"]
@@ -216,12 +219,12 @@ def test_paired_metrics_share_a_band_set_across_legs() -> None:
     )
     high_500 = channel_band_avg_metrics(
         high, sample_rate=_SR, iso_eval_freqs=[500.0], onset_rel_db=_ONSET_DB,
-        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND,
+        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
         trunc_idx_per_band=shared_500)[0]["C50"]
     high_both = channel_band_avg_metrics(
         high, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
-        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND,
+        band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER)[0]["C50"]
     assert c50.high == pytest.approx(high_500)
     assert high_500 != pytest.approx(high_both)
@@ -287,7 +290,7 @@ def test_t30_invariant_to_leg_noise_floor() -> None:
                     leg: channel_band_avg_metrics(
                         ir, sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
                         band_resolvability_margin=_NO_FLOOR, trunc_idx_per_band=shared,
-                        min_decay_range_db=_NO_SNR_BOUND,
+                        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
                     )[0]["T30"]
                     for leg, ir in legs.items()
@@ -339,7 +342,7 @@ def test_prediction_cannot_set_the_integration_window() -> None:
             pred[None, :], high[None, :], low[None, :],
             sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
             band_resolvability_margin=_NO_FLOOR,
-            min_decay_range_db=_NO_SNR_BOUND,
+            min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
         )
         out[label] = (triples, window)
@@ -417,7 +420,7 @@ def test_prediction_cannot_set_the_band_set() -> None:
             pred[None, :], high[None, :], low[None, :],
             sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
             band_resolvability_margin=margin,
-            min_decay_range_db=_NO_SNR_BOUND,
+            min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
         )
         out[label] = (triples, reasons, acct)
@@ -573,7 +576,7 @@ def test_the_placement_axis_moves_c50_through_the_iso_path() -> None:
             sample_rate=cfg.sample_rate, iso_eval_freqs=iso,
             onset_rel_db=cfg.metric_onset_rel_db,
             band_resolvability_margin=cfg.metric_band_resolvability_margin,
-            min_decay_range_db=_NO_SNR_BOUND,
+            min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
         )
         c50.append(vals["C50"])
@@ -936,7 +939,7 @@ def test_a_leg_that_both_excludes_a_band_and_is_floor_limited_keeps_both_reasons
         tag("pred"), tag("high"), tag("low"),
         sample_rate=_SR, iso_eval_freqs=_ISO, onset_rel_db=_ONSET_DB,
         band_resolvability_margin=2.0,
-        min_decay_range_db=_NO_SNR_BOUND,
+        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
     )
 
@@ -1113,7 +1116,7 @@ def test_a_record_shorter_than_one_guard_width_is_unmeasurable_not_approximated(
     short = np.zeros(guard - 1, dtype=np.float32)
     short[len(short) // 2] = 1.0
     values, reasons, _res = _iso3382_band_metrics(
-        short, fc, _SR, band_resolvability_margin=2.0, min_decay_range_db=_NO_SNR_BOUND,
+        short, fc, _SR, band_resolvability_margin=2.0, min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER)
     for metric in ("T30", "EDT", "C50"):
         assert np.isnan(values[metric]), (
@@ -1132,7 +1135,7 @@ def test_a_record_shorter_than_one_guard_width_is_unmeasurable_not_approximated(
     ok = np.zeros(max(guard, _MIN_FILTER_SAMPLES_FOR_TEST), dtype=np.float32)
     ok[len(ok) // 2] = 1.0
     values_ok, _r, _res2 = _iso3382_band_metrics(
-        ok, fc, _SR, band_resolvability_margin=2.0, min_decay_range_db=_NO_SNR_BOUND,
+        ok, fc, _SR, band_resolvability_margin=2.0, min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER)
     assert not np.isnan(values_ok["T30"]), (
         f"a {len(ok)}-sample record at {fc:g} Hz is at or above the {guard}-sample "
@@ -1273,7 +1276,7 @@ def _oracle_t30_error_frac(cfg, rep, sim, scene, gain_db: float):
         iso_eval_freqs=[float(f) for f in cfg.iso_eval_freqs],
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
-        min_decay_range_db=_NO_SNR_BOUND,
+        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
     )
     t = triples["T30"]
@@ -1374,7 +1377,7 @@ def _fitted_t30(t60: float, fc: float, seed: int, duration_s: float = 0.5) -> fl
     if len(energy) < 2:
         return float("nan")
     return _decay_times_from_energy(
-        energy, _SR, min_decay_range_db=_NO_SNR_BOUND, band_centre_hz=fc,
+        energy, _SR, min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT, band_centre_hz=fc,
         filter_order=_ORDER,
     )[0]
 
@@ -1471,7 +1474,7 @@ def test_a_floor_limited_band_does_not_cost_a_scene_from_the_paired_comparison()
         sample_rate=cfg.sample_rate, iso_eval_freqs=iso,
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
-        min_decay_range_db=_NO_SNR_BOUND,
+        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
     )
     assert acct["T30"]["resolvability_limited_hz"], (
@@ -1516,7 +1519,7 @@ def test_a_degenerate_pred_leaves_c50_unscored_not_at_plus_200_db() -> None:
         iso_eval_freqs=[float(f) for f in cfg.iso_eval_freqs],
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
-        min_decay_range_db=_NO_SNR_BOUND,
+        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
     )
 
@@ -1569,7 +1572,7 @@ def test_a_large_but_real_c50_is_not_unscored_by_the_guard() -> None:
         iso_eval_freqs=[float(f) for f in cfg.iso_eval_freqs],
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
-        min_decay_range_db=_NO_SNR_BOUND,
+        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
     )
     assert np.isfinite(values["C50"]), (
@@ -1615,7 +1618,7 @@ def test_a_physical_leg_is_never_censored_for_its_own_c50(true_t60: float) -> No
         iso_eval_freqs=[float(f) for f in cfg.iso_eval_freqs],
         onset_rel_db=cfg.metric_onset_rel_db,
         band_resolvability_margin=cfg.metric_band_resolvability_margin,
-        min_decay_range_db=_NO_SNR_BOUND,
+        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
     )
     for leg in ("low", "high"):
@@ -1738,7 +1741,7 @@ class TestTheTruncationIndexUnderAZeroPad:
         for fc in _ISO:
             values = [
                 _iso3382_band_metrics(
-                    ir * 10.0**e, fc, _SR, band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND,
+                    ir * 10.0**e, fc, _SR, band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER)[0]
                 for e in (-6, -3, 0, 3)
             ]
@@ -1827,7 +1830,7 @@ class TestT30RecoversAKnownDecayInAPaddedRecord:
                     values, nan_reasons, _ = _iso3382_band_metrics(
                         _padded_decay(rt60, seed=seed), fc, _SR,
                         band_resolvability_margin=_NO_FLOOR,
-                        min_decay_range_db=_NO_SNR_BOUND,
+                        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
                     )
                     t30 = values["T30"]
@@ -1862,7 +1865,7 @@ class TestT30RecoversAKnownDecayInAPaddedRecord:
                     values, _, _ = _iso3382_band_metrics(
                         _padded_decay(rt60, seed=seed), fc, _SR,
                         band_resolvability_margin=_NO_FLOOR,
-                        min_decay_range_db=_NO_SNR_BOUND,
+                        min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
                     )
                     if abs(values["T30"] - rt60) / rt60 > _base_scalar("d0b_t30_jnd_frac"):
@@ -1918,7 +1921,7 @@ class TestARoomTooReverberantForItsRecord:
             values, reasons, _ = _iso3382_band_metrics(
                 _padded_decay(2.000, seed=0), fc, _SR,
                 band_resolvability_margin=_NO_FLOOR,
-                min_decay_range_db=_ISO_SNR_BOUND,
+                min_decay_range_db=_ISO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
             )
             assert reasons.get("T30") is None, (
@@ -1935,7 +1938,7 @@ class TestARoomTooReverberantForItsRecord:
             values, reasons, _ = _iso3382_band_metrics(
                 _padded_decay(8.294, seed=0), fc, _SR,
                 band_resolvability_margin=_NO_FLOOR,
-                min_decay_range_db=_ISO_SNR_BOUND,
+                min_decay_range_db=_ISO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
             )
             assert np.isnan(values["T30"]), (
@@ -1973,7 +1976,7 @@ class TestARoomTooReverberantForItsRecord:
                 values, reasons, _ = _iso3382_band_metrics(
                     _padded_decay(rt60, seed=0), fc, _SR,
                     band_resolvability_margin=_NO_FLOOR,
-                    min_decay_range_db=_ISO_SNR_BOUND,
+                    min_decay_range_db=_ISO_SNR_BOUND, decay_range_fit=_FIT,
                     octave_filter_order=_ORDER,
                 )
                 assert np.isnan(values["EDT"]), (
@@ -1993,7 +1996,7 @@ class TestARoomTooReverberantForItsRecord:
             values, reasons, _ = _iso3382_band_metrics(
                 _padded_decay(4.000, seed=0), fc, _SR,
                 band_resolvability_margin=_NO_FLOOR,
-                min_decay_range_db=_ISO_SNR_BOUND,
+                min_decay_range_db=_ISO_SNR_BOUND, decay_range_fit=_FIT,
                 octave_filter_order=_ORDER,
             )
             assert reasons.get("EDT") is None and np.isfinite(values["EDT"]), (
@@ -2030,7 +2033,8 @@ class TestARoomTooReverberantForItsRecord:
         for fc in _ISO:
             values, reasons, _ = _iso3382_band_metrics(
                 ir, fc, _SR, band_resolvability_margin=_NO_FLOOR,
-                min_decay_range_db=_ISO_SNR_BOUND, octave_filter_order=_ORDER,
+                min_decay_range_db=_ISO_SNR_BOUND, decay_range_fit=_FIT,
+                octave_filter_order=_ORDER,
             )
             assert np.isnan(values["T30"]), (
                 f"T30 = {values['T30']:.3f} s at {fc} Hz on a record holding "
@@ -2051,11 +2055,11 @@ class TestARoomTooReverberantForItsRecord:
         ir = _padded_decay(8.294, seed=0)
         strict, _, _ = _iso3382_band_metrics(
             ir, _ISO[0], _SR, band_resolvability_margin=_NO_FLOOR,
-            min_decay_range_db=_ISO_SNR_BOUND,
+            min_decay_range_db=_ISO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER)
         lax, _, _ = _iso3382_band_metrics(
             ir, _ISO[0], _SR, band_resolvability_margin=_NO_FLOOR,
-            min_decay_range_db={"T30": 15.0, "EDT": 10.0},
+            min_decay_range_db={"T30": 15.0, "EDT": 10.0}, decay_range_fit=_FIT,
             octave_filter_order=_ORDER)
         assert np.isnan(strict["T30"]) and np.isfinite(lax["T30"]), (
             "the declared bound did not change the outcome on an identical "
@@ -2070,7 +2074,7 @@ class TestARoomTooReverberantForItsRecord:
             _iso3382_band_metrics(
                 _padded_decay(1.0, seed=0), _ISO[0], _SR,
                 band_resolvability_margin=_NO_FLOOR,
-                min_decay_range_db={"EDT": 20.0},   # T30 missing
+                min_decay_range_db={"EDT": 20.0}, decay_range_fit=_FIT,   # T30 missing
                 octave_filter_order=_ORDER,
             )
 
@@ -2255,7 +2259,7 @@ class TestGeometryAdjudicatesTheOnset:
         _triples, reasons, _window, _acct = compute_room_acoustic_metrics(
             stack(quiet), stack(clean), stack(clean),
             sample_rate=self._SR, iso_eval_freqs=_ISO, onset_rel_db=self._REL_DB,
-            band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND,
+            band_resolvability_margin=_NO_FLOOR, min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
             octave_filter_order=_ORDER,
             expected_onset_samples=self._DELAY, onset_tolerance_samples=self._TOL,
         )
@@ -2315,7 +2319,8 @@ class TestTheDecayRangeEstimatorIsKneeIndependent:
             true_db = 60.0 * window_s / t60_s
             for fc in (125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0):
                 got = _available_decay_range_db(
-                    self._energy(t60_s, window_s, fc, knee_frac), _SR, fc, _ORDER
+                    self._energy(t60_s, window_s, fc, knee_frac), _SR, fc, _ORDER,
+                    _FIT,
                 )
                 if got != got:
                     continue  # refused: the filter rings longer than the record
@@ -2334,15 +2339,22 @@ class TestTheDecayRangeEstimatorIsKneeIndependent:
         """A fixed kernel smooths 1.25 cycles at 125 Hz and 40 at 4 kHz, so the
         slope fit is far noisier at the bottom of the range — which is where the
         replaced estimator's error was worst."""
-        from amcd.evaluation.room_acoustic import (
-            _RANGE_FIT_MIN_SMOOTHING_S,
-            _RANGE_FIT_SMOOTHING_CYCLES,
-        )
-
-        low = max(_RANGE_FIT_MIN_SMOOTHING_S, _RANGE_FIT_SMOOTHING_CYCLES / 125.0)
-        high = max(_RANGE_FIT_MIN_SMOOTHING_S, _RANGE_FIT_SMOOTHING_CYCLES / 4000.0)
+        low = max(_FIT.min_smoothing_s, _FIT.smoothing_cycles / 125.0)
+        high = max(_FIT.min_smoothing_s, _FIT.smoothing_cycles / 4000.0)
         assert low > high, "the kernel must lengthen as the band narrows"
-        assert high == _RANGE_FIT_MIN_SMOOTHING_S, (
+        assert high == _FIT.min_smoothing_s, (
             "the floor must bind in the top bands, or the kernel collapses to a "
             "handful of samples"
         )
+
+    def test_the_fit_is_config_declared_not_a_literal(self) -> None:
+        """These four values decide which T30s reach a table, exactly as the
+        octave-filter order does, and that one is config-declared."""
+        import inspect
+
+        from amcd.evaluation import room_acoustic
+
+        src = inspect.getsource(room_acoustic._available_decay_range_db)
+        assert "fit." in src, "the estimator must read its window from config"
+        assert _FIT.window == tuple(_FIT.window)
+        assert 0.0 <= _FIT.window[0] < _FIT.window[1] <= 1.0

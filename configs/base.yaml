@@ -709,3 +709,29 @@ bootstrap_power: 0.8
 metric_min_decay_range_db:
   T30: 45.0
   EDT: 20.0
+
+# ── How the available decay range is ESTIMATED ────────────────────────────────
+# The bound above is the value a record is compared against; these decide what it
+# is compared. They belong in config for the same reason
+# `metric_octave_filter.order` does: they govern which T30s reach a table.
+#
+# They are not free. On one real 200k-ray render, varying only `window` gives
+# 12.5 dB at [0.05, 0.40], 13.4 at [0.10, 0.50], 16.4 at [0.20, 0.60] and 23.6 at
+# [0.40, 0.80] in the 500 Hz band — a 2.4x spread, because a gsound record is
+# strongly multi-slope. `scripts/decay_range_probe.py` measures the shipped values.
+metric_decay_range_fit:
+  # Fractions of the record the slope is fitted over. The END is what makes the
+  # estimate independent of where the terminal synthesis taper begins: a fit
+  # running to 0.70 over-reads by 204 % when the taper starts at 0.50.
+  window: [0.05, 0.40]
+  # Envelope smoothing, in cycles of the band centre, floored at a duration.
+  # Band-proportional because envelope noise is: a fixed 10 ms kernel smooths 1.25
+  # cycles at 125 Hz and 40 at 4 kHz, so the fit is far noisier at the bottom of
+  # the range. The floor stops the kernel collapsing to a few samples up top.
+  smoothing_cycles: 20.0
+  min_smoothing_s: 0.010
+  # Ceiling on the kernel as a fraction of the record, so it cannot grow into the
+  # span being fitted. Binds only on records short relative to the band, where the
+  # alternative is refusing them — and a refusal that depends on record length is
+  # a refusal that depends on absorption, which is a shift axis (see AC-188).
+  max_kernel_frac: 0.10

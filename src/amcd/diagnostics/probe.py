@@ -284,6 +284,7 @@ def _band_intersected_pair(
             onset_rel_db=config.metric_onset_rel_db,
             band_resolvability_margin=config.metric_band_resolvability_margin,
             min_decay_range_db=config.metric_min_decay_range_db,
+            decay_range_fit=config.metric_decay_range_fit,
             octave_filter_order=config.metric_octave_filter.order,
             trunc_idx_per_band=shared_trunc,
         )
@@ -360,6 +361,7 @@ def _d0b_level_sweep(
         iso_eval_freqs=iso_eval_freqs, onset_rel_db=config.metric_onset_rel_db,
         band_resolvability_margin=config.metric_band_resolvability_margin,
         min_decay_range_db=config.metric_min_decay_range_db,
+            decay_range_fit=config.metric_decay_range_fit,
         octave_filter_order=config.metric_octave_filter.order,
     )[0]["T30"]
     for gain_db in gains_db:

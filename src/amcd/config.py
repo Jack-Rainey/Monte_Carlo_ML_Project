@@ -466,6 +466,48 @@ class UnconvergedMetric(BaseModel):
     n_cells: int
 
 
+class DecayRangeFit(BaseModel):
+    """How `_available_decay_range_db` estimates the range a record holds.
+
+    Config rather than literals because these decide which T30s are reported —
+    the same standard `metric_octave_filter` is held to — and because the window
+    in particular moves a real render's 500 Hz estimate by 2.4x across plausible
+    choices.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    #: (start, end) as fractions of the record. The END is load-bearing: it keeps
+    #: the fit inside the room decay wherever the terminal taper begins.
+    window: tuple[float, float]
+    #: Smoothing kernel in cycles of the band centre, and its floor in seconds.
+    smoothing_cycles: float
+    min_smoothing_s: float
+    #: Ceiling on the kernel as a fraction of the record.
+    max_kernel_frac: float
+
+    @model_validator(mode="after")
+    def _usable(self) -> "DecayRangeFit":
+        lo, hi = self.window
+        if not 0.0 <= lo < hi <= 1.0:
+            raise ValueError(
+                f"metric_decay_range_fit.window must satisfy 0 <= start < end <= 1; "
+                f"got {self.window}"
+            )
+        if self.max_kernel_frac <= 0.0 or self.max_kernel_frac >= hi - lo:
+            raise ValueError(
+                f"metric_decay_range_fit.max_kernel_frac ({self.max_kernel_frac}) "
+                f"must be positive and smaller than the fit span ({hi - lo:g}), or "
+                f"the smoothing kernel is wider than the span the slope is fitted "
+                f"over and the fit reads the kernel's own response."
+            )
+        if self.smoothing_cycles <= 0.0 or self.min_smoothing_s <= 0.0:
+            raise ValueError(
+                "metric_decay_range_fit smoothing values must be positive"
+            )
+        return self
+
+
 class UnmeasuredMetric(BaseModel):
     """A convergence quantity nobody has measured, and why not.
 
@@ -999,6 +1041,7 @@ class Config(BaseModel):
     # scaffold overlay declares its own lower value with that reason attached; the
     # real-render configs declare the standard's.
     metric_min_decay_range_db: dict[str, float]
+    metric_decay_range_fit: "DecayRangeFit"
 
     # Decay time (s) below which the EDT ESTIMATOR is variance-limited rather than
     # filter-limited: measured sd 24-31 % of T60 below ~0.15 s, against 6-10 % for

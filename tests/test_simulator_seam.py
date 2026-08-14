@@ -426,7 +426,7 @@ class TestPlacementAxisIsAcousticallyLive:
             self._render(distance).ir[0], sample_rate=48000,
             iso_eval_freqs=[500.0, 1000.0], onset_rel_db=-20.0,
             band_resolvability_margin=0.0,
-            min_decay_range_db={"T30": 0.0, "EDT": 0.0},
+            decay_range_fit=_decay_fit(), min_decay_range_db={"T30": 0.0, "EDT": 0.0},
             octave_filter_order=Config.load(
                 Path("configs/base.yaml")
             ).metric_octave_filter.order,
@@ -2262,7 +2262,7 @@ class TestEveryBackendDeclaresWhetherItModelsEarlyReflections:
                 iso_eval_freqs=[float(f) for f in cfg.iso_eval_freqs],
                 onset_rel_db=cfg.metric_onset_rel_db,
                 band_resolvability_margin=cfg.metric_band_resolvability_margin,
-                min_decay_range_db={"T30": 0.0, "EDT": 0.0},
+                decay_range_fit=_decay_fit(), min_decay_range_db={"T30": 0.0, "EDT": 0.0},
                 octave_filter_order=cfg.metric_octave_filter.order,
             )
             edt.append(vals["EDT"])
@@ -2279,3 +2279,16 @@ class TestEveryBackendDeclaresWhetherItModelsEarlyReflections:
             f"early-reflection cluster, `models_early_reflections` must stop "
             f"returning False."
         )
+
+
+def _decay_fit():
+    """The shipped decay-range fit, read from the config the pipeline runs under.
+
+    A function rather than a module constant so importing this test module does
+    not read a config file at collection time.
+    """
+    from pathlib import Path as _Path
+
+    from amcd.config import Config as _Config
+
+    return _Config.load(_Path("configs/base.yaml")).metric_decay_range_fit

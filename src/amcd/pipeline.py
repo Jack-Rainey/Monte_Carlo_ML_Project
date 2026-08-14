@@ -240,6 +240,9 @@ def _diagnostics_fingerprint(config: Config) -> dict:
         "metric_onset_tolerance_ms": config.metric_onset_tolerance_ms,
         "metric_band_resolvability_margin": config.metric_band_resolvability_margin,
         "metric_edt_variance_limited_s": config.metric_edt_variance_limited_s,
+        # How the decay range is ESTIMATED decides which T30s are reported, so it
+        # moves the reported table exactly as the floor it is compared against does.
+        "metric_decay_range_fit": config.metric_decay_range_fit.model_dump(mode="json"),
         "metric_min_decay_range_db": dict(config.metric_min_decay_range_db),
         # THE FILTER IS THE INSTRUMENT. `order` sets both the out-of-band
         # rejection and the ringing floor every reported ISO metric is measured
@@ -327,6 +330,9 @@ def _eval_fingerprint(config: Config) -> dict:
         # and moves with it.
         "metric_octave_filter": config.metric_octave_filter.model_dump(mode="json"),
         "metric_edt_variance_limited_s": config.metric_edt_variance_limited_s,
+        # How the decay range is ESTIMATED decides which T30s are reported, so it
+        # moves the reported table exactly as the floor it is compared against does.
+        "metric_decay_range_fit": config.metric_decay_range_fit.model_dump(mode="json"),
         "representation": {
             "name": config.representation.name,
             "params": config.representation.params,

@@ -157,6 +157,7 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
                 onset_rel_db=config.metric_onset_rel_db,
                 band_resolvability_margin=config.metric_band_resolvability_margin,
                 min_decay_range_db=config.metric_min_decay_range_db,
+                decay_range_fit=config.metric_decay_range_fit,
                 octave_filter_order=config.metric_octave_filter.order,
                 expected_onset_samples=expected_onset,
                 onset_tolerance_samples=int(round(

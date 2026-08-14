@@ -46,6 +46,7 @@ reported metrics.
 """
 from __future__ import annotations
 
+from collections import namedtuple
 from functools import lru_cache
 
 import numpy as np
@@ -296,31 +297,26 @@ def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int, order: int) -> n
     return energy[guard:guard + n_record].astype(np.float32)
 
 
-#: The fit window, as fractions of the record. It starts after the onset attack
-#: and ENDS WELL BEFORE THE RECORD DOES, which is what makes the estimate
-#: independent of where the terminal taper begins — see the docstring below.
-_RANGE_FIT_WINDOW = (0.05, 0.40)
+#: Shape of the config block `_available_decay_range_db` reads, so the estimator
+#: names its own inputs rather than a caller assembling a dict. `configs/base.yaml`
+#: `metric_decay_range_fit:` holds the values and the measurements behind them.
+DecayRangeFit = namedtuple(
+    "DecayRangeFit", "window smoothing_cycles min_smoothing_s max_kernel_frac"
+)
 
-#: Envelope smoothing, as cycles of the band centre, floored at a fixed duration.
-#: Band-proportional because the envelope's noisiness is: a narrow low band holds
-#: fewer independent samples per unit time, so a fixed 10 ms kernel smooths 1.25
-#: cycles at 125 Hz and 40 at 4 kHz, and the slope fit is correspondingly noisier
-#: at the bottom of the range. 20 cycles equalizes it. The floor keeps the kernel
-#: from collapsing to a few samples in the top bands.
-_RANGE_FIT_SMOOTHING_CYCLES = 20.0
-_RANGE_FIT_MIN_SMOOTHING_S = 0.010
-
-#: Ceiling on the smoothing kernel as a fraction of the record, so the kernel
-#: cannot grow into the span the slope is fitted over. Binds only on records short
-#: relative to the band — where the alternative is refusing them, and a refusal
-#: that depends on record length is a refusal that depends on absorption.
-_RANGE_FIT_MAX_KERNEL_FRAC = 0.10
-
+#: Placeholder for the one call path where the decay range is computed and then
+#: never read — `_band_resolvable_decay_s`, which disables the range gate with
+#: 0.0 floors. Named rather than passed as the shipped config so that path cannot
+#: quietly acquire a dependence on values it must not depend on.
+_RANGE_UNUSED = DecayRangeFit(
+    window=(0.05, 0.40), smoothing_cycles=20.0, min_smoothing_s=0.010,
+    max_kernel_frac=0.10,
+)
 
 
 def _available_decay_range_db(
     energy_trunc: np.ndarray, sample_rate: int, band_centre_hz: float,
-    filter_order: int,
+    filter_order: int, fit: DecayRangeFit,
 ) -> float:
     """How many dB of decay the record actually holds, from the ENERGY ENVELOPE.
 
@@ -337,32 +333,40 @@ def _available_decay_range_db(
     A gsound record is not a single exponential: it decays at the room's rate and
     then falls off a terminal synthesis taper an order of magnitude steeper, so a
     fit that reaches the knee reports a decay far faster than the room's and a
-    range far larger than the record holds. Ending the fit at
-    `_RANGE_FIT_WINDOW[1]` keeps it inside the room decay wherever the knee
-    happens to fall, which a knee-position-dependent trim does not: measured over
-    synthetic decays with the knee swept from 50 % to 100 % of the record, a fit
-    running to 70 % over-reads by up to 204 % when the knee arrives at 50 %, while
-    this window's worst case across the same sweep is +11.7 %.
+    range far larger than the record holds. Ending the fit early keeps it inside
+    the room decay for any knee AT OR BEYOND the window's end, which a
+    knee-position-dependent trim does not: over synthetic decays with the knee
+    swept from 50 % to 100 % of the record, a fit running to 70 % over-reads by up
+    to 204 % when the knee arrives at 50 %. Over the reported bands at shippable
+    window lengths this window scores every case, at 9.1 % mean error and a worst
+    over-read of +12.5 %.
 
-    `scripts/decay_range_probe.py` measures this against the shallowest-of-K
-    construction it replaced.
+    THE CLAIM STOPS THERE, and the boundary is measured rather than assumed. A
+    knee INSIDE the fit window is not covered and is not safe: measured worst
+    over-reads are +531 % at knee 0.35, +683 % at 0.25 and +901 % at 0.10, all
+    admitted against the 45 dB floor. Production does not reach that regime — gsound's ~10x taper and
+    Lundeby truncation put the knee near 86 % of the truncated record — so this is
+    a bound on what the construction guarantees, not a live defect.
+
+    `scripts/decay_range_probe.py` measures all of it, including the knees inside
+    the window, and against the shallowest-of-K construction this replaced.
 
     KNOWN LIMIT, not yet closed: on records short relative to the band the
-    estimate is still biased low, and because the smoothing kernel scales as 1/fc
-    the bias is larger in the low bands. Records shorten with absorption, which is
+    estimate is biased low, and because the smoothing kernel scales as 1/fc the
+    bias is larger in the low bands — at a 0.10 s window, -40.6 % at 500 Hz
+    against -8.5 % at 1000 Hz. Records shorten with absorption, which is
     `test_material_shift`'s own independent variable, so the residual is a
-    selection effect on that split rather than a random error. The decisive
-    measurement is an admit-rate sweep over matched populations whose true range
-    is fixed at the ISO threshold; it has not been run.
+    selection effect on that split rather than a random error. It does not bite at
+    E1's declared operating points, which sit far above the floor. The decisive
+    measurement is an admit-rate sweep over matched populations whose true range is
+    fixed at the ISO threshold; it has not been run (ledger AC-188).
 
     A non-decaying envelope returns NaN, which `_admissible` treats as
     unmeasurable rather than as a pass.
     """
     energy = np.asarray(energy_trunc, dtype=np.float64)
     n = len(energy)
-    smoothing_s = max(
-        _RANGE_FIT_MIN_SMOOTHING_S, _RANGE_FIT_SMOOTHING_CYCLES / band_centre_hz
-    )
+    smoothing_s = max(fit.min_smoothing_s, fit.smoothing_cycles / band_centre_hz)
     # THE KERNEL IS AN ABSOLUTE DURATION AND THE RECORD IS NOT, so on a short
     # record the two collide: 20 cycles is 160 ms at 125 Hz, and D0b already
     # scores 10 ms windows. Two consequences, both handled here.
@@ -380,7 +384,7 @@ def _available_decay_range_db(
     # own independent variable, so a length-dependent refusal selects on the very
     # axis that split exists to measure.
     win = max(1, min(int(smoothing_s * sample_rate),
-                     int(_RANGE_FIT_MAX_KERNEL_FRAC * n)))
+                     int(fit.max_kernel_frac * n)))
 
     # EDGE-NORMALISED, dividing by how many samples each output actually averaged
     # rather than by the kernel width. A plain `ones(win)/win` tapers the first and
@@ -398,7 +402,7 @@ def _available_decay_range_db(
     envelope_db = 10.0 * np.log10(np.maximum(smoothed, peak * 1e-300) / peak)
     t_s = np.arange(n) / sample_rate
 
-    lo_frac, hi_frac = _RANGE_FIT_WINDOW
+    lo_frac, hi_frac = fit.window
     # The fit also starts no earlier than a half kernel in, where the local mean
     # stops being asymmetric, and spans enough kernel widths to be a slope rather
     # than one smoothed value repeated.
@@ -422,6 +426,7 @@ def _decay_times_from_energy(
     min_decay_range_db: dict[str, float],
     band_centre_hz: float,
     filter_order: int,
+    decay_range_fit: DecayRangeFit,
 ) -> tuple[float, str | None, float, str | None]:
     """T30 and EDT from an already-truncated band energy envelope.
 
@@ -460,7 +465,7 @@ def _decay_times_from_energy(
     # envelope and never the Schroeder curve.
     window_s = len(energy_trunc) / sample_rate
     available_db = _available_decay_range_db(
-        energy_trunc, sample_rate, band_centre_hz, filter_order
+        energy_trunc, sample_rate, band_centre_hz, filter_order, decay_range_fit
     )
 
     def _admissible(value, reason, metric):
@@ -526,6 +531,13 @@ def _band_resolvable_decay_s(fc: float, sample_rate: int, order: int) -> dict[st
         min_decay_range_db={"T30": 0.0, "EDT": 0.0},
         band_centre_hz=fc,
         filter_order=order,
+        # Any valid fit: the floors above are 0.0, so `_admissible` short-circuits
+        # and the decay range is never consulted. This function measures the
+        # FILTER's own ringing from a unit impulse, which has no room decay to
+        # estimate a range for — so it must not depend on how that estimate is
+        # configured, or the resolvability floor would move when the estimator's
+        # window did.
+        decay_range_fit=_RANGE_UNUSED,
     )
     return {"T30": t30, "EDT": edt}
 
@@ -620,6 +632,7 @@ def _iso3382_band_metrics(
     *,
     band_resolvability_margin: float,
     min_decay_range_db: dict[str, float],
+    decay_range_fit: DecayRangeFit,
     octave_filter_order: int,
     trunc_idx: int | None = None,
     trunc_source: str | None = None,
@@ -690,6 +703,7 @@ def _iso3382_band_metrics(
     t30, t30_reason, edt, edt_reason = _decay_times_from_energy(
         energy_trunc, sample_rate, min_decay_range_db=min_decay_range_db,
         band_centre_hz=fc, filter_order=octave_filter_order,
+        decay_range_fit=decay_range_fit,
     )
 
     # C50 is computed BEFORE the resolvability verdict because the verdict cites
@@ -778,6 +792,7 @@ def channel_band_avg_metrics(
     onset_rel_db: float,          # config.metric_onset_rel_db
     band_resolvability_margin: float,      # config.metric_band_resolvability_margin
     min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db
+    decay_range_fit: DecayRangeFit,       # config.metric_decay_range_fit
     octave_filter_order: int,              # config.metric_octave_filter.order
     #: `floor(|src - rcv| / c * fs)` — where GEOMETRY says the direct arrival is.
     #: None = no geometry available (standalone probes), leaving the detector alone.
@@ -815,6 +830,7 @@ def channel_band_avg_metrics(
         iso_eval_freqs=iso_eval_freqs, onset_rel_db=onset_rel_db,
         band_resolvability_margin=band_resolvability_margin,
         min_decay_range_db=min_decay_range_db,
+        decay_range_fit=decay_range_fit,
         octave_filter_order=octave_filter_order,
         expected_onset_samples=expected_onset_samples,
         onset_tolerance_samples=onset_tolerance_samples,
@@ -850,6 +866,7 @@ def channel_per_band_metrics(
     onset_rel_db: float,          # config.metric_onset_rel_db
     band_resolvability_margin: float,      # config.metric_band_resolvability_margin
     min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db
+    decay_range_fit: DecayRangeFit,       # config.metric_decay_range_fit
     octave_filter_order: int,              # config.metric_octave_filter.order
     #: `floor(|src - rcv| / c * fs)` — where GEOMETRY says the direct arrival is.
     #: None = no geometry available (standalone probes), leaving the detector alone.
@@ -891,6 +908,7 @@ def channel_per_band_metrics(
             ir_w, float(fc), sample_rate,
             band_resolvability_margin=band_resolvability_margin,
             min_decay_range_db=min_decay_range_db,
+            decay_range_fit=decay_range_fit,
             octave_filter_order=octave_filter_order,
             trunc_idx=None if trunc_idx_per_band is None else trunc_idx_per_band[b][0],
             trunc_source=None if trunc_idx_per_band is None else trunc_idx_per_band[b][1],
@@ -909,6 +927,7 @@ def compute_room_acoustic_metrics(
     onset_rel_db: float,          # config.metric_onset_rel_db
     band_resolvability_margin: float,      # config.metric_band_resolvability_margin
     min_decay_range_db: dict[str, float],  # config.metric_min_decay_range_db
+    decay_range_fit: DecayRangeFit,       # config.metric_decay_range_fit
     octave_filter_order: int,              # config.metric_octave_filter.order
     expected_onset_samples: int | None = None,  # geometry's direct arrival
     onset_tolerance_samples: int = 0,           # config.metric_onset_tolerance_ms
@@ -985,6 +1004,7 @@ def compute_room_acoustic_metrics(
             iso_eval_freqs=iso_eval_freqs, onset_rel_db=onset_rel_db,
             band_resolvability_margin=band_resolvability_margin,
             min_decay_range_db=min_decay_range_db,
+            decay_range_fit=decay_range_fit,
             octave_filter_order=octave_filter_order,
             expected_onset_samples=expected_onset_samples,
             onset_tolerance_samples=onset_tolerance_samples,

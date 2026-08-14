@@ -34,11 +34,17 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from amcd.config import Config  # noqa: E402
 from amcd.evaluation.room_acoustic import (  # noqa: E402
     _available_decay_range_db,
     _butter_octave_filter,
     _filter_guard_samples,
 )
+
+#: The shipped estimator settings, read from the config the pipeline runs under so
+#: the probe cannot measure a construction nothing uses.
+FIT = Config.load(Path(__file__).resolve().parent.parent / "configs" / "base.yaml"
+                  ).metric_decay_range_fit
 
 SAMPLE_RATE = 48000
 FILTER_ORDER = 4
@@ -61,8 +67,17 @@ DECAYS = (
     (0.6, 0.5), (0.4, 0.6), (1.0, 0.8), (2.0, 0.9),
     (0.40, 0.17), (0.40, 0.08), (0.10, 0.04), (0.10, 0.02),
 )
-#: 1.0 means no taper at all.
-KNEE_FRACTIONS = (0.5, 0.6, 0.7, 0.85, 1.0)
+#: Where the terminal taper begins, as a fraction of the record. 1.0 means none.
+#:
+#: THE FIRST THREE SIT INSIDE THE FIT WINDOW, and that is the point. A sweep whose
+#: every knee is at or beyond `metric_decay_range_fit.window[1]` cannot produce a
+#: case where the knee lands INSIDE the fit, so it cannot falsify the claim that
+#: the window keeps the estimate inside the room decay — the identical worst
+#: over-read at every swept position is the tell that the estimator never saw one.
+#: Production does not reach this regime (gsound's ~10x taper plus Lundeby
+#: truncation put the knee near 86 % of the truncated record), so these cells
+#: measure the BOUNDARY of the construction's guarantee rather than a live defect.
+KNEE_FRACTIONS = (0.10, 0.25, 0.35, 0.5, 0.6, 0.7, 0.85, 1.0)
 TAPER_STEEPNESS = 10.0
 
 _SHALLOWEST_SEGMENTS = 4
@@ -96,7 +111,8 @@ def _synthetic_band_energy(
     return energy[guard:guard + n_record]
 
 
-def _shallowest_of_k(energy, sample_rate: int, _fc: float, _order: int) -> float:
+def _shallowest_of_k(energy, sample_rate: int, _fc: float, _order: int,
+                     _fit=None) -> float:
     """The REPLACED estimator, kept here so the claim that it was worse is checkable.
 
     Takes the shallowest of K sub-fits on a fixed-10 ms-smoothed envelope, on the
@@ -143,7 +159,7 @@ def main() -> int:
             for fc in BANDS:
                 energy = _synthetic_band_energy(t60_s, window_s, fc, knee_frac)
                 for name, estimator in ESTIMATORS.items():
-                    got = estimator(energy, SAMPLE_RATE, fc, FILTER_ORDER)
+                    got = estimator(energy, SAMPLE_RATE, fc, FILTER_ORDER, FIT)
                     errors[name].append((
                         100.0 * (got - true_range_db) / true_range_db, fc, knee_frac
                     ))
@@ -182,9 +198,13 @@ def main() -> int:
     # than the real dataset's — its median truncated window is ~0.17 s. The all-
     # cells summary above deliberately includes records too short to measure, so
     # it understates the estimator on the population E1 will score.
-    print("\nReported bands (500/1000 Hz) at shippable window lengths:")
+    print("\nReported bands (500/1000 Hz) at shippable window lengths, knees at or "
+          "beyond\nthe fit window's end — THE PRODUCTION REGIME, and the only one "
+          "the construction\nclaims to cover:")
     shipped = []
     for knee_frac in KNEE_FRACTIONS:
+        if knee_frac < FIT.window[1]:
+            continue
         for t60_s, window_s in DECAYS:
             if window_s < 0.15:
                 continue
@@ -192,16 +212,26 @@ def main() -> int:
             for fc in (500.0, 1000.0):
                 got = _available_decay_range_db(
                     _synthetic_band_energy(t60_s, window_s, fc, knee_frac),
-                    SAMPLE_RATE, fc, FILTER_ORDER,
+                    SAMPLE_RATE, fc, FILTER_ORDER, FIT,
                 )
                 shipped.append(100.0 * (got - true_range_db) / true_range_db)
     ok = [v for v in shipped if v == v]
     print(f"  {len(ok)}/{len(shipped)} scored, mean|err| "
           f"{statistics.mean(abs(v) for v in ok):.1f}%, "
           f"worst over {max(ok):+.1f}%, worst under {min(ok):+.1f}%")
+    print("\nOUTSIDE the claim — a knee INSIDE the fit window. Not covered, not "
+          "safe, and\nnot reached in production (gsound's taper plus Lundeby put "
+          "the knee near 86 %):")
+    for knee_frac in KNEE_FRACTIONS:
+        if knee_frac >= FIT.window[1]:
+            continue
+        inside = [e for e, _, k in errors["shipped (early-window fit)"]
+                  if k == knee_frac and e == e]
+        print(f"  knee at {knee_frac:.0%}: worst over-read {max(inside):+.1f}%")
 
     print("\nOver-reading is the UNSAFE direction: it admits a T30 the record "
-          "cannot support.\nWorst over-read per knee position, shipped estimator:")
+          "cannot support.\nWorst over-read per knee position, shipped estimator "
+          f"(fit window ends at {FIT.window[1]:.0%}):")
     for knee_frac in KNEE_FRACTIONS:
         at_knee = [e for e, _, k in errors["shipped (early-window fit)"]
                    if k == knee_frac and e == e]
