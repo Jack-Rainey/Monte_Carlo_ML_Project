@@ -322,6 +322,24 @@ require_non_empty_path_file: true
 max_excluded_frac: 0.05
 max_excluded_frac_per_split: 0.05
 
+# A CRITERION THAT NEVER RAN IS NOT A CRITERION THAT PASSED. Largest share of one
+# gating criterion's attempts that may come back unscored.
+#
+# `qc.QCRecord` is three-state precisely so a skip cannot inflate a pass count, but
+# that only fixes the arithmetic — nothing was BOUNDING the skips. A criterion that
+# scores nothing across the batch leaves every scene admitted, records no
+# exclusion, and satisfies both attrition bounds above, because none of them is
+# about coverage. RI's paired onset check is the live case: geometry overrules the
+# detector on both legs and the record goes unscored, so the criterion the
+# reproduction is named for can be absent from the dataset it admits.
+#
+# 0.10 against a backend that supplies what every criterion needs. It is NOT a
+# quality bar on the renders — it is a tripwire on the INSTRUMENT, and a run that
+# breaches it should be read as "this criterion is not measuring", never as
+# "loosen it". `configs/overlays/simulator_dry_run.yaml` declares its own, because
+# the scaffold exports no retained paths and so cannot score two of the four.
+max_unscored_gating_frac: 0.10
+
 # Tighter, and deliberately so: a refusal is a statement about the BACKEND, not
 # about the scene. It also leaves nothing on disk, so a re-run retries the scene
 # and — pygsound exposing no RNG seed — may admit it next time. Membership under

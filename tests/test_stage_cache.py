@@ -1021,6 +1021,7 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         # TIGHTENING one on a batch that already completed would otherwise never
         # be re-checked.
         "max_excluded_frac": 0.2,
+        "max_unscored_gating_frac": 0.42,
         "max_refused_frac": 0.15,
         "max_excluded_frac_per_split": 0.25,
         "metric_edt_variance_limited_s": 0.3,
@@ -1604,3 +1605,67 @@ class TestCodeVersionHashesSemanticsNotBytes:
                 "amcd/evaluation/room_acoustic.py", ("eval",), tmp_path,
                 "\ndef broken(:\n",
             )
+
+
+class TestRevalidateReScoresWithoutReRendering:
+    """The affordance design_spec §11.1's RE-SCORES list promises, and the flag
+    that makes it reachable.
+
+    Keeping the QC thresholds and `qc.py` out of the per-scene artifact
+    fingerprint is only half of it. The other half is being able to ACT on the
+    mismatch: the sole escape used to be `--force`, which deliberately suppresses
+    per-scene reuse, so the documented recovery from a QC failure at scene 700 of
+    720 re-rendered all 720 anyway. `--force` and `--revalidate` answer different
+    questions — "I do not trust these artifacts" versus "the artifacts are fine,
+    the rule that judges them changed".
+    """
+
+    def _rendered(self, cfg, run_dir: Path, **kw) -> int:
+        Pipeline(cfg, run_dir, QUIET, **kw).run_stage("render")
+        manifest = json.loads((run_dir / "renders" / "manifest.json").read_text())
+        return manifest["generated"]
+
+    def test_a_qc_threshold_change_re_scores_every_scene_and_re_renders_none(
+        self, tmp_path: Path
+    ) -> None:
+        cfg = tiny_config(scenes={"n_id": 4})
+        Pipeline(cfg, tmp_path, QUIET).run_stage("gen-scenes")
+        Pipeline(cfg, tmp_path, QUIET).run_stage("render")
+        before = {
+            p: p.stat().st_mtime_ns
+            for p in sorted((tmp_path / "renders").rglob("*.npy"))
+        }
+        assert before, "fixture rendered nothing"
+
+        # Only the admission rule moves. Nothing here can change an IR sample.
+        loosened = tiny_config(scenes={"n_id": 4}, min_energy_db=-70.0)
+        Pipeline(tmp_path and loosened, tmp_path, QUIET, revalidate=True).run_stage(
+            "render"
+        )
+        after = {p: p.stat().st_mtime_ns for p in before}
+        assert after == before, (
+            "an IR was rewritten by a change that cannot alter one sample, so a "
+            "QC fix still costs a full emulated re-render"
+        )
+
+    def test_force_still_rebuilds(self, tmp_path: Path) -> None:
+        """`--revalidate` must not quietly become the only behaviour: a run
+        started because an artifact is SUSPECT has to actually replace it."""
+        cfg = tiny_config(scenes={"n_id": 4})
+        Pipeline(cfg, tmp_path, QUIET).run_stage("gen-scenes")
+        Pipeline(cfg, tmp_path, QUIET).run_stage("render")
+        target = next(iter(sorted((tmp_path / "renders").rglob("*.npy"))))
+        before = target.stat().st_mtime_ns
+
+        Pipeline(cfg, tmp_path, QUIET, force=True).run_stage("render")
+        assert target.stat().st_mtime_ns != before, "--force reused an artifact"
+
+    def test_a_stage_that_never_ran_is_unaffected_by_revalidate(
+        self, tmp_path: Path
+    ) -> None:
+        """The flag is about getting PAST a mismatch, not about skipping work."""
+        cfg = tiny_config(scenes={"n_id": 4})
+        Pipeline(cfg, tmp_path, QUIET, revalidate=True).run_stage("gen-scenes")
+        assert self._rendered(
+            cfg, tmp_path, revalidate=True
+        ) == len(list((tmp_path / "scenes").glob("scene_*.json")))

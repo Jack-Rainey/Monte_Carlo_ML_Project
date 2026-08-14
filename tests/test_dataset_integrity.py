@@ -17,6 +17,7 @@ from amcd.config import Config
 from amcd.data.dataset import EnergyDataset
 from amcd.pipeline import Pipeline
 from amcd.scenes.generator import run_gen_scenes
+from amcd.simulators.base import admitted_digest
 
 from tests.conftest import CANONICAL_DRY_RUN, QUIET, tiny_config
 
@@ -275,6 +276,7 @@ class TestTheManifestIsTheDataset:
             "criteria": [{"leg": "low", "criterion": "min_energy_db",
                           "measured": -999.0, "threshold": -60.0}],
         })
+        manifest["admitted_sha256"] = admitted_digest(manifest["admitted"])
         manifest_path.write_text(json.dumps(manifest))
 
         _pipeline(cfg, tmp_path).run_stage("preprocess")
@@ -312,6 +314,7 @@ class TestTheManifestIsTheDataset:
         manifest["excluded"].append(
             {"scene_id": victim, "category": "refused", "reason": "simulated"}
         )
+        manifest["admitted_sha256"] = admitted_digest(manifest["admitted"])
         manifest_path.write_text(json.dumps(manifest))
 
         _pipeline(cfg, tmp_path).run_stage("preprocess")
@@ -352,7 +355,43 @@ class TestTheManifestIsTheDataset:
         manifest["excluded"] += [
             {"scene_id": s, "category": "qc_failed", "criteria": []} for s in doomed
         ]
+        manifest["admitted_sha256"] = admitted_digest(manifest["admitted"])
         manifest_path.write_text(json.dumps(manifest))
 
         with pytest.raises(ValueError, match="concentrated on one or more splits"):
             _pipeline(cfg, tmp_path).run_stage("preprocess")
+
+    def test_a_manifest_edited_after_the_render_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """`admitted_sha256` has to be CHECKED or it is decoration.
+
+        It was written and read by nothing, while its own docstring claimed it made
+        membership drift detectable. A manifest whose admitted list no longer
+        matches its digest describes a different dataset than the renders on disk,
+        and preprocessing it would train on a membership no stage chose.
+        """
+        cfg = tiny_config(scenes={"n_id": 4})
+        _pipeline(cfg, tmp_path).run_stage("gen-scenes")
+        _pipeline(cfg, tmp_path).run_stage("render")
+
+        manifest_path = tmp_path / "renders" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["admitted"] = manifest["admitted"][:-1]   # digest NOT restamped
+        manifest_path.write_text(json.dumps(manifest))
+
+        with pytest.raises(RuntimeError, match="admitted_sha256"):
+            _pipeline(cfg, tmp_path).run_stage("preprocess")
+
+    def test_the_membership_digest_reaches_the_preprocess_stamp(
+        self, tmp_path: Path
+    ) -> None:
+        """So a reader of `preprocessed/meta.json` can tell WHICH membership the
+        tensors were built from, rather than assuming the manifest on disk now is
+        the one that produced them."""
+        cfg = tiny_config(scenes={"n_id": 4})
+        _through_preprocess(cfg, tmp_path)
+        manifest = json.loads((tmp_path / "renders" / "manifest.json").read_text())
+        meta = json.loads((tmp_path / "preprocessed" / "meta.json").read_text())
+        assert meta["admitted_sha256"] == manifest["admitted_sha256"]
+        assert meta["admitted_sha256"] == admitted_digest(manifest["admitted"])

@@ -151,3 +151,14 @@ class RunContext:
     #: return that artifact. The sha above is still RECORDED on a forced run, so
     #: the next run can resume from what the forced one produced.
     force: bool = False
+
+    #: Whether the operator passed `--revalidate`: run the stage past a fingerprint
+    #: mismatch, but KEEP every unit whose own artifact fingerprint still matches.
+    #:
+    #: THE SEPARATION IS THE POINT. `--force` answers "I do not trust these
+    #: artifacts"; `--revalidate` answers "the artifacts are fine, the rule that
+    #: judges them changed". Without the second, the only way past a stage-level
+    #: mismatch is `--force`, which suppresses per-unit reuse — so changing a QC
+    #: threshold, whose whole design is to cost a re-score, re-rendered all 720
+    #: scenes instead. Never both at once; the CLI refuses the pair.
+    revalidate: bool = False

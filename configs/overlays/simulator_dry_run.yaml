@@ -14,3 +14,12 @@
 # name-change scoping) rather than leaking into a backend that never declared them.
 simulator:
   name: dry_run
+
+# The scaffold exports no retained propagation paths, so two of the four RI
+# admission criteria (`path_file_mb`, `non_empty_path_file`) are recorded SKIPPED
+# with a reason on every scene — correctly, since there is no file to bound. That
+# is a permanent property of this backend, not a symptom, so the coverage tripwire
+# is declared here at a level those two cannot trip. Raising it is scoped to the
+# dry-run backend alone: `base.yaml` keeps the strict value that guards the real
+# renderer, where a criterion going unscored means the instrument is broken.
+max_unscored_gating_frac: 1.0

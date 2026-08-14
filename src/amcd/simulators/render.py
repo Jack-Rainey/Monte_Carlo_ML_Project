@@ -47,6 +47,7 @@ from .base import (
     IRResult,
     SceneRefused,
     SceneSpec,
+    admitted_digest,
     build_simulator,
     simulator_host_scoped_params,
     simulator_min_separation,
@@ -55,11 +56,31 @@ from .base import (
 )
 
 
+def _qc_coverage(criteria: list[qc.QCRecord]) -> dict[str, dict[str, int]]:
+    """Per gating criterion: how many were SCORED, out of how many attempted.
+
+    The `n scored / attempted` discipline the metric path already applies, applied
+    to admission. Without it a criterion can go unscored on the whole batch and
+    read as clean: `manifest.json` shows every scene admitted, no exclusion is
+    recorded, and the attrition bounds see nothing, because a skip is not a
+    failure. RI's paired onset check is the live case — geometry overrules the
+    detector on both legs and the record becomes unscored — so the criterion the
+    reproduction is named for can be silently absent from the dataset it admits.
+    """
+    coverage: dict[str, dict[str, int]] = {}
+    for record in criteria:
+        row = coverage.setdefault(record.criterion, {"scored": 0, "attempted": 0})
+        row["attempted"] += 1
+        row["scored"] += int(record.scored)
+    return coverage
+
+
 def _write_manifest(
     renders_dir: Path,
     scenes: list[SceneSpec],
     refused: list[tuple[str, str]],
     failures: list[qc.QCRecord],
+    criteria: list[qc.QCRecord],
 ) -> dict:
     """Write `renders/manifest.json` — WHICH SCENES THE DATASET IS MADE OF.
 
@@ -95,10 +116,11 @@ def _write_manifest(
     manifest = {
         "generated": len(scenes),
         "admitted": admitted,
-        "admitted_sha256": hashlib.sha256(
-            "\n".join(admitted).encode()
-        ).hexdigest(),
+        "admitted_sha256": admitted_digest(admitted),
         "excluded": sorted(excluded, key=lambda e: e["scene_id"]),
+        # Which admission criteria actually RAN, per criterion. An admitted set is
+        # only as meaningful as the checks that admitted it.
+        "qc_coverage": _qc_coverage(criteria),
     }
     (renders_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
     return manifest
@@ -132,6 +154,21 @@ def _enforce_attrition_bounds(config: Config, manifest: dict) -> None:
                 f"  {count} of {generated} scenes {label} "
                 f"({count / generated:.1%}), over the declared {bound:.1%}"
             )
+    # A criterion that never RAN is not a criterion that passed. Bounded per
+    # criterion rather than over the pooled total: pooling lets three healthy
+    # criteria mask a fourth that scored nothing, and it is the fourth — RI's
+    # paired onset check, say — whose absence changes what "admitted" means.
+    for criterion, row in sorted(manifest["qc_coverage"].items()):
+        if not row["attempted"]:
+            continue
+        unscored = 1.0 - row["scored"] / row["attempted"]
+        if unscored > config.max_unscored_gating_frac:
+            breaches.append(
+                f"  QC criterion {criterion!r} scored only {row['scored']} of "
+                f"{row['attempted']} attempts ({unscored:.1%} unscored), over the "
+                f"declared {config.max_unscored_gating_frac:.1%}"
+            )
+
     if breaches:
         raise ValueError(
             "the render stage lost more of the batch than the dataset can carry:\n"
@@ -574,7 +611,7 @@ def run_render(config: Config, run_dir: Path, ctx: RunContext) -> None:
     if verbosity.saves("diagnostics"):
         qc.write_qc_csv(renders_dir / "qc_record.csv", qc_records)
 
-    manifest = _write_manifest(renders_dir, scenes, refused, failures)
+    manifest = _write_manifest(renders_dir, scenes, refused, failures, criteria)
     emit(verbosity, "metrics",
          f"  Admitted {len(manifest['admitted'])} of {len(scenes)} scenes "
          f"({len(manifest['excluded'])} excluded) → {renders_dir / 'manifest.json'}")

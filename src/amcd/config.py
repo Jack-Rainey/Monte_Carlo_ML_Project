@@ -917,6 +917,13 @@ class Config(BaseModel):
     #: severe there while negligible overall.
     max_excluded_frac: float
     max_excluded_frac_per_split: float
+    #: Largest share of a single gating criterion's attempts that may go UNSCORED.
+    #: A skip is not a pass (`qc.QCRecord`), so a criterion that never ran on a
+    #: batch would otherwise leave every scene admitted, no exclusion recorded, and
+    #: the attrition bounds satisfied — an admission rule silently absent from the
+    #: dataset it is supposed to admit. Per criterion, not pooled: pooling lets
+    #: healthy criteria mask the one that scored nothing.
+    max_unscored_gating_frac: float
     #: The same for scenes the BACKEND refused, held tighter because a refusal
     #: describes the backend rather than the scene, and because it leaves nothing on
     #: disk — so unlike a QC exclusion it is not reproducible on a re-run.

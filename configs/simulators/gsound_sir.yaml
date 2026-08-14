@@ -105,6 +105,18 @@ max_discarded_tail_db: -60.0
 # must support.
 render_python: null
 
+# Seconds one leg's worker may run before it is killed and the SCENE is refused
+# (excluded, per RI §B.4) rather than the batch hanging. Not a performance knob: a
+# wedged emulated worker otherwise blocks a ~14 h render with no output at all.
+#
+# 1800 is ~30x the slowest leg measured on this project's own renders — the 800k
+# reference leg of the convergence probe averaged 1067 s per scene under Rosetta,
+# and E1's 200k leg runs ~30 s — so it cannot fire on a scene that is merely slow,
+# including on a native x86 host where every leg is faster. Raise it before
+# sweeping to a budget beyond 800k; a run that trips it should be read as a wedged
+# worker, not as a tight bound.
+worker_timeout_s: 1800.0
+
 # ── Normalization ─────────────────────────────────────────────────────────────
 # Must stay false. Per-IR normalization destroys low↔high energy comparability,
 # and every paired-improvement metric plus the D0b carrier test rests on it. Both

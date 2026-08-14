@@ -411,6 +411,22 @@ what makes the estimate above a measurement.
 **What DOES discard a persisted dataset — and what only re-scores it.** Two
 lists, because the difference is the difference between 14 hours and seconds.
 
+Two modules a stage IMPORTS are on NEITHER list, deliberately: `runtime.py` (the
+verbosity ladder and stage dispatch) and `device.py` (the MPS → CUDA → CPU
+fallback). Neither can change what a run produces — the first by a standing
+project rule, the second because the compute device is a host fact — so neither
+may discard what a run produced. While they were scoped, appending one statement
+to `runtime.py` invalidated all 720 renders, measured. `provenance.UNSCOPED_MODULES`
+declares each with its reason and `tests/test_stage_cache.py` pins both.
+
+`config.py` is a third case and NOT exempt: it stays in every stage fingerprint,
+including the render STAGE key, because a config change genuinely can change which
+renders are admitted. It is dropped from the render BYTES scope alone, which puts
+an obligation on `_render_artifact_fingerprint`: it must enumerate the resolved
+config VALUES the IR bytes are a function of, and it records the DERIVED
+`(n_channels, n_samples)` shape so a change to either derivation is visible
+without the module's own bytes.
+
 RE-RENDERS every scene (in the per-scene artifact fingerprint):
 
     src/amcd/__init__.py   config.py    runtime.py    registry.py
@@ -430,12 +446,31 @@ text in the x86 subprocess, so no import closure can see it.
 
 Comment and docstring edits are exempt from both —
 `provenance._semantic_digest` hashes the AST with docstrings stripped — so
-documentation work is free. `src/amcd/scenes/**` is on neither list and still
-forces a full re-render by a different route: it moves `gen-scenes`' fingerprint,
-`render` then refuses on the upstream sha, and the documented escape is `--force`,
-which suppresses per-scene reuse. Anything on the re-render list either lands
-BEFORE a full-dataset render or is accepted as a re-render cost, and the decision
-is recorded either way.
+documentation work is free. Anything on the re-render list either lands BEFORE a
+full-dataset render or is accepted as a re-render cost, and the decision is
+recorded either way.
+
+**`src/amcd/scenes/**` and the split NAMES are frozen for the life of the E1
+dataset, and they are the two traps that do not look like the list above.**
+
+`scenes/**` is on neither list yet forces a full re-render by a different route:
+it moves `gen-scenes`' fingerprint, `render` then refuses on the upstream sha, and
+the only documented escape is `--force`, which deliberately suppresses per-scene
+reuse. So an edit that changes no sampled room — adding a recorded column to
+`placement_report.json` while writing the E1 report — costs every scene even
+though each `_scene_sha256` still matches. Checked before the render: that file
+already records volume, Sabine and Eyring T60, critical distance, d/r_c, DRR,
+source-receiver distance, absorption realized-vs-declared and the record
+decay-range counts per regime, which is everything RD-29 and RD-46 will quote.
+
+Split names are keys in `_gen_scenes_fingerprint`, so RENAMING a split invalidates
+the scene set and therefore the dataset. RD-27's obligation to relabel
+`test_geometry_shift` as a v3-corrected single-axis shift is **E1 report prose
+only**; the config key does not move.
+
+There is no `--revalidate` that would honour a matching artifact fingerprint on a
+`scenes/**` edit. Adding one is the better long-term fix and is deliberately not a
+prerequisite for E1.
 
 ### 11.1a A scene can leave the study two ways, and they are not the same number
 

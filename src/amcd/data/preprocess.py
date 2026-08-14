@@ -14,7 +14,7 @@ import torch
 from ..config import Config
 from ..representations import build_representation
 from ..runtime import RunContext, emit
-from ..simulators.base import SceneSpec
+from ..simulators.base import SceneSpec, admitted_digest
 
 #: The `compute_stats` keys actually applied to the saved tensors, as (mean, std).
 #: ONE declaration, read both by the `normalize()` calls and by what `meta.json`
@@ -64,8 +64,13 @@ def _spectral_slope_db_per_decade(
 
 def _admitted_scenes(
     generated: list[SceneSpec], renders_dir: Path
-) -> tuple[list[SceneSpec], dict[str, dict]]:
+) -> tuple[list[SceneSpec], dict[str, dict], str]:
     """Split the generated scenes into the admitted ones and the excluded ones.
+
+    Returns `(admitted, excluded, admitted_sha256)` — the digest identifies the
+    MEMBERSHIP this run's tensors were built from, and is stamped into
+    `preprocessed/meta.json` so a later reader can tell which dataset a split
+    describes rather than assuming the manifest on disk is still the one used.
 
     A MISSING MANIFEST IS FATAL, never "assume everything was admitted". That
     fallback would silently reinstate the whole batch on a run whose render stage
@@ -80,6 +85,21 @@ def _admitted_scenes(
             f"Re-run the render stage (already-rendered scenes are reused)."
         )
     manifest = json.loads(manifest_path.read_text())
+
+    # The digest is CHECKED, not just carried. `render` writes it beside the id
+    # list it describes, so the two disagreeing means the file was edited after the
+    # stage wrote it — by hand, by a partial write, or by a tool. Verifying it here
+    # is what makes it a integrity record rather than decoration.
+    recorded_digest = manifest.get("admitted_sha256")
+    actual_digest = admitted_digest(manifest["admitted"])
+    if recorded_digest != actual_digest:
+        raise RuntimeError(
+            f"{manifest_path} records admitted_sha256 {recorded_digest} but its own "
+            f"admitted list digests to {actual_digest}. The file has been modified "
+            f"since the render stage wrote it, so it no longer describes the "
+            f"renders on disk. Re-run the render stage (rendered scenes are reused)."
+        )
+
     excluded = {e["scene_id"]: e for e in manifest["excluded"]}
     admitted = [s for s in generated if s.scene_id not in excluded]
 
@@ -92,7 +112,7 @@ def _admitted_scenes(
             f"different batch than gen-scenes produced — re-run both stages rather "
             f"than preprocessing a set neither stage agrees on."
         )
-    return admitted, excluded
+    return admitted, excluded, actual_digest
 
 
 def _split_attrition(
@@ -200,7 +220,7 @@ def run_preprocess(config: Config, run_dir: Path, ctx: RunContext) -> None:
     # its artifacts on disk — that is what makes the exclusion re-derivable — so
     # anything that discovered scenes by listing would train on renders the render
     # stage refused to admit.
-    scenes, excluded = _admitted_scenes(generated, renders_dir)
+    scenes, excluded, membership_sha = _admitted_scenes(generated, renders_dir)
 
     # `carrier/` is excluded from the rmtree above because it is keyed by scene id
     # rather than by split, so it needs the same pruning gen-scenes gives
@@ -372,6 +392,10 @@ def run_preprocess(config: Config, run_dir: Path, ctx: RunContext) -> None:
         # scenes QC excludes are not a random subset of the split, since the energy
         # floor bites hardest at high absorption, which is a shift axis.
         "split_attrition": attrition,
+        # WHICH membership these tensors were built from. Stamped so a
+        # reader can tell whether a split describes the manifest now on
+        # disk, rather than assuming it does.
+        "admitted_sha256": membership_sha,
     }
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
     (out_dir / "splits.json").write_text(json.dumps(splits, indent=2))

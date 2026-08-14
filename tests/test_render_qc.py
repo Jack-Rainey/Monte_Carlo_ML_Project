@@ -361,3 +361,47 @@ class TestTheStageExcludesOffendersAndBoundsTheAttrition:
         assert record and {r["scene_id"] for r in record} == {
             p.name for p in (tmp_path / "renders").iterdir() if p.is_dir()
         }
+
+
+class TestACriterionThatNeverRanIsNotACriterionThatPassed:
+    """`QCRecord` being three-state fixes the arithmetic; it does not bound the
+    skips. A gating criterion that scores nothing across a batch leaves every
+    scene admitted, records no exclusion, and satisfies both attrition bounds,
+    because none of them is about coverage — so an admission rule can be silently
+    absent from the dataset it is supposed to admit."""
+
+    def _run(self, cfg, run_dir: Path):
+        Pipeline(cfg, run_dir, QUIET).run_stage("gen-scenes")
+        return Pipeline(cfg, run_dir, QUIET).run_stage("render")
+
+    def test_the_manifest_records_scored_over_attempted_per_criterion(
+        self, tmp_path: Path
+    ) -> None:
+        self._run(tiny_config(scenes={"n_id": 4}), tmp_path)
+        coverage = json.loads(
+            (tmp_path / "renders" / "manifest.json").read_text()
+        )["qc_coverage"]
+        # dry_run exports no retained paths, so those two criteria cannot score.
+        assert coverage["path_file_mb"]["scored"] == 0
+        assert coverage["path_file_mb"]["attempted"] > 0
+        assert coverage["min_energy_db"]["scored"] == coverage["min_energy_db"]["attempted"]
+
+    def test_a_criterion_that_scores_nothing_trips_the_coverage_bound(
+        self, tmp_path: Path
+    ) -> None:
+        """Under base.yaml's strict bound the dry-run backend's unscorable path
+        criteria are exactly this failure, which is why the dry-run overlay
+        declares its own — the exemption is scoped to the backend that earns it,
+        not baked into the check."""
+        cfg = tiny_config(scenes={"n_id": 4}, max_unscored_gating_frac=0.10)
+        with pytest.raises(ValueError, match="unscored"):
+            self._run(cfg, tmp_path)
+
+    def test_the_bound_is_per_criterion_not_pooled(self, tmp_path: Path) -> None:
+        """Pooling lets healthy criteria mask the one that scored nothing: two of
+        four criteria fully scored puts the POOLED unscored fraction at 50 %, so a
+        pooled bound anywhere above that passes a batch in which two criteria
+        never ran at all."""
+        cfg = tiny_config(scenes={"n_id": 4}, max_unscored_gating_frac=0.60)
+        with pytest.raises(ValueError, match="path_file_mb"):
+            self._run(cfg, tmp_path)

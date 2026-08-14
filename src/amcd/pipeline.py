@@ -171,6 +171,7 @@ def _render_fingerprint(config: Config) -> dict:
             # declared bound with the sentinel reporting done.
             "max_excluded_frac": config.max_excluded_frac,
             "max_refused_frac": config.max_refused_frac,
+            "max_unscored_gating_frac": config.max_unscored_gating_frac,
         },
     }
 
@@ -734,7 +735,8 @@ def _dispatch(stage: str) -> Callable[[Config, Path, RunContext], None]:
 
 class Pipeline:
     def __init__(
-        self, config: Config, run_dir: Path, ctx: RunContext, force: bool = False
+        self, config: Config, run_dir: Path, ctx: RunContext, force: bool = False,
+        revalidate: bool = False,
     ) -> None:
         self.config = config
         self.run_dir = run_dir
@@ -745,6 +747,9 @@ class Pipeline:
         #: Convenience for this class's own `emit` calls; `ctx` is what stages get.
         self.verbosity = ctx.verbosity
         self.force = force
+        #: Run past a fingerprint mismatch WITHOUT discarding per-unit artifacts —
+        #: see `RunContext.revalidate` for why this is not `--force`.
+        self.revalidate = revalidate
 
     def _recorded_fingerprint(self, stage: str) -> tuple[str, dict | None]:
         """`stage`'s sentinel state and the fingerprint in it, if any.
@@ -856,7 +861,7 @@ class Pipeline:
         modes are invisible after the fact, so the decision belongs to a human.
         """
         sentinel = _sentinel(self.run_dir, stage)
-        if self.force or not sentinel.exists():
+        if self.force or self.revalidate or not sentinel.exists():
             return False
 
         if STAGE_FINGERPRINT[stage] is None:
@@ -878,8 +883,10 @@ class Pipeline:
                 f"Stage {stage!r} was cached under a DIFFERENT config; reusing it "
                 f"would silently mix two experiments in one run_dir.\n"
                 f"  Changed inputs:\n" + "\n".join(diff) + "\n"
-                f"  Re-run with --force to rebuild {stage!r} (this discards its "
-                f"existing artifacts), or use a fresh --run-dir to keep both."
+                f"  Re-run with --revalidate to re-run {stage!r} while KEEPING every "
+                f"artifact whose own fingerprint still matches (a changed admission "
+                f"rule costs a re-score, not a re-render), with --force to rebuild it "
+                f"from scratch, or use a fresh --run-dir to keep both."
             )
         return True
 
@@ -922,6 +929,7 @@ class Pipeline:
                 None if artifact_fn is None else _fingerprint_sha(artifact_fn(self.config))
             ),
             force=self.force,
+            revalidate=self.revalidate,
         )
 
     def _record_timing(self, stage: str, seconds: float) -> None:

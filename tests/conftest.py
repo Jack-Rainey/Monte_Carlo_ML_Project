@@ -132,3 +132,51 @@ def sample_ir(dry_run_config: Config) -> np.ndarray:
     C = dry_run_config.n_channels
     T = dry_run_config.n_samples
     return rng.standard_normal((C, T)).astype(np.float32)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _warm_plugin_registries():
+    """Import every plugin package once, BEFORE any snapshot is taken.
+
+    Registration happens as an import side effect, and the imports are lazy. So a
+    per-test snapshot taken before the first `build_model` call would not contain
+    `vanilla_cnn`, and restoring it afterwards would DELETE the registration —
+    permanently, because the module stays in `sys.modules` and never re-registers.
+    Warming first makes the snapshot a superset of anything a test can legitimately
+    rely on.
+    """
+    import amcd.models  # noqa: F401
+    import amcd.representations  # noqa: F401
+    import amcd.simulators  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def _isolate_registries(_warm_plugin_registries):
+    """Undo every plugin registration a test makes, whatever it does.
+
+    The registries are module-level singletons, so a test that registers a probe
+    backend and does not remove it changes what LATER tests see — and the effect
+    depends on collection order, so the suite passes or fails differently between
+    identical invocations. That happened: two registrations here had no teardown,
+    and five runs of one unmodified tree produced five different failure sets, all
+    of which passed in isolation. A guard that passes intermittently is not a
+    guard, and one of the intermittent failures was the stale-cache check standing
+    in front of a 14-hour render.
+
+    Autouse and snapshot-based rather than a `finally` in each test: the failure
+    mode is a test FORGETTING to clean up, so a fix each test has to remember to
+    apply is the same class of defect.
+    """
+    from amcd import registry as _registry
+
+    registries = [
+        v for v in vars(_registry).values() if isinstance(v, _registry.Registry)
+    ]
+    assert registries, "no registries found to isolate — this fixture is inert"
+    saved = [(r, dict(r._entries)) for r in registries]
+    try:
+        yield
+    finally:
+        for reg, entries in saved:
+            reg._entries.clear()
+            reg._entries.update(entries)

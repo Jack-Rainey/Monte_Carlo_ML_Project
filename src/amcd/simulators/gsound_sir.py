@@ -50,6 +50,12 @@ _N_BANDS = 8
 _RECEIPT_NAME = "amcd_gsound_install.json"
 _RECEIPT_SHA_KEY = "commit_sha"
 
+#: The worker's exit status meaning "this SCENE is bad", as distinct from every
+#: other non-zero status, which means the BACKEND is. Must equal
+#: `_gsound_worker.SCENE_REFUSED_EXIT`; the worker is read as TEXT and cannot
+#: import this, so `tests/test_simulator_seam.py` checks the two agree.
+_SCENE_REFUSED_EXIT = 3
+
 #: The ambisonic channel ordering + normalization upstream actually produces.
 #: **N3D, not SN3D** — verified in the auralizer binding at
 #: `auralizer/src/cpp/binding.cpp:18` ("normalization constant K(l, m) for N3D")
@@ -208,6 +214,15 @@ class GsoundSirSimulator:
         source_radius: float
         listener_radius: float
         source_power: float
+
+        #: Seconds a single leg's worker may run before it is killed and the scene
+        #: refused. Declared rather than defaulted because how long a leg
+        #: legitimately takes is an operating-point fact — a 200k-ray reference leg
+        #: under emulation is minutes, a 5k low leg is seconds — so no one value is
+        #: right across the ray budgets this study sweeps. Without it a wedged
+        #: worker blocks a 14-hour batch with no output but a process that never
+        #: returns.
+        worker_timeout_s: float
 
         #: Surface scattering coefficient passed to `createbox`. Scene specs carry
         #: absorption; scattering is a backend-level material property today.
@@ -552,7 +567,7 @@ class GsoundSirSimulator:
             return float(value), 0
         return 100.0, int(value)
 
-    def _run_worker(self, request: dict, out_dir: Path) -> dict:
+    def _run_worker(self, request: dict, out_dir: Path, scene_id: str) -> dict:
         """Execute `_WORKER_SRC` under the render interpreter and return its result.
 
         `render_python` null → `sys.executable`, which is correct wherever the
@@ -566,11 +581,34 @@ class GsoundSirSimulator:
         request_path.write_text(json.dumps(request, indent=2))
 
         interpreter = self.params["render_python"] or sys.executable
-        proc = subprocess.run(
-            [str(interpreter), str(worker_path), str(request_path)],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            proc = subprocess.run(
+                [str(interpreter), str(worker_path), str(request_path)],
+                capture_output=True,
+                text=True,
+                # A hung worker must not hang the batch. Without this a single
+                # wedged emulated render blocks a 14-hour run indefinitely, and the
+                # operator's only evidence is a process that never finishes.
+                # Config-declared, because how long a scene may legitimately take is
+                # an operating-point fact: a 200k-ray reference leg is minutes.
+                timeout=self.params["worker_timeout_s"],
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise SceneRefused(
+                f"scene {scene_id!r}: the render worker exceeded "
+                f"{self.params['worker_timeout_s']:g}s and was killed. Treated as a "
+                f"per-scene refusal so the batch continues; if it recurs across "
+                f"scenes the timeout is wrong or the backend is wedged."
+            ) from exc
+        # ONE distinguished code means the SCENE is bad; everything else means the
+        # BACKEND is, and still aborts. Without the split, a geometry the tracer
+        # cannot resolve — the most likely per-scene failure of this backend, at the
+        # absorptive end where the energy floor also bites — killed the whole batch.
+        if proc.returncode == _SCENE_REFUSED_EXIT:
+            raise SceneRefused(
+                f"scene {scene_id!r}: the render worker refused this scene.\n"
+                f"{proc.stderr.strip()}"
+            )
         if proc.returncode != 0:
             raise RuntimeError(
                 f"GSound-SIR render worker failed (exit {proc.returncode}) under "
@@ -763,7 +801,7 @@ class GsoundSirSimulator:
         with tempfile.TemporaryDirectory(prefix="amcd_gsound_") as tmp:
             out_dir = Path(tmp)
             request["out_dir"] = str(out_dir)
-            result = self._run_worker(request, out_dir)
+            result = self._run_worker(request, out_dir, scene.scene_id)
             native = np.load(out_dir / "ir.npy")
             arrays = {k: v for k, v in np.load(out_dir / "paths.npz").items()}
 

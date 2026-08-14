@@ -46,7 +46,18 @@ def common_options(fn):
             default=None,
             help="Run directory (default: experiments/<stage>_<timestamp>).",
         ),
-        click.option("--force", is_flag=True, default=False, help="Re-run even if cached."),
+        click.option(
+            "--force", is_flag=True, default=False,
+            help="Re-run even if cached, rebuilding every artifact from scratch. "
+                 "Use when you do not trust the artifacts.",
+        ),
+        click.option(
+            "--revalidate", is_flag=True, default=False,
+            help="Re-run past a fingerprint mismatch while KEEPING every artifact "
+                 "whose own fingerprint still matches. Use when the artifacts are "
+                 "fine and the rule that judges them changed — a QC threshold "
+                 "costs a re-score, not a re-render.",
+        ),
         click.option(
             "--save-verbosity",
             type=click.IntRange(0, 5),
@@ -78,12 +89,19 @@ def _invoke(
     config: tuple[Path, ...],
     run_dir: Path | None,
     force: bool,
+    revalidate: bool,
     save_verbosity: int,
     show_verbosity: int,
 ) -> None:
     """Shared command body; `stage=None` runs all stages."""
     from .config import Config
     from .device import select_device
+    if force and revalidate:
+        raise click.UsageError(
+            "--force and --revalidate contradict each other: the first discards "
+            "every artifact, the second keeps the ones that still match. Pick the "
+            "one that describes why you are re-running."
+        )
     cfg = Config.load(*config)
     verbosity = Verbosity(save=save_verbosity, show=show_verbosity)
     if run_dir is None:
@@ -95,7 +113,9 @@ def _invoke(
     # The CLI is where the runtime context is ASSEMBLED — it is the layer that
     # knows the machine and the invocation, which is exactly what RunContext
     # carries and Config must not.
-    pipeline = Pipeline(cfg, run_dir, RunContext(verbosity), force=force)
+    pipeline = Pipeline(
+        cfg, run_dir, RunContext(verbosity), force=force, revalidate=revalidate
+    )
     if stage is None:
         pipeline.run_all()
     else:
@@ -109,10 +129,12 @@ def _add_stage_command(stage: str) -> None:
         config: tuple[Path, ...],
         run_dir: Path | None,
         force: bool,
+        revalidate: bool,
         save_verbosity: int,
         show_verbosity: int,
     ) -> None:
-        _invoke(stage, config, run_dir, force, save_verbosity, show_verbosity)
+        _invoke(stage, config, run_dir, force, revalidate,
+                save_verbosity, show_verbosity)
 
     _cmd.__name__ = stage.replace("-", "_")
 
@@ -127,8 +149,10 @@ def run_all(
     config: tuple[Path, ...],
     run_dir: Path | None,
     force: bool,
+    revalidate: bool,
     save_verbosity: int,
     show_verbosity: int,
 ) -> None:
     """Run all stages: gen-scenes → render → preprocess → diagnostics → train → infer → eval → stats → report."""
-    _invoke(None, config, run_dir, force, save_verbosity, show_verbosity)
+    _invoke(None, config, run_dir, force, revalidate,
+            save_verbosity, show_verbosity)

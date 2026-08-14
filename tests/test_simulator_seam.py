@@ -1174,10 +1174,33 @@ class TestGsoundProvenanceFill:
         with pytest.raises(SystemExit, match="compiled in and can only be declared"):
             check(np.full(5, 343.0, dtype="float32"), 344.0)
 
-    def test_a_render_with_no_paths_is_an_error_not_an_empty_ir(self) -> None:
+    def test_a_render_with_no_paths_refuses_the_SCENE_not_the_batch(self) -> None:
+        """A geometry the tracer resolves no path for is the most likely per-scene
+        failure of this backend, at the absorptive end where the energy floor also
+        bites. It leaves as the distinguished exit code, so the parent excludes the
+        scene and keeps going instead of aborting 720 renders.
+
+        A CODE, not a message: the parent reads an exit status across a process
+        boundary and cannot classify prose."""
+        from amcd.simulators.gsound_sir import _SCENE_REFUSED_EXIT
+
         check = self._worker_speed_check()
-        with pytest.raises(SystemExit, match="returned no paths"):
+        with pytest.raises(SystemExit) as excinfo:
             check(np.zeros(0, dtype="float32"), 344.0)
+        assert excinfo.value.code == _SCENE_REFUSED_EXIT
+
+    def test_the_two_halves_of_the_refusal_code_agree(self) -> None:
+        """The worker is read as TEXT and cannot import the parent's constant, so
+        the number exists twice. If they drift, a per-scene refusal is read as a
+        backend fault and aborts the batch — the exact failure the code prevents."""
+        from amcd.simulators.gsound_sir import _SCENE_REFUSED_EXIT
+
+        from amcd.simulators.gsound_sir import _WORKER_SRC
+
+        namespace: dict = {}
+        exec(compile(_WORKER_SRC, "<gsound worker>", "exec"), namespace)
+        assert namespace["SCENE_REFUSED_EXIT"] == _SCENE_REFUSED_EXIT
+        assert _SCENE_REFUSED_EXIT != 0, "a refusal must not look like success"
 
     def test_the_declared_centres_are_upstreams_compiled_set(self) -> None:
         """Counting bands is not identifying them.

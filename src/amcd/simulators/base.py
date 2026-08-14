@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 import numpy as np
+
+
+def admitted_digest(scene_ids: list[str]) -> str:
+    """Digest of a dataset's MEMBERSHIP — the admitted scene ids, in order.
+
+    One definition, shared by the render stage that writes it into
+    `renders/manifest.json` and by preprocess, which recomputes it and refuses a
+    manifest whose recorded digest disagrees. Two implementations could differ in
+    separator or ordering and would then never disagree with each other for the
+    right reason.
+    """
+    return hashlib.sha256("\n".join(scene_ids).encode()).hexdigest()
 
 
 class SceneRefused(ValueError):

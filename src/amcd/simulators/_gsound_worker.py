@@ -24,6 +24,20 @@ from pathlib import Path
 
 import numpy as np
 
+#: Exit status meaning "THIS SCENE cannot be rendered; the batch can continue" —
+#: the worker's half of `simulators.base.SceneRefused`.
+#:
+#: A distinguished CODE rather than a message: everything the worker raises leaves
+#: as an exit status plus stderr, and the parent cannot tell a bad scene from a bad
+#: backend by reading prose. Every other non-zero exit stays a backend fault and
+#: still aborts the run, which is the safe default — a scene wrongly excluded is a
+#: silently smaller dataset, while a backend fault wrongly excluded is 720 of them.
+#:
+#: `gsound_sir._SCENE_REFUSED_EXIT` must hold the same number; the two are checked
+#: against each other in `tests/test_simulator_seam.py`, since this file is read as
+#: TEXT and cannot import the constant.
+SCENE_REFUSED_EXIT = 3
+
 
 def _installed_sha(receipt_name, sha_key):
     """The upstream commit this env was built from, per its install receipt.
@@ -108,10 +122,12 @@ def _check_declared_speed(speeds, declared):
     """
     observed = np.unique(np.asarray(speeds, dtype=np.float64))
     if observed.size == 0:
-        raise SystemExit(
-            "the render returned no paths, so the declared speed_of_sound_m_s "
-            "could not be cross-checked and there is no propagation to synthesize."
-        )
+        # THIS SCENE, not this backend — exit code, not a message, because the
+        # parent reads an exit status across a process boundary and cannot
+        # classify prose. The tracer resolving no path for one geometry is exactly
+        # what `SceneRefused` is for; without the distinguished code it aborted a
+        # 720-scene batch that should have excluded one scene and continued.
+        raise SystemExit(SCENE_REFUSED_EXIT)
     if not np.allclose(observed, declared, rtol=1e-3):
         raise SystemExit(
             "config declares speed_of_sound_m_s=%s but the rendered paths report "
