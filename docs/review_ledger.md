@@ -25,6 +25,11 @@ contain; nothing can be implemented for them before the report exists, and
 together they are that report's disclosure list. **Implementation, gated** is work
 whose prerequisite does not exist yet.
 
+**Every cycle re-checks every row here for whether its gate has arrived**, and
+promotes it when it has. Without that sweep this is where rows go to die — one sat
+deferred for three cycles after the gate it was waiting on had already passed. With
+OPEN empty, the sweep is the only thing keeping this file from being a graveyard.
+
 ### Report-prose obligations (E1 / E2)
 
 | ID | agent | sev | status | anchor | finding | resolution |

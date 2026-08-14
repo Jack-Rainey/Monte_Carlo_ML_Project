@@ -44,10 +44,44 @@ _PACKAGE_ROOT = Path(__file__).resolve().parent
 #: imports through and which no per-stage scope named, so an edit to it used to
 #: invalidate nothing. Subpackage `__init__.py` files need no entry: they are
 #: covered by their own subpackage's scope entry.
+#:
+#: `runtime.py` and `device.py` are deliberately ABSENT, and for one reason: a
+#: module that cannot change what a run produces must not be able to discard what
+#: a run produced. `runtime.py` is the verbosity ladder and the stage dispatch
+#: context, and "no verbosity level may alter what a run produces" is a standing
+#: project rule (docs/verbosity.md, `tests/test_verbosity_gate.py`); `device.py`
+#: is the MPS -> CUDA -> CPU fallback. Both are code the project's own
+#: requirements make someone touch, and while they were in here, touching either
+#: invalidated a 720-scene emulated render — measured, not assumed. `device.py`
+#: was moved out of this tuple for exactly that reason and
+#: `tests/test_stage_cache.py` pins both.
 _CORE_SOURCES = (
-    "__init__.py", "config.py", "runtime.py", "registry.py", "acoustics.py",
-    "provenance.py",
+    "__init__.py", "config.py", "registry.py", "acoustics.py", "provenance.py",
 )
+
+#: Modules a stage IMPORTS but no stage scope covers, each with the reason it
+#: cannot change what a run produces.
+#:
+#: Declared here rather than left as a silent hole in
+#: `tests/test_stage_cache.py::TestDeclaredScopeCoversWhatTheStageImports`. That
+#: test exists to catch a scope omitting a real dependency, so every omission has
+#: to be either a defect it reports or a claim recorded here — a test that simply
+#: skipped these would stop protecting anything the day a third module joined
+#: them by accident.
+UNSCOPED_MODULES: dict[str, str] = {
+    "runtime.py": (
+        "the verbosity ladder and the stage dispatch context. No verbosity level "
+        "may alter what a run produces (docs/verbosity.md, enforced by "
+        "tests/test_verbosity_gate.py), so nothing here can change an artifact — "
+        "while scoping it meant an edit to a print level discarded a 720-scene "
+        "emulated render."
+    ),
+    "device.py": (
+        "the MPS -> CUDA -> CPU fallback. Which device a tensor computes on is a "
+        "host fact, not an experiment one, and the cross-platform requirement "
+        "makes this the code someone touches on a new machine."
+    ),
+}
 
 #: Every source file, for the human-facing `versions.json` stamp — "which code was
 #: this run made with", where over-inclusion costs nothing. The `"."` is the
@@ -98,13 +132,23 @@ def _hashable_sources(target: Path) -> list[Path]:
     return found
 
 
-def code_version(scope: tuple[str, ...]) -> str:
+def code_version(scope: tuple[str, ...], *, drop_core: tuple[str, ...] = ()) -> str:
     """A content hash over the `.py` files a stage's output actually depends on.
 
     `scope` is a tuple of package-relative paths — a module (`"config.py"`) or a
     subpackage (`"evaluation"`) — and `_CORE_SOURCES` is added to every scope.
     Declaring the scope is the point: it states, per stage, which code the artifact
     is a function of, and that claim is auditable.
+
+    `drop_core` removes core entries for ONE caller, and a caller that passes it
+    takes on an obligation: it must enumerate, as VALUES in its own fingerprint,
+    everything the dropped module contributes. There is exactly one such caller —
+    `pipeline._render_bytes_code_version` drops `config.py`, having enumerated the
+    resolved config values the render bytes are a function of — because the render
+    is the one artifact whose recomputation costs ~14 hours of emulation and whose
+    re-rendered bytes are not the earlier ones (the backend exposes no RNG seed).
+    Everywhere else the coarse dependency is the right trade, and this parameter
+    should stay unused.
 
     Why a content hash and not `git rev-parse HEAD`: the sha is
     blind to the working tree, which is the exact state the guard exists for —
@@ -128,8 +172,15 @@ def code_version(scope: tuple[str, ...]) -> str:
     it does and does not catch, since an earlier version of THIS docstring claimed
     more than the test checked and that overstatement was the finding.
     """
+    unknown = set(drop_core) - set(_CORE_SOURCES)
+    if unknown:
+        raise ValueError(
+            f"drop_core names {sorted(unknown)}, which are not in _CORE_SOURCES. "
+            f"Dropping something that was never added would silently do nothing, "
+            f"and the caller would believe it had narrowed a scope it had not."
+        )
     digest = hashlib.sha256()
-    for entry in sorted(set(scope) | set(_CORE_SOURCES)):
+    for entry in sorted((set(scope) | set(_CORE_SOURCES)) - set(drop_core)):
         target = _PACKAGE_ROOT / entry
         paths = _hashable_sources(target)
         for path in paths:

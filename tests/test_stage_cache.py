@@ -611,6 +611,48 @@ class TestTheExpensiveArtifactIsCacheProtected:
         would have invalidated a 720-scene render."""
         assert not self._moves(tmp_path, "amcd/device.py")
 
+    def test_editing_the_verbosity_ladder_does_not(self, tmp_path) -> None:
+        """Same argument as `device.py`, same conclusion. `runtime.py` holds the
+        verbosity ladder and the stage dispatch context, and no verbosity level
+        may alter what a run produces (docs/verbosity.md) — so a module that
+        cannot change what a run produces must not be able to discard what a run
+        produced."""
+        assert not self._moves(tmp_path, "amcd/runtime.py")
+
+    def test_editing_config_re_scores_but_does_not_re_render(self, tmp_path) -> None:
+        """`config.py` is where every new experiment parameter goes, so leaving it
+        in the render BYTES scope meant E2's loss keys and E3's search keys each
+        cost a full emulated re-render — of bytes that would not be the ones the
+        earlier numbers came from, the backend having no RNG seed.
+
+        It stays in the STAGE key: a config change genuinely can change which
+        renders are admitted, and that is a different dataset. What it must not do
+        is discard the persisted IRs. The obligation this creates is on
+        `_render_artifact_fingerprint`, which enumerates the resolved config
+        VALUES the bytes are a function of — including the DERIVED
+        `(n_channels, n_samples)` shape, so a change to either derivation is
+        visible without the module's own bytes.
+        """
+        stage, artifact = self._moves_both(tmp_path, "amcd/config.py")
+        assert stage, "a config.py edit must still invalidate the render STAGE"
+        assert not artifact, (
+            "a config.py edit reached the PER-SCENE key, so adding any config "
+            "field costs a full emulated re-render"
+        )
+
+    def test_the_render_shape_is_fingerprinted_as_derived_values(self) -> None:
+        """The half of the above that is not about a file.
+
+        With `config.py` out of the bytes scope, a change to how `n_channels` or
+        `n_samples` is DERIVED is invisible unless the derived value itself is in
+        the fingerprint. Recording only `ambisonics_order` and `ir_duration` would
+        leave it silent.
+        """
+        from amcd.pipeline import _render_artifact_fingerprint
+
+        fp = _render_artifact_fingerprint(tiny_config())
+        assert "n_channels" in fp and "n_samples" in fp, fp
+
     @staticmethod
     def _moves(tmp_path, rel: str) -> bool:
         """Render `code_version` before vs after appending a statement to `rel`,
@@ -848,7 +890,12 @@ class TestDeclaredScopeCoversWhatTheStageImports:
 
         package_root = Path(amcd.__file__).resolve().parent
         for stage, scope in STAGE_CODE_SCOPE.items():
-            covered = set(scope) | set(prov._CORE_SOURCES)
+            # `UNSCOPED_MODULES` is a DECLARATION, not a skip list: each entry
+            # states why that module cannot change what a run produces. A module
+            # that is neither covered nor declared is what this test reports.
+            covered = (
+                set(scope) | set(prov._CORE_SOURCES) | set(prov.UNSCOPED_MODULES)
+            )
             missing = []
             for module in self._closure(_dispatch(stage).__module__):
                 rel = self._module_file(module).relative_to(package_root).as_posix()
@@ -859,6 +906,21 @@ class TestDeclaredScopeCoversWhatTheStageImports:
                 f"stage {stage!r} imports {sorted(missing)}, which its declared "
                 f"scope {scope} does not cover — an edit there would not "
                 f"invalidate its cached artifacts"
+            )
+
+    def test_every_unscoped_module_exists_and_states_its_reason(self) -> None:
+        """An entry naming a deleted module would be a hole nobody could see, and
+        one with an empty reason is a skip list wearing a declaration's name."""
+        import amcd
+        import amcd.provenance as prov
+
+        package_root = Path(amcd.__file__).resolve().parent
+        for rel, reason in prov.UNSCOPED_MODULES.items():
+            assert (package_root / rel).exists(), rel
+            assert len(reason) > 40, f"{rel}: reason too thin to audit"
+            assert rel not in prov._CORE_SOURCES, (
+                f"{rel} is declared unscoped AND in _CORE_SOURCES, so the "
+                f"declaration is false — every scope unions the core in"
             )
 
     def test_eval_and_infer_declare_the_module_they_denormalize_with(self) -> None:
@@ -954,6 +1016,13 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         "min_energy_reference": 2.0,
         "max_path_file_mb": 64.0,
         "require_non_empty_path_file": False,
+        # Attrition bounds. Fingerprinted for the case a raise cannot cover:
+        # loosening one re-runs anyway (a breached batch writes no sentinel), but
+        # TIGHTENING one on a batch that already completed would otherwise never
+        # be re-checked.
+        "max_excluded_frac": 0.2,
+        "max_refused_frac": 0.15,
+        "max_excluded_frac_per_split": 0.25,
         "metric_edt_variance_limited_s": 0.3,
         # The D0a/D0b thresholds ARE the verdict `diagnostics` publishes — "signal
         # to learn at this ray budget", "carrier ceiling clears" — so a change to

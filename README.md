@@ -220,7 +220,7 @@ scripts/            # setup_gsound_sir.py — the ref-addressable backend instal
                     # ledger_review_guard.py — the ledger's Stop hook
                     # *_probe.py — retained measurements the code's contracts cite
                     #   (tail compensation, shared window, support law, C50 noise
-                    #   floor, ray-budget convergence)
+                    #   floor, ray-budget convergence, decay range)
 docs/               # research_I_paper.md, design_spec.md, review_ledger.md,
                     # verbosity.md, gsound_sir_setup.md, parallel_protocol.md
   lanes/            #   one partition file per review cycle (who owns what)

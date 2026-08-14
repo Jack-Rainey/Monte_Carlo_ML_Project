@@ -74,6 +74,9 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
     # Drop log: one row per (scene, split, metric, leg) that is NaN in a
     # leg its kind consumes (unscored) or was only partially computed — written
     # to metrics/drops.csv so nothing leaves a result silently.
+    # UNSCORED, never excluded: the scene is in the dataset and scored on every
+    # other metric, which is a different denominator from the render stage's
+    # admission (design_spec §11.1a).
     drop_rows: list[dict] = []
     # Shared ISO-3382 Schroeder integration window per (scene, band).
     # Recorded for every scene the room-acoustic path scores, so a reported absolute

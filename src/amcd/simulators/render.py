@@ -14,7 +14,9 @@ Nothing already rendered is rendered twice: the batch is validated up front, and
 a scene whose artifacts carry the current fingerprint and scene digest and still
 verify is reused rather than re-rendered.
 
-A BAD SCENE IS EXCLUDED; A BAD BACKEND ABORTS. Research I §B.4 excludes examples
+A BAD SCENE IS EXCLUDED; A BAD BACKEND ABORTS. Exclusion here is EXCLUDED in the
+sense design_spec §11.1a defines — never in the dataset, as distinct from a scene
+that is admitted and carries one unscored metric. Research I §B.4 excludes examples
 that fail the admission criteria rather than discarding the dataset, and this
 stage does the same: a scene the backend REFUSED (`SceneRefused`) or that failed a
 gating QC criterion is left out of `manifest.json`, which is what downstream reads
@@ -354,9 +356,10 @@ def _score(config: Config, scene_id: str, out_dir: Path) -> list[qc.QCRecord]:
 
     # Path files come from the DIGEST RECORD, not from a directory listing: an
     # unrecorded `paths_{leg}.parquet` left by an earlier run under a different
-    # `path_retention` is outside provenance, and scoring an admission criterion
-    # against bytes no digest covers is exactly what the warning above refuses to
-    # delete the evidence of.
+    # `path_retention` is outside provenance. `run_render` reports such a file
+    # rather than deleting it (see the WARNING it emits), so it can still be sitting
+    # in the directory; scoring an admission criterion against it is what this
+    # avoids.
     recorded = set(meta.get("artifact_sha256") or {})
     path_files = {
         leg: (out_dir / f"paths_{leg}.parquet"

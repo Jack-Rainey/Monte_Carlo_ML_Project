@@ -30,12 +30,11 @@ def _spectral_slope_db_per_decade(
 ) -> float:
     """Least-squares slope of per-band peak level against log10(frequency), dB/decade.
 
-    THE DISCLOSURE THE NARROWED HEADROOM GUARD DROPPED. A minimum across every
-    band is a spectral-FLATNESS constraint: it rejects a steeply sloped render even
-    when the two REPORTED metric bands have ample headroom. Narrowing the guard's
-    operand to those bands removes that false rejection — and with it the only
-    signal that the slope exists, so a render whose top octaves are 40 dB down
-    would otherwise pass without comment.
+    WHAT THE HEADROOM GUARD DOES NOT SEE. The guard (`min_db` in
+    `configs/representations/spectrogram.yaml`, applied in `rep.encode`) has the
+    REPORTED metric bands as its operand, so a render whose top octaves are 40 dB
+    down clears it: spectral tilt outside those bands is unchecked. This records
+    the tilt so it is not also unreported.
 
     Flat is 0. Negative is the usual direction (energy falling with frequency, which
     real air absorption and most sources produce). A strongly negative value is not
@@ -100,6 +99,11 @@ def _split_attrition(
     generated: list[SceneSpec], excluded: dict[str, dict], config: Config
 ) -> dict[str, dict]:
     """Per split: how many scenes were generated, admitted, and lost to what.
+
+    Counts EXCLUDED scenes in the design_spec §11.1a sense — never in the dataset.
+    A scene that is admitted but carries an unscored metric is not here; it is in
+    `metrics/drops.csv` and in the split's scored/attempted count, and folding the
+    two into one denominator states something false about each.
 
     Computed over the GENERATED scenes, not the admitted ones, because the
     denominator is the whole point — "112 admitted" is not a disclosure, "112 of
@@ -264,11 +268,8 @@ def run_preprocess(config: Config, run_dir: Path, ctx: RunContext) -> None:
         low_energy = rep.encode(low_ir)    # (C, n_bands, n_frames)
         high_energy = rep.encode(high_ir)
 
-        # WHAT THE NARROWED GUARD NO LONGER SEES. Its operand is the reported
-        # metric bands, so a steeply sloped render — a 2nd-order 4 kHz lowpass is
-        # enough — passes silently. The slope is a real property of the render, so
-        # it is RECORDED rather than gated: nothing about it should reject a scene,
-        # and nothing should hide it either.
+        # Recorded, never gated — see `_spectral_slope_db_per_decade` for what the
+        # headroom guard's operand leaves unchecked.
         slopes[scene.scene_id] = {
             leg: _spectral_slope_db_per_decade(energy, rep.center_freqs)
             for leg, energy in (("low", low_energy), ("high", high_energy))
@@ -341,7 +342,7 @@ def run_preprocess(config: Config, run_dir: Path, ctx: RunContext) -> None:
         # eval consumers key on this stamp, never on the rep class.
         "value_domain": rep.value_domain,
         # Per-scene, per-leg spectral slope in dB/decade. Recorded, never gated —
-        # see the note at the encode call for what the guard stopped seeing.
+        # see `_spectral_slope_db_per_decade`.
         "spectral_slope_db_per_decade": slopes,
         "norm_stats": norm_stats,
         # WHICH of those four were applied, in the file rather than in a comment no

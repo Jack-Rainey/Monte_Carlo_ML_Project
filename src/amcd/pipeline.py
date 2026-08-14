@@ -128,7 +128,15 @@ def _render_artifact_fingerprint(config: Config) -> dict:
         "simulator": {"name": config.simulator.name,
                       "params": _dataset_simulator_params(config)},
         "sample_rate": config.sample_rate,
+        # Both DERIVED values, recorded rather than only the fields they derive
+        # from, because it is the derived pair that fixes the array the backend
+        # must return (`render.py` checks `(n_channels, n_samples)`). Recording
+        # `ambisonics_order` and `ir_duration` alone would leave a change to
+        # either DERIVATION invisible here — and this dict has to enumerate the
+        # render's inputs COMPLETELY, since `config.py`'s own bytes are not in
+        # this scope.
         "n_samples": config.n_samples,
+        "n_channels": config.n_channels,
         "ambisonics_order": config.ambisonics_order,
         "low_ray_budget": config.low_ray_budget,
         "high_ray_budget": config.high_ray_budget,
@@ -155,6 +163,14 @@ def _render_fingerprint(config: Config) -> dict:
             "min_energy_reference": config.min_energy_reference,
             "max_path_file_mb": config.max_path_file_mb,
             "require_non_empty_path_file": config.require_non_empty_path_file,
+            # The attrition bounds are admission-side too. Here rather than
+            # exempt because the asymmetry bites: a batch that BREACHES a bound
+            # raises and writes no sentinel, so loosening one re-runs anyway —
+            # but TIGHTENING one on a batch that already completed would never be
+            # re-checked, and the dataset would carry attrition above its own
+            # declared bound with the sentinel reporting done.
+            "max_excluded_frac": config.max_excluded_frac,
+            "max_refused_frac": config.max_refused_frac,
         },
     }
 
@@ -184,6 +200,10 @@ def _preprocess_fingerprint(config: Config) -> dict:
         "sample_rate": config.sample_rate,
         "n_samples": config.n_samples,
         "ambisonics_order": config.ambisonics_order,
+        # Enforced here, because this is where split membership is assigned — so
+        # it is here that tightening it must re-check rather than be skipped by a
+        # sentinel. Cheap either way: preprocess re-runs in seconds.
+        "max_excluded_frac_per_split": config.max_excluded_frac_per_split,
         "code_version": _code_version("preprocess"),
     }
 
@@ -497,12 +517,31 @@ _RENDER_ADMISSION_SOURCES: tuple[str, ...] = (
 )
 
 
+#: Core sources dropped from the render BYTES scope, and nowhere else.
+#:
+#: `config.py` is in `_CORE_SOURCES`, so it lands in every scope including this
+#: one — which made ANY behavioural edit to it discard 720 persisted renders. It
+#: cannot be left there: `config.py` is where every new experiment parameter goes,
+#: so E2's loss keys and E3's search keys would each cost ~14 hours of emulation,
+#: and the re-rendered bytes would not be the ones the earlier numbers came from
+#: (the backend exposes no RNG seed — design_spec §11.1).
+#:
+#: What replaces it is `_render_artifact_fingerprint` enumerating the resolved
+#: config VALUES the render bytes are a function of — simulator name and
+#: dataset-scoped params, sample rate, the derived `(n_channels, n_samples)`
+#: shape, and both ray budgets. That enumeration is the obligation this constant
+#: creates: a config value that reaches the backend and is not in that dict is a
+#: silent staleness bug, which is why the shape is recorded DERIVED rather than as
+#: the fields it comes from.
+_RENDER_BYTES_DROPPED_CORE: tuple[str, ...] = ("config.py",)
+
+
 def _render_bytes_code_version(config: Config) -> str:
     """`code_version` over the sources that decide the IR bytes only."""
     return provenance.code_version(
-        _RENDER_BYTES_SOURCES + simulator_code_scope(config)
+        _RENDER_BYTES_SOURCES + simulator_code_scope(config),
+        drop_core=_RENDER_BYTES_DROPPED_CORE,
     )
-    return provenance.code_version(STAGE_CODE_SCOPE[stage])
 
 
 #: Per-stage declaration of the config inputs a cached artifact depends on.
@@ -605,20 +644,6 @@ FINGERPRINT_EXEMPT_FIELDS: dict[str, str] = {
         "describes are fingerprinted through the fields themselves, and `splits` "
         "is dumped in full by `_preprocess_fingerprint`."
     ),
-    **{
-        field: (
-            "An attrition BOUND, not an admission rule: it decides only whether "
-            "the stage RAISES on how much of the batch was lost, never which "
-            "scenes are lost or what any artifact contains — that is the QC "
-            "thresholds, which ARE fingerprinted. A stage that raises writes no "
-            "sentinel, so loosening a bound re-runs the stage anyway, while "
-            "fingerprinting it would discard 720 correct renders to re-derive an "
-            "identical manifest. Non-exempt the moment a bound changes which "
-            "scenes are admitted rather than whether the batch is accepted."
-        )
-        for field in ("max_excluded_frac", "max_excluded_frac_per_split",
-                      "max_refused_frac")
-    },
 }
 
 

@@ -577,11 +577,21 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
     df["unit"] = df["metric"].map(units)
     # The convergence verdict, carried into the machine-readable artifact for the
     # reason the unit is: a downstream analysis opens this file, not summary.txt,
-    # and a C50
-    # improvement whose reference is unconverged must not arrive there bare.
-    df["reference_converged"] = ~df["metric"].isin(
-        config.convergence.reference_unconverged
-    )
+    # and a C50 improvement whose reference is unconverged must not arrive there
+    # bare.
+    #
+    # THREE VALUES, NOT A BOOLEAN, matching the config's own contract: a boolean
+    # has to render "nobody measured this" as True, which is exactly the reading
+    # `convergence.reference_unmeasured` exists to prevent (config.py: a skip is
+    # not a pass). summary.txt already separates the two; the artifact must too.
+    unconverged = config.convergence.reference_unconverged
+    unmeasured = config.convergence.reference_unmeasured
+    df["reference_convergence"] = [
+        "unconverged" if m in unconverged
+        else "unmeasured" if m in unmeasured
+        else "converged"
+        for m in df["metric"]
+    ]
     df.to_csv(report_dir / "metrics_table.csv", index=False)
 
     # Supplementary bundle: copy config stamp + versions. Provenance, same gate

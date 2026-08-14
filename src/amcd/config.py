@@ -47,23 +47,14 @@ from .acoustics import sabine_rt60
 #: Where `configs/` lives: beside `src/`, in the checkout this package was
 #: installed from.
 #:
-#: ONE CANDIDATE, because there is one layout. A second entry pointing at
-#: `amcd/configs/` was listed FIRST here as a provision for shipping `configs/` as
-#: package data — but no build ever shipped it, `pyproject.toml` declares no
-#: package data, and a search path that can never match is not a provision, it is a
-#: claim to support an install mode that does not work. Its only effect was to put
-#: a directory that cannot exist at the head of the error message below.
+#: ONE CANDIDATE, because there is one supported layout. The documented install is
+#: `pip install -e .` (README), under which this resolves to the checkout on both
+#: declared hosts (docs/gsound_sir_setup.md). A non-editable wheel is not supported:
+#: `configs/` sits outside the package directory, so shipping it needs a real
+#: packaging change — a build-backend directive and a test that installs and loads.
 #:
-#: The documented install is `pip install -e .` (README), under which this resolves
-#: to the checkout on both declared hosts (docs/gsound_sir_setup.md). A non-editable
-#: wheel is not supported: `configs/` sits outside the package directory, so
-#: shipping it needs a real packaging change — a build-backend directive and a test
-#: that installs and loads — not a speculative path. `_require_configs` says so.
-#:
-#: Kept as a tuple rather than collapsed to a single Path so that change stays a
-#: one-line addition, and so the error message keeps enumerating what it tried
-#: (without it a missing `base.yaml` surfaces as a bare `FileNotFoundError` from
-#: inside `_merge_yaml`, naming a path three parents up).
+#: A tuple rather than a bare Path so that change stays a one-line addition, and so
+#: `_require_configs` can enumerate what it tried.
 _CONFIG_ROOT_CANDIDATES = (
     Path(__file__).parent.parent.parent / "configs",  # source checkout: repo/configs
 )

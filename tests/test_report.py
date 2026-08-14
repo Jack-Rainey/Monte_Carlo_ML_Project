@@ -233,9 +233,46 @@ class TestTheUnconvergedReferenceReachesTheReader:
             rows = list(csv.DictReader(
                 (run_dir / "report" / "metrics_table.csv").open()
             ))
-        by_metric = {r["metric"]: r["reference_converged"] for r in rows}
-        assert by_metric["C50"] == "False", by_metric
-        assert by_metric["EDT"] == "True", by_metric
+        by_metric = {r["metric"]: r["reference_convergence"] for r in rows}
+        assert by_metric["C50"] == "unconverged", by_metric
+        assert by_metric["EDT"] == "converged", by_metric
+
+    def test_the_machine_readable_column_carries_all_three_states(self) -> None:
+        """A boolean has to render "nobody measured this" as True, which is the
+        reading `reference_unmeasured` exists to prevent. summary.txt separates
+        the two; the artifact a downstream analysis actually opens must too."""
+        import csv
+
+        from amcd.config import UnmeasuredMetric
+
+        cfg = tiny_config()
+        # base.yaml declares T30 unconverged too; this test needs one metric in
+        # each of the three states, so T30 is the converged one here.
+        cfg.convergence.reference_unconverged = {
+            "C50": cfg.convergence.reference_unconverged["C50"]
+        }
+        cfg.convergence.reference_unmeasured = {
+            "EDT": UnmeasuredMetric(reason="never probed", gate="E4")
+        }
+        with tempfile.TemporaryDirectory() as d:
+            run_dir = Path(d)
+            (run_dir / "stats").mkdir()
+            (run_dir / "stats" / "summary.json").write_text(
+                json.dumps([_summary_row("C50"), _summary_row("EDT"),
+                            _summary_row("T30")])
+            )
+            (run_dir / "preprocessed").mkdir()
+            (run_dir / "preprocessed" / "meta.json").write_text(
+                json.dumps({"value_domain": "db"})
+            )
+            run_report(cfg, run_dir, QUIET)
+            rows = list(csv.DictReader(
+                (run_dir / "report" / "metrics_table.csv").open()
+            ))
+        by_metric = {r["metric"]: r["reference_convergence"] for r in rows}
+        assert by_metric["C50"] == "unconverged", by_metric
+        assert by_metric["EDT"] == "unmeasured", by_metric
+        assert by_metric["T30"] == "converged", by_metric
 
     def test_a_declaration_this_run_cannot_apply_is_LOGGED_not_silent(self) -> None:
         """A caveat that matches no reported metric is a SKIP, and this project logs

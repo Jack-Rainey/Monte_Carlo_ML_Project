@@ -296,8 +296,6 @@ def _band_energy(ir_w: np.ndarray, fc: float, sample_rate: int, order: int) -> n
     return energy[guard:guard + n_record].astype(np.float32)
 
 
-#: Sub-windows the decay-range fit is split into. The estimate takes the
-#: SHALLOWEST sub-fit, so this must be large enough that at least one window lies
 #: The fit window, as fractions of the record. It starts after the onset attack
 #: and ENDS WELL BEFORE THE RECORD DOES, which is what makes the estimate
 #: independent of where the terminal taper begins — see the docstring below.
@@ -312,9 +310,17 @@ _RANGE_FIT_WINDOW = (0.05, 0.40)
 _RANGE_FIT_SMOOTHING_CYCLES = 20.0
 _RANGE_FIT_MIN_SMOOTHING_S = 0.010
 
+#: Ceiling on the smoothing kernel as a fraction of the record, so the kernel
+#: cannot grow into the span the slope is fitted over. Binds only on records short
+#: relative to the band — where the alternative is refusing them, and a refusal
+#: that depends on record length is a refusal that depends on absorption.
+_RANGE_FIT_MAX_KERNEL_FRAC = 0.10
+
+
 
 def _available_decay_range_db(
-    energy_trunc: np.ndarray, sample_rate: int, band_centre_hz: float
+    energy_trunc: np.ndarray, sample_rate: int, band_centre_hz: float,
+    filter_order: int,
 ) -> float:
     """How many dB of decay the record actually holds, from the ENERGY ENVELOPE.
 
@@ -338,32 +344,67 @@ def _available_decay_range_db(
     running to 70 % over-reads by up to 204 % when the knee arrives at 50 %, while
     this window's worst case across the same sweep is +11.7 %.
 
-    An earlier version took the SHALLOWEST of four sub-fits instead, reasoning
-    that the taper is always steeper so the shallowest segment must be the room.
-    It is a minimum over noisy slope estimates, and therefore biased — badly, and
-    in BOTH directions once band width enters: over the same sweep it errs 13.4 %
-    on average, over-reading by up to 55 % and under-reading by up to 64 %, worst
-    in the narrow low bands. This construction errs 6.0 % on average.
-    `scripts/decay_range_probe.py` is that measurement.
+    `scripts/decay_range_probe.py` measures this against the shallowest-of-K
+    construction it replaced.
+
+    KNOWN LIMIT, not yet closed: on records short relative to the band the
+    estimate is still biased low, and because the smoothing kernel scales as 1/fc
+    the bias is larger in the low bands. Records shorten with absorption, which is
+    `test_material_shift`'s own independent variable, so the residual is a
+    selection effect on that split rather than a random error. The decisive
+    measurement is an admit-rate sweep over matched populations whose true range
+    is fixed at the ISO threshold; it has not been run.
 
     A non-decaying envelope returns NaN, which `_admissible` treats as
     unmeasurable rather than as a pass.
     """
+    energy = np.asarray(energy_trunc, dtype=np.float64)
+    n = len(energy)
     smoothing_s = max(
         _RANGE_FIT_MIN_SMOOTHING_S, _RANGE_FIT_SMOOTHING_CYCLES / band_centre_hz
     )
-    win = max(1, int(smoothing_s * sample_rate))
-    smoothed = np.convolve(
-        np.asarray(energy_trunc, dtype=np.float64), np.ones(win) / win, mode="same"
-    )
+    # THE KERNEL IS AN ABSOLUTE DURATION AND THE RECORD IS NOT, so on a short
+    # record the two collide: 20 cycles is 160 ms at 125 Hz, and D0b already
+    # scores 10 ms windows. Two consequences, both handled here.
+    #
+    # `np.convolve(..., "same")` returns the longer of its arguments, so a kernel
+    # longer than the record silently returns an array of the KERNEL's length and
+    # every index derived from `n` below addresses a different array than the one
+    # it was computed for.
+    #
+    # And a kernel that is a large fraction of the record leaves no span to fit a
+    # slope over. So the kernel is capped at a fraction of the record as well: on
+    # a long record it is the full 20 cycles, and on a short one it shortens —
+    # noisier, but a noisy estimate beats refusing a scene, and refusals here are
+    # not random. Records shorten with absorption, which is `test_material_shift`'s
+    # own independent variable, so a length-dependent refusal selects on the very
+    # axis that split exists to measure.
+    win = max(1, min(int(smoothing_s * sample_rate),
+                     int(_RANGE_FIT_MAX_KERNEL_FRAC * n)))
+
+    # EDGE-NORMALISED, dividing by how many samples each output actually averaged
+    # rather than by the kernel width. A plain `ones(win)/win` tapers the first and
+    # last half-kernel toward zero, which reads as a steep decay exactly where the
+    # fit starts — biasing the estimate low, worse the shorter the record and
+    # worse the lower the band, since the kernel grows as 1/fc. Records shorten
+    # with absorption, so that bias selected on `test_material_shift`'s own axis.
+    kernel = np.ones(win)
+    counts = np.convolve(np.ones(n), kernel, mode="same")
+    smoothed = np.convolve(energy, kernel, mode="same") / counts
+
     peak = float(smoothed.max()) if smoothed.size else 0.0
     if peak <= 0.0:
         return float("nan")
     envelope_db = 10.0 * np.log10(np.maximum(smoothed, peak * 1e-300) / peak)
-    t_s = np.arange(len(envelope_db)) / sample_rate
+    t_s = np.arange(n) / sample_rate
 
     lo_frac, hi_frac = _RANGE_FIT_WINDOW
-    lo, hi = int(lo_frac * len(envelope_db)), int(hi_frac * len(envelope_db))
+    # The fit also starts no earlier than a half kernel in, where the local mean
+    # stops being asymmetric, and spans enough kernel widths to be a slope rather
+    # than one smoothed value repeated.
+    lo, hi = max(int(lo_frac * n), win // 2), int(hi_frac * n)
+    if hi - lo < 2:
+        return float("nan")
     fit_t, fit_db = t_s[lo:hi], envelope_db[lo:hi]
     finite = np.isfinite(fit_db)
     if finite.sum() < 2:
@@ -371,7 +412,7 @@ def _available_decay_range_db(
     slope = float(np.polyfit(fit_t[finite], fit_db[finite], 1)[0])
     if slope >= 0.0:
         return float("nan")
-    return 60.0 * (len(energy_trunc) / sample_rate) / (-60.0 / slope)
+    return 60.0 * (n / sample_rate) / (-60.0 / slope)
 
 
 def _decay_times_from_energy(
@@ -380,6 +421,7 @@ def _decay_times_from_energy(
     *,
     min_decay_range_db: dict[str, float],
     band_centre_hz: float,
+    filter_order: int,
 ) -> tuple[float, str | None, float, str | None]:
     """T30 and EDT from an already-truncated band energy envelope.
 
@@ -417,7 +459,9 @@ def _decay_times_from_energy(
     # Range from `_available_decay_range_db`; see its docstring for why the
     # envelope and never the Schroeder curve.
     window_s = len(energy_trunc) / sample_rate
-    available_db = _available_decay_range_db(energy_trunc, sample_rate, band_centre_hz)
+    available_db = _available_decay_range_db(
+        energy_trunc, sample_rate, band_centre_hz, filter_order
+    )
 
     def _admissible(value, reason, metric):
         floor = min_decay_range_db.get(metric)
@@ -481,6 +525,7 @@ def _band_resolvable_decay_s(fc: float, sample_rate: int, order: int) -> dict[st
         sample_rate,
         min_decay_range_db={"T30": 0.0, "EDT": 0.0},
         band_centre_hz=fc,
+        filter_order=order,
     )
     return {"T30": t30, "EDT": edt}
 
@@ -644,7 +689,7 @@ def _iso3382_band_metrics(
     # Schroeder backward integration on truncated portion
     t30, t30_reason, edt, edt_reason = _decay_times_from_energy(
         energy_trunc, sample_rate, min_decay_range_db=min_decay_range_db,
-        band_centre_hz=fc,
+        band_centre_hz=fc, filter_order=octave_filter_order,
     )
 
     # C50 is computed BEFORE the resolvability verdict because the verdict cites
