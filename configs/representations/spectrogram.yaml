@@ -9,7 +9,7 @@
 n_fft: 2048
 hop_length: 512
 # ABSOLUTE floor, in dB re 1.0 in STFT power of the float32 IR — NOT a level below
-# the per-scene peak (AC-33). Stated because the IR's absolute scale is set by the
+# the per-scene peak. Stated because the IR's absolute scale is set by the
 # backend (`normalize_ir: false`, `source_power: 1.0 W`, the 1/d direct term), so
 # the effective dB-below-peak floor is scene-dependent: measured, encoding the same
 # IR at gains 0.01 … 100 moves the clamped fraction 0.760 → 0.513. Absolute is
@@ -18,16 +18,16 @@ hop_length: 512
 min_db: -80.0
 
 # Smallest dB gap `encode` accepts between a scene's WEAKEST per-band peak and
-# min_db (AC-37). Below it encode RAISES.
+# min_db. Below it encode RAISES.
 #
 # Because min_db is absolute, a scene reaches it by LEVEL alone, and the damage
 # lands in decode(): the clamped envelope becomes a target power the carrier is
 # rescaled UP to, injecting a non-decaying floor into the prediction inside the
-# Schroeder window — which is shared and set by the PHYSICAL legs (AC-17/RD-43), so
+# Schroeder window — which is shared and set by the PHYSICAL legs, so
 # the prediction gets no Lundeby cut of its own to truncate the injection away.
 #
 # RE-CALIBRATED against the operand below, which is NOT the operand the previous
-# 50.0 was measured on (AC-37-R4). Population: the `valid` split ONLY, n=5, read
+# 50.0 was measured on. Population: the `valid` split ONLY, n=5, read
 # from the canonical dry run's splits.json — this threshold decides which scenes
 # ENTER the dataset, so it is a tuned value and is selected on validation, never on
 # a test_* scene. Method: sweep level in 1 dB steps; at each level take the
@@ -39,8 +39,8 @@ min_db: -80.0
 # MEASURED IN THE SHIPPED DECISION STATISTIC — 16 channels, min over channels AND
 # over the operand bands, i.e. exactly what `_check_min_db_headroom` computes. An
 # earlier version of this table was swept at n_channels=1 and is superseded: that is
-# not the pipeline's channel 0 and it moved every figure by 1.7-4.9 dB (F-135). The
-# defect was AC-37-R4's own — operand not matching justification — relocated from
+# not the pipeline's channel 0 and it moved every figure by 1.7-4.9 dB. The
+# defect was — operand not matching justification — relocated from
 # the band axis to the CHANNEL axis by the very edit that fixed the band axis.
 #
 #   headroom = worst per-band peak above min_db, in dB, over the bands the guard
@@ -67,7 +67,7 @@ min_db: -80.0
 # selection effect on the surviving population), while a false negative is a silently
 # wrong reported ISO metric that surfaces later looking like a model failure.
 #
-# THIS IS A SAMPLE BOUND, NOT A POPULATION BOUND (F-142). n=5, breach headrooms
+# THIS IS A SAMPLE BOUND, NOT A POPULATION BOUND. n=5, breach headrooms
 # {42.3, 42.8, 44.0, 45.7, 45.9}, sd 1.65 dB; 52.0 is the sample max + 6.1 dB. It is
 # not a guarantee about unseen scenes.
 #
@@ -83,7 +83,7 @@ min_db: -80.0
 # ISO metric.
 min_db_headroom_db: 52.0
 
-# WHICH BANDS THE GUARD READS (AC-37-R4 / F-M3). Octave-band CENTRES, same shape as
+# WHICH BANDS THE GUARD READS. Octave-band CENTRES, same shape as
 # base.yaml's `iso_eval_freqs`; the operand is every ladder band inside the union of
 # `[fc/sqrt2, fc*sqrt2]`.
 #
@@ -97,19 +97,19 @@ min_db_headroom_db: 52.0
 # level test's error message: the dry-run tail is white so nothing trips it, but any
 # realistic spectral slope (air absorption, frequency-dependent alpha — both
 # roadmap) drops the extreme band out and encode tells the operator to fix a level
-# that is fine (F-M3).
+# that is fine.
 #
 # CENTRES, not a [lo, hi] range: a contiguous range cannot express a non-contiguous
 # evaluation band set, and would silently re-admit every band between.
 #
 # THE BAND SET IS NOT DECLARED HERE — it is `iso_eval_freqs` from configs/base.yaml,
 # handed to `build_representation` as a cross-cutting argument alongside
-# `sample_rate` (RD-187). It used to be re-declared as
-# `min_db_headroom_octave_centres_hz`, which is the AC-24 divergence shape: a guard
+# `sample_rate`. It used to be re-declared as
+# `min_db_headroom_octave_centres_hz`, which is the divergence shape: a guard
 # calibrated against the REPORTED metric bands, and a second config naming its own
 # band set, held together only by a test asserting the two were equal.
 
-# ── The fractional-octave ladder (AC-19) ──────────────────────────────────────
+# ── The fractional-octave ladder ──────────────────────────────────────
 # Previously literals inside `_build_third_octave_filters`. Declared here because
 # they define what a "band" IS in every reported per-band quantity.
 reference_freq_hz: 1000.0    # ISO 266 / ISO 3382 anchor: f_n = 1000 * 2^(n/3)
@@ -123,13 +123,13 @@ min_center_freq_hz: 10.0     # lower bound of the ladder (the upper is derived
 # 48 kHz FRAMING — the Nyquist admission rule that landed alongside it is not
 # framing-independent: 8 kHz/256 gives 18 bands where the old rule gave 19, and
 # 44.1 kHz/2048 gives 27 where it gave 28. See `_build_third_octave_filters`,
-# F-59.) At the production framing (48 kHz, n_fft 2048 → 23.44 Hz bins) a
+# At the production framing (48 kHz, n_fft 2048 → 23.44 Hz bins) a
 # third-octave band at 125 Hz is
 # only ~29 Hz wide, so the five lowest bands hold ONE bin each and measure Hann
 # leakage rather than band content: a 63 Hz tone peaks in the WRONG band (57.7 %
 # in the 78.7 Hz band vs 35.6 % in the 49.6 Hz band). In-band fraction, measured at
 # THIS framing (48 kHz, n_fft 2048, hop 512, min_bins_per_band 1): 0.9992 at 500 Hz
-# and >= 0.9999 above, 0.9464 at 250 Hz, 0.5771 at 125 Hz (AC-19-R7 — the figures
+# and >= 0.9999 above, 0.9464 at 250 Hz, 0.5771 at 125 Hz (the figures
 # previously quoted here, 99.4 / 93.4 / 56.8 %, had drifted and named no framing).
 #
 # Raising this to 3 would drop every band below ~315 Hz — real lost low-frequency
@@ -138,6 +138,6 @@ min_center_freq_hz: 10.0     # lower bound of the ladder (the upper is derived
 # evidence. Blast radius today is bounded: reported ISO-3382 metrics are 500/1000
 # Hz octave-band quantities computed from DECODED WAVEFORMS, not from these bands,
 # so this affects the learned representation and low-frequency reconstruction (E2),
-# not an E1 headline number. Ledger row `AC-19-value`, DEFERRED at E2
+# not an E1 headline number. DEFERRED at E2
 # (roadmap fix: multi-resolution sampling).
 min_bins_per_band: 1

@@ -31,19 +31,18 @@ def _build_third_octave_filters(
     Returns the (n_bands, n_fft//2+1) float32 bank — each row sums power in one
     band — and a DESCRIPTION dict recording what the bank actually is.
 
-    Why the description exists (AC-19). Measured at the production framing
+    Why the description exists. Measured at the production framing
     (48 kHz, n_fft 2048, hop 512, min_bins_per_band 1 — 23.44 Hz bin spacing) the
     five lowest bands hold ONE FFT bin each, because a third-octave band at 125 Hz
     is only ~29 Hz wide. Those bands therefore measure Hann leakage rather than
     band content: a 63 Hz tone puts 57.7 % of its energy in the 78.7 Hz band and
     only 35.6 % in the 49.6 Hz band — it peaks in the WRONG band.
 
-    In-band fraction, re-measured on this tree (AC-19-R7 — the previously quoted
-    99.4 / 93.4 / 56.8 % had drifted): **0.9992 at 500 Hz and >= 0.9999 above,
-    0.9464 at 250 Hz, 0.5771 at 125 Hz**, and 0.5634-0.6544 across the five
+    In-band fraction at production framing: **0.9992 at 500 Hz and >= 0.9999
+    above, 0.9464 at 250 Hz, 0.5771 at 125 Hz**, and 0.5634-0.6544 across the five
     one-bin bands below it. The framing is stated with them, because these are
-    properties of (sample_rate, n_fft, hop, min_bins_per_band) and are meaningless
-    without it — which is how the previous figures drifted unattributably.
+    properties of (sample_rate, n_fft, hop, min_bins_per_band) and mean nothing
+    without it.
 
     Two further properties were true but undeclared: dropping empty bands makes
     `center_freqs` an IRREGULAR series rather than a fractional-octave ladder, and
@@ -52,14 +51,13 @@ def _build_third_octave_filters(
     exact, and the leakage is common-mode across legs, so paired metrics survive
     it; per-band interpretation does not.
 
-    The response is to GUARD AND DECLARE, not to remove bands (AC-19's own
-    wording): every constant that shapes the ladder is a config value, the
-    resulting bank is described in `preprocessed/meta.json`, and
-    `min_bins_per_band` gives the band floor a name. Choosing a value above 1 is a
-    research decision with real cost — at production framing 3 bins would drop
-    every band below ~315 Hz — so the number stays the researcher's, now with the
-    measurement in front of them (ledger row `AC-19-value`, DEFERRED at E2 —
-    the roadmap fix is multi-resolution sampling).
+    The response is to GUARD AND DECLARE, not to remove bands: every constant
+    that shapes the ladder is a config value, the resulting bank is described in
+    `preprocessed/meta.json`, and `min_bins_per_band` gives the band floor a name.
+    Choosing a value above 1 is a research decision with real cost — at production
+    framing 3 bins would drop every band below ~315 Hz — so the number stays the
+    researcher's, with the measurement in front of them. The roadmap fix is
+    multi-resolution sampling (paper §6).
     """
     if min_bins_per_band < 1:
         raise ValueError(
@@ -79,7 +77,7 @@ def _build_third_octave_filters(
     # ruling out a band straddling Nyquist, which would be half-empty and read as
     # a real measurement.
     #
-    # It is NOT behaviour-preserving in general — only at 48 kHz (F-59). MEASURED
+    # It is NOT behaviour-preserving in general — only at 48 kHz. MEASURED
     # against the old rule at min_bins_per_band=1, as `new (was old)`:
     #     48000/2048 → 27 (was 27), bank bit-identical    48000/512 → 21 (was 21)
     #      8000/256  → 18 (was 19), one band LOST        44100/2048 → 27 (was 28)
@@ -93,7 +91,7 @@ def _build_third_octave_filters(
     while f * half_width <= nyquist:
         candidate_freqs.append(f)
         f *= ratio
-    # The rung the Nyquist rule just rejected. Recorded (F-59) because a candidate
+    # The rung the Nyquist rule just rejected. Recorded because a candidate
     # excluded by the loop CONDITION never becomes a candidate, so it could not
     # appear in `dropped_bands` — meta.json under-reported which bands were removed
     # and why. Only the first is recorded: the ladder above it is infinite.
@@ -149,7 +147,7 @@ def _build_third_octave_filters(
         # FFT BINS that reach no band at all: below the lowest edge (incl. DC) or
         # above the highest. A property of the BANK, not of any signal — it was
         # named `uncovered_power_fraction`, which a reader takes as "this fraction
-        # of the run's power is in no band" (AC-31). The two coincide only for a
+        # of the run's power is in no band". The two coincide only for a
         # white spectrum: measured at production framing this figure is 0.0585
         # while the true uncovered POWER is 0.0610 for white noise and 0.7794 for
         # a low-passed signal. Renamed rather than redefined, because the bank
@@ -177,7 +175,7 @@ class ThirdOctaveSpectrogram:
 
         #: Lower clamp on the encoded band energy, in **dB re 1.0 in STFT power of
         #: the float32 IR** — an ABSOLUTE floor, not a level below the per-scene
-        #: peak (AC-33). The reference has to be stated because the absolute scale
+        #: peak. The reference has to be stated because the absolute scale
         #: of an IR is set by the backend (`normalize_ir: false`,
         #: `source_power: 1.0 W`, the 1/d direct term), so the effective
         #: dB-below-peak floor is scene-dependent: measured, encoding the SAME IR
@@ -194,12 +192,12 @@ class ThirdOctaveSpectrogram:
         min_db: float
 
         #: The fractional-octave ladder, declared rather than written as literals
-        #: in the filter builder (AC-19). `reference_freq_hz` anchors it,
+        #: in the filter builder. `reference_freq_hz` anchors it,
         #: `bands_per_octave` sets the spacing (3 = third-octave), and
         #: `min_center_freq_hz` bounds it below. The upper bound is DERIVED from
         #: Nyquist.
         #:
-        #: The bounds are enforced, not documented (AC-32): all three build the
+        #: The bounds are enforced, not documented: all three build the
         #: ladder by repeated multiplication, so three schema-valid settings made
         #: `_build_third_octave_filters` loop FOREVER — a hang or an OOM at
         #: preprocess, i.e. AFTER the render it would waste.
@@ -228,7 +226,7 @@ class ThirdOctaveSpectrogram:
         min_bins_per_band: int
 
         #: Smallest dB gap `encode` will accept between a scene's WEAKEST per-band
-        #: peak and `min_db` (AC-37). Below it, `encode` raises rather than
+        #: peak and `min_db`. Below it, `encode` raises rather than
         #: returning an envelope that `decode` will turn into an injected energy
         #: floor.
         #:
@@ -237,11 +235,11 @@ class ThirdOctaveSpectrogram:
         #: `10**(env/10)`, so wherever the clamp is active the decode BOOSTS the
         #: carrier UP to the floor, injecting a non-decaying tail into the
         #: prediction — inside the Schroeder window, which is shared and set by the
-        #: PHYSICAL legs (AC-17/RD-43), so the prediction never gets its own Lundeby
+        #: PHYSICAL legs, so the prediction never gets its own Lundeby
         #: cut to truncate the injection away.
         #:
         #: CALIBRATED, not chosen — and RE-calibrated against the operand the code
-        #: actually applies (AC-37-R4). The previous table was measured with the
+        #: actually applies. The previous table was measured with the
         #: guard minimising over ALL 27 ladder bands while the justification below
         #: it reasoned about 500/1000 Hz octave quantities; the operand is now the
         #: reported ISO span (`min_db_headroom_octave_centres_hz`), so the
@@ -252,18 +250,16 @@ class ThirdOctaveSpectrogram:
         #: value and is selected on validation, never on a `test_*` scene.
         #: METHOD: sweep level in 1 dB steps; at each level read the definitionally
         #: perfect oracle `decode(encode(high), low)` through the REPORTED path, so
-        #: it inherits the physical legs' shared Schroeder window (AC-17/RD-43) —
+        #: it inherits the physical legs' shared Schroeder window —
         #: given its own Lundeby cut the oracle truncates the injection away and the
         #: defect hides entirely. Verified definitionally perfect: at native level
         #: the oracle's T30 error is 0.00-0.06 % across all five scenes, so there is
         #: no carrier-dependent error floor being misattributed to `min_db`.
         #:
         #: STATISTIC: 16 channels, min over channels AND over the operand bands —
-        #: exactly what `_check_min_db_headroom` computes. An earlier version of this
-        #: table was swept at n_channels=1, which is NOT the pipeline's channel 0 and
-        #: moved every figure by 1.7-4.9 dB (F-135): AC-37-R4's own defect — operand
-        #: not matching justification — relocated from the band axis to the CHANNEL
-        #: axis by the edit that fixed the band axis.
+        #: exactly what `_check_min_db_headroom` computes. Sweeping this at
+        #: n_channels=1 is NOT the pipeline's channel 0 and moves every figure by
+        #: 1.7-4.9 dB, so the operand has to match the justification.
         #:
         #: headroom = worst per-band peak above min_db, in dB, over the guard's
         #: bands AND channels. "native" is the scene's own level; "last OK" and
@@ -290,13 +286,13 @@ class ThirdOctaveSpectrogram:
         #: negative is a silently wrong reported ISO metric that surfaces as an
         #: apparent model failure.
         #:
-        #: A SAMPLE BOUND, NOT A POPULATION BOUND (F-142): n=5, sd 1.65 dB, 52.0 is
+        #: A SAMPLE BOUND, NOT A POPULATION BOUND: n=5, sd 1.65 dB, 52.0 is
         #: the sample max + 6.1 dB. Accepted cost is that scenes at 43.3-52.0 dB
         #: would have measured within JND and are refused anyway — zero in practice,
         #: since native headroom over all 29 canonical renders is 65.42-80.15 dB
         #: (67.52-77.36 on `valid`), 13.42 dB clear of the threshold.
         #:
-        #: Physical reading, CORRECTED (AC-105): T30 regresses the EDR over -5 to
+        #: Physical reading, CORRECTED: T30 regresses the EDR over -5 to
         #: -35 dB, so 35 dB of genuine range is necessary — but it is NOT sufficient,
         #: and a declared value of 35 would be unsafe. The ladder bands this guard
         #: EXCLUDES are not out of band for the octave filter that computes the
@@ -306,7 +302,7 @@ class ThirdOctaveSpectrogram:
         #: metric: measured end to end, a 1587 Hz band on the floor moves the
         #: 1000 Hz T30 by +0.1 % at 52 dB of headroom, +1.1 % at 40, +4.4 % at 35
         #: and +91.7 % at 30 — so 35 dB leaves NO MARGIN (4.4 % against a 5 % JND,
-        #: 88 % of it) and 30 dB breaches it outright (AC-183).
+        #: 88 % of it) and 30 dB breaches it outright.
         #: The floor for any declared value is ~52 dB, derived as 35 + 17.4.
         #: The shipped 52.0 satisfies it; that it also matches the calibration above
         #: is a coincidence worth not relying on.
@@ -319,7 +315,7 @@ class ThirdOctaveSpectrogram:
         #: preprocess rather than silently biasing every reported ISO metric.
         min_db_headroom_db: float
 
-        #: WHICH BANDS THE HEADROOM GUARD READS (AC-37-R4 / F-M3). Octave-band
+        #: WHICH BANDS THE HEADROOM GUARD READS. Octave-band
         #: CENTRE frequencies, in the same shape as `config.iso_eval_freqs`; the
         #: guard's operand is every ladder band lying inside the union of those
         #: octave spans, `[fc/sqrt2, fc*sqrt2]`.
@@ -341,7 +337,7 @@ class ThirdOctaveSpectrogram:
         #: dry-run tail is white, so nothing trips it; put any realistic slope on it
         #: — air absorption, frequency-dependent alpha, both roadmap items — and the
         #: extreme band drops out and `encode` tells the operator to "fix the level"
-        #: when the level is fine (F-M3, demonstrated with a gentle 4 kHz lowpass).
+        #: when the level is fine — a gentle 4 kHz lowpass is enough to show it.
         #:
         #: DECLARED AS CENTRES, NOT AS A [lo, hi] RANGE, on purpose. A contiguous
         #: range cannot express a non-contiguous evaluation band set: if
@@ -349,9 +345,9 @@ class ThirdOctaveSpectrogram:
         #: re-admit every band between and rebuild the too-wide-operand defect while
         #: a coverage test still passed.
         #:
-        #: This is a SECOND declaration of the evaluation band set, which is the
-        #: AC-24 divergence shape, and is only acceptable because a test forbids the
-        #: drift: `test_the_headroom_guard_reads_exactly_the_reported_metric_bands`
+        #: This is a SECOND declaration of the evaluation band set, acceptable
+        #: only because a test forbids the drift:
+        #: `test_the_headroom_guard_reads_exactly_the_reported_metric_bands`
 
     # Per-channel third-octave log band-energy in dB (the banded-rep contract).
     value_domain = "db"
@@ -362,9 +358,9 @@ class ThirdOctaveSpectrogram:
         #: The REPORTED metric bands (`config.iso_eval_freqs`), handed down by
         #: `build_representation`. The headroom guard's operand is derived from
         #: THESE rather than from a copy this config used to declare of its own
-        #: (RD-187): a guard calibrated against the reported bands and a config
-        #: naming its own band set is the AC-24 divergence shape, and it was held
-        #: together only by a test asserting the two were equal.
+        #: — a guard calibrated against the reported bands and a config naming
+        #: its own band set can only be held together by a test asserting they are
+        #: equal, and one declaration cannot drift from itself.
         eval_freqs_hz: list[float],
         n_fft: int,
         hop_length: int,
@@ -381,7 +377,7 @@ class ThirdOctaveSpectrogram:
         self.min_db = min_db
         self.min_db_headroom_db = min_db_headroom_db
         #: The reported metric bands, handed down rather than re-declared here
-        #: (RD-187). `_resolve_headroom_bands` derives the guard's operand from
+        #:. `_resolve_headroom_bands` derives the guard's operand from
         #: exactly these, so the guard cannot be calibrated against one band set
         #: while the metrics are reported over another.
         self.eval_freqs_hz = list(eval_freqs_hz)
@@ -398,11 +394,11 @@ class ThirdOctaveSpectrogram:
 
     def _resolve_headroom_bands(self) -> list[int]:
         """Ladder-band indices the headroom guard reads: those inside the union of
-        the declared octave spans (AC-37-R4).
+        the declared octave spans.
 
         Raises if the declaration selects nothing — a guard with an empty operand
-        would silently accept every scene, which is the failure mode AC-37 exists
-        to prevent, and it must not be reachable by a config typo.
+        would silently accept every scene, which is the failure mode the guard
+        exists to prevent, and it must not be reachable by a config typo.
         """
         idx: list[int] = []
         for b, fc in enumerate(self.center_freqs):
@@ -416,7 +412,7 @@ class ThirdOctaveSpectrogram:
                 f"{self.eval_freqs_hz} select NO ladder band "
                 f"at sample_rate={self.sample_rate}, n_fft={self.n_fft} (band "
                 f"centres {self.center_freqs[0]:.1f}-{self.center_freqs[-1]:.1f} Hz). "
-                f"The AC-37 headroom guard would then have nothing to check and "
+                f"The headroom guard would then have nothing to check and "
                 f"would accept every scene, including ones whose decode injects an "
                 f"energy floor into the reported ISO metrics."
             )
@@ -428,12 +424,12 @@ class ThirdOctaveSpectrogram:
 
     @property
     def headroom_band_indices(self) -> list[int]:
-        """Ladder-band indices the AC-37 headroom guard reads.
+        """Ladder-band indices the headroom guard reads.
 
-        Public because it is a CROSS-FILE CONTRACT, not an implementation
-        detail: any probe reproducing the guard's headroom must use this exact
-        operand or it measures a different statistic — which is how F-135
-        happened. `tests/test_metrics.py` reads it for precisely that reason.
+        Public because it is a CROSS-FILE CONTRACT, not an implementation detail:
+        any probe reproducing the guard's headroom must use this exact operand or
+        it measures a different statistic. `tests/test_metrics.py` reads it for
+        precisely that reason.
         """
         return list(self._headroom_band_indices)
 
@@ -442,7 +438,7 @@ class ThirdOctaveSpectrogram:
 
         The static description says how wide each band is; this adds what the bank
         actually does with a pure tone at each centre, through the real STFT and
-        window. That distinction is the whole of AC-19: the five lowest bands are
+        window. That distinction is the point: the five lowest bands are
         nominally ~29 Hz wide but hold one 23.44 Hz bin, so their in-band fraction
         collapses (56.8 % at 125 Hz) while the geometry alone looks fine.
 
@@ -479,7 +475,7 @@ class ThirdOctaveSpectrogram:
 
     def _check_min_db_headroom(self, energy_db: torch.Tensor) -> None:
         """Refuse a scene whose level has slid down onto the absolute `min_db`
-        floor (AC-37).
+        floor.
 
         `min_db` is absolute, so this is reachable by LEVEL alone, and the
         consequence lands in `decode`, not here: the clamp becomes a target power
@@ -490,16 +486,14 @@ class ThirdOctaveSpectrogram:
         reported ISO-3382 metrics are per-band quantities — one band on the floor
         corrupts the band average even where the broadband peak looks healthy.
         Measured on a definitionally perfect oracle: a scene 30 dB below its native
-        level reads T30 2.1959 s against its target's 0.9681 s — a 126.8 % error —
-        at 42.6 dB of headroom — but note that figure was measured under the
-        pre-AC-37-R4 all-band operand at n_channels=1, so it is not comparable to the
-        shipped threshold; the current calibration is the table in `Params`.
+        level reads a T30 error well over 100 %. The shipped calibration is the
+        table in `Params`; this figure is illustrative of the mechanism, not the
+        threshold.
 
         Raises rather than clamps. A representation cannot know whether a quiet
         scene is a modelling choice or a mis-scaled render, and silently returning
-        an envelope that produces a physically wrong T30 is the failure AC-37
-        exists to prevent — it would surface on the emulated gsound render as an
-        apparent model failure.
+        an envelope that produces a physically wrong T30 would surface on the
+        emulated gsound render as an apparent model failure.
         """
         # Peak over FRAMES only, per (channel, band): (C, n_bands).
         #
@@ -513,8 +507,8 @@ class ThirdOctaveSpectrogram:
         per_channel_band_peak_db = torch.amax(energy_db, dim=2)
         headroom = per_channel_band_peak_db - self.min_db
 
-        # ...but only over the bands the REPORTED metrics integrate over
-        # (AC-37-R4 / F-M3). Minimising over every ladder band made this a
+        # ...but only over the bands the REPORTED metrics integrate over.
+        # Minimising over every ladder band made this a
         # spectral-flatness test decided by a low single-FFT-bin band, while the
         # threshold beside it is calibrated on oracle T30 — a 500/1000 Hz OCTAVE
         # quantity of the decoded waveform. See `min_db_headroom_octave_centres_hz`.
@@ -530,7 +524,7 @@ class ThirdOctaveSpectrogram:
                 for c in self.eval_freqs_hz
             )
             raise ValueError(
-                f"scene rejected by the min_db headroom guard (AC-37): channel "
+                f"scene rejected by the min_db headroom guard: channel "
                 f"{worst_c}'s {self.center_freqs[worst_b]:.1f} Hz band peaks at "
                 f"{float(per_channel_band_peak_db[worst_c, worst_b]):.1f} dB, "
                 f"only {worst_headroom:.1f} dB "
@@ -551,7 +545,7 @@ class ThirdOctaveSpectrogram:
                 f"configs/representations/spectrogram.yaml — do not raise "
                 f"min_db_headroom_db to silence this. A scene that is merely "
                 f"SPECTRALLY SLOPED no longer reaches this message: bands outside "
-                f"the reported span are not read here (F-M3)."
+                f"the reported span are not read here."
             )
 
     def encode(self, ir: np.ndarray) -> torch.Tensor:
@@ -586,7 +580,7 @@ class ThirdOctaveSpectrogram:
         # Convert to dB, clamp at floor
         energy_db = 10.0 * torch.log10(energy.clamp(min=1e-10))
         # Checked BEFORE the clamp: after it, a band sitting entirely on the floor
-        # reads exactly min_db and its true distance below is unrecoverable (AC-37).
+        # reads exactly min_db and its true distance below is unrecoverable.
         self._check_min_db_headroom(energy_db)
         energy_db = energy_db.clamp(min=self.min_db)
 

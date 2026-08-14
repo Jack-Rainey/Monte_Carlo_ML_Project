@@ -10,7 +10,7 @@
 # this composes with any root config without silently changing its scene set.
 #
 # `simulator.params` come from configs/simulators/dry_run.yaml via the plugin seam,
-# and base.yaml's gsound_sir params drop out on the name change (config.py's F-11
+# and base.yaml's gsound_sir params drop out on the name change (config.py's
 # name-change scoping) rather than leaking into a backend that never declared them.
 simulator:
   name: dry_run

@@ -170,7 +170,7 @@ class TestLossActivity:
         The trainer z-scores operands by high_std, so a raw δ=1.0 would put the Huber
         knee tens of dB out (≈MSE). build_criterion scales δ (dB) into that domain; a
         ~3 dB residual must then sit in the L1 regime, distinct from MSE. This replaces
-        the old raw-dB check, which tested a domain the trainer never uses (ledger F-01).
+        the old raw-dB check, which tested a domain the trainer never uses.
         """
         from amcd.training.loss import build_criterion
 
@@ -280,7 +280,7 @@ class TestDistributionShiftSplits:
             )
 
     def test_shift_axis_ranges_disjoint_from_id(self) -> None:
-        """RD-02 / inv #10: each shift axis is a genuine held-out region — its
+        """Invariant #10: each shift axis is a genuine held-out region — its
         sampling range is DISJOINT from the id baseline along the named axis (or,
         for placement, a proper corner sub-region), so a shift is not an
         overlapping tilt. Read entirely from config."""
@@ -337,7 +337,7 @@ class TestDistributionShiftSplits:
                     f"{s.scene_id} mixed label but α={s.material_absorption}"
                 )
             if axes["placement"] == "near_corner":
-                # HORIZONTAL axes only (AC-10): the corner bias is about proximity
+                # HORIZONTAL axes only: the corner bias is about proximity
                 # to a wall junction, and z is bounded by floor/ceiling margins or
                 # an explicit ergonomic height_range — there is no corner in z.
                 for i in (0, 1):

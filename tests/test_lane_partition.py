@@ -26,7 +26,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 #: `._`-prefixed entries are AppleDouble resource forks the host filesystem
 #: creates beside every file on this exFAT volume; they are not partitions. The
 #: package filters them the same way wherever it globs artifacts (evaluator.py,
-#: data/dataset.py) — see F-69, which is the same sidecar reaching a cache key.
+#: data/dataset.py); the same sidecar has reached a cache key before.
 _PARTITIONS = sorted(
     p for p in (_REPO_ROOT / "docs" / "lanes").glob("*.yaml")
     if not p.name.startswith("._")
@@ -113,9 +113,10 @@ def test_every_row_is_fixable_inside_its_own_lane(path: Path, spec: dict) -> Non
 
     Non-overlap alone does not give this. A row can be assigned to the lane that
     owns the code it describes while its FIX or its TEST lands somewhere else —
-    F-72 was assigned to lane S with its test class in a file lane P owns, and
-    the ownership hook would have refused the edit halfway through the session
-    (RD-83). Declaring `fix:` and `test:` per row turns that into a failure at
+    a row assigned to the lane owning the code can have its test class in a file
+    another lane owns, and the ownership hook then refuses the edit halfway
+    through the session. Declaring `fix:` and `test:` per row turns that into a
+    failure at
     declaration time, which costs seconds instead of a session.
 
     A row that genuinely spans two lanes is not a partition bug — it belongs in
@@ -139,7 +140,7 @@ def test_no_row_id_appears_in_two_places(path: Path, spec: dict) -> None:
     """Every row is assigned exactly once, across every list.
 
     The lists together are the partition's coverage claim. A row in two of them
-    means two different plans for it; a row in none is the silent omission RD-73
+    means two different plans for it; a row in none is the silent omission
     exists to prevent.
 
     `pre_lane:` and `post_merge:` are the two integrator queues: work that must
@@ -172,8 +173,7 @@ def _open_ledger_ids() -> set[str]:
     Status is matched as a PREFIX, not an exact cell. `F-45` is `OPEN (narrowed)`
     and `AC-09` is `DEFERRED (gate: E1 report)` — an exact `| OPEN |` match drops
     the first and an exact `| DEFERRED |` match keeps it, so the naive parser
-    miscounts by one in the direction that makes a broken partition look sound
-    (RD-88).
+    miscounts by one in the direction that makes a broken partition look sound.
     """
     return set(_open_ledger_id_list())
 
@@ -183,7 +183,7 @@ def _open_ledger_id_list() -> list[str]:
 
     `_open_ledger_ids` returns a set, which silently absorbs a duplicated row id —
     and a duplicated id is exactly the failure cycle 4 hit four ways when four
-    parallel lanes each numbered from the ledger's maximum (F-103, RD-126).
+    parallel lanes each numbered from the ledger's maximum.
     """
     ledger = (_REPO_ROOT / "docs" / "review_ledger.md").read_text()
     ids = []
@@ -201,9 +201,8 @@ def test_no_ledger_row_id_is_duplicated() -> None:
 
     The coverage identity below compares SETS, so a duplicate is invisible to it —
     the id would be "covered" while two different findings hid behind one entry.
-    That is not hypothetical: cycle 4's four lanes each allocated from the ledger's
-    max and `RD-93`…`RD-100` ended up naming four different findings apiece
-    (RD-126). The remap fixed the instance; this is what stops the class.
+    That is not hypothetical: lanes allocating independently from the ledger's
+    max produce one id naming several different findings.
     """
     ids = _open_ledger_id_list()
     dupes = sorted({i for i in ids if ids.count(i) > 1})
@@ -217,9 +216,9 @@ def test_no_ledger_row_id_is_duplicated() -> None:
 def _ids_lanes_raised_from_their_own_blocks(spec: dict) -> set[str]:
     """Ids a lane actually raised: inside its OWN id_block AND in its OWN inbox.
 
-    This is the attribution both F-210 and F-212 rest on. Deriving it from the
-    partition's buckets would be circular — the buckets are what it validates —
-    and would have widened silently when RD-264 split the fold's output in two.
+    Deriving this from the partition's buckets would be circular — the buckets
+    are what it validates — and would widen silently the moment the fold's output
+    is split in two.
     """
     raised: set[str] = set()
     for lane in spec["lanes"]:
@@ -238,7 +237,7 @@ def _ids_lanes_raised_from_their_own_blocks(spec: dict) -> set[str]:
 def _ids_open_before_this_cycle(partition_name: str) -> frozenset[str]:
     """OPEN row ids in the ledger as of the commit that DREW this cycle.
 
-    The non-circular discriminator for F-210. What RD-126 forbids is a lane
+    The non-circular discriminator. What the protocol forbids is a lane
     allocating an id that already names a LIVE finding, so the question is "was
     this id open when the cycle was drawn" — and only history answers it.
 
@@ -297,11 +296,10 @@ def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
     """Rule 6: each lane allocates new ids only from its own declared block, and no
     block overlaps another lane's or an id the ledger already uses.
 
-    Cycle 4 had no such rule. Every lane numbered from the ledger's maximum at the
-    moment it started, so `RD-93`…`RD-100` named FOUR different findings and one
-    lane's new `AC-` ids landed on rows that were live and unrelated. Untangling it
-    took a per-lane, per-CLASS remap of the source tree — and the remap then missed
-    a lane's own citations, which a reviewer had to catch (F-104).
+Without it, every lane numbers from the ledger's maximum at the moment it
+    starts, so one id names several different findings and a lane's new ids land
+    on rows that are live and unrelated. Untangling that takes a per-lane,
+    per-class remap of the source tree.
 
     A lane with no `id_block` is allowed only if it declares none at all: lane-scoped
     suffixes (`F-M1`, `AC-42-R1`) are the sanctioned alternative and collide by
@@ -317,16 +315,15 @@ def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
     # are folded, ids from its own block are live OPEN rows BY DESIGN — that is
     # rule 6 working, not failing.
     #
-    # The exemption is ATTRIBUTION, not mention (F-210). Exempting any id the
+    # The exemption is ATTRIBUTION, not mention. Exempting any id the
     # lane's inbox happens to NAME is blind to the exact failure this guard
     # exists for: a lane that allocates a colliding id necessarily writes that id
     # into its own inbox, so a mention-based exemption fires precisely in the case
-    # RD-126 forbids. Measured: with a mention-based rule, setting lane M's F
-    # block to "99..99" — F-99 is a live pre-existing row — PASSES as soon as M's
-    # inbox names F-99.
+    # the protocol forbids: a mention-based rule passes as soon as the lane's
+    # own inbox names the colliding id.
     #
     # An id is a COLLISION only if it was already a live finding when this cycle
-    # was DRAWN (F-210). Consuming your own block and folding the results makes
+    # was DRAWN. Consuming your own block and folding the results makes
     # those ids OPEN by design — that is rule 6 working — so "OPEN now" is the
     # wrong test. And every lane-side signal is defeated by the offence itself,
     # which is why this reads history instead.
@@ -345,13 +342,13 @@ def test_lane_id_blocks_are_disjoint_and_unused(path: Path, spec: dict) -> None:
                     f"{path.name}: lane {lane['id']}'s block {prefix}-{rng} contains "
                     f"{prefix}-{n}, which was ALREADY a live OPEN row when this "
                     "cycle was drawn. A lane allocating it would overwrite a live "
-                    "finding (RD-126, F-210)."
+                    "finding."
                 )
                 key = (prefix, n)
                 assert key not in seen, (
                     f"{path.name}: {prefix}-{n} is in both lane {seen[key]}'s and "
                     f"lane {lane['id']}'s id_block. Blocks must be disjoint — this "
-                    "is the four-way collision of cycle 4 (RD-126)."
+                    "is the four-way collision of cycle 4."
                 )
                 seen[key] = lane["id"]
 
@@ -361,14 +358,13 @@ def test_the_partition_covers_exactly_the_ledgers_open_rows(path: Path, spec: di
     """Every OPEN row has a plan, and every planned row is really OPEN.
 
     Pairwise uniqueness cannot catch a row that is in NO list — which is the
-    omission RD-73 was raised for, and precisely what a coverage figure equal to
-    its own scope hides. This is the check `cycle4.yaml` and the ledger both
-    CLAIMED was here while nothing read the ledger at all (RD-88).
+    omission this exists for, and precisely what a coverage figure equal to its
+    own scope hides.
 
     Only the current cycle's partition is checked against the live ledger; an
     older cycle's file describes a ledger state that no longer exists.
 
-    `unassigned:` is the FIFTH list, added for RD-146. A cycle's fold creates rows
+    `unassigned:` is the FIFTH list. A cycle's fold creates rows
     the partition could not have planned, because they did not exist when it was
     drawn — cycle 5's fold created 142. Without a bucket for them this check goes
     red between every fold and the next partition, and the pressure is then to
@@ -407,14 +403,14 @@ def test_the_partition_covers_exactly_the_ledgers_open_rows(path: Path, spec: di
         f"{path.name}: these rows are OPEN in the ledger but appear in NO list — "
         f"neither a lane, an integrator queue (pre_lane/post_merge), nor raised "
         f"against the partition: {sorted(unplanned)}. A row with no plan is the "
-        "silent omission RD-73 exists to prevent."
+        "silent omission exists to prevent."
     )
     stale = planned - open_ids
     assert not stale, (
         f"{path.name}: these rows are planned but are NOT OPEN in the ledger "
         f"(closed, deleted, or still DEFERRED): {sorted(stale)}. Either the row "
         "was resolved and the partition is stale, or it needs re-statusing "
-        "before a lane is told to work it (RD-90)."
+        "before a lane is told to work it."
     )
 
 
@@ -430,13 +426,12 @@ def test_every_declared_brief_exists(path: Path, spec: dict) -> None:
 
 
 def test_the_current_cycle_names_the_newest_partition() -> None:
-    """RD-148: `_CURRENT_CYCLE` is a module literal that nothing asserted.
+    """`_CURRENT_CYCLE` is a module literal that nothing asserted.
 
     Every check below that matters — the coverage identity, the id blocks, the
     anchor check — skips when `path.stem != _CURRENT_CYCLE`. If the literal ever
     names a stem with no file, `pytest.skip` fires for EVERY parametrization and
-    the whole coverage guarantee is suspended with a green suite. That is RD-88's
-    own "asserted by nothing" shape, one level up: the guard reports success
+    the whole coverage guarantee is suspended with a green suite. That is "asserted by nothing" shape, one level up: the guard reports success
     because it never ran.
     """
     current = _REPO_ROOT / "docs" / "lanes" / f"{_CURRENT_CYCLE}.yaml"
@@ -454,17 +449,16 @@ def test_the_current_cycle_names_the_newest_partition() -> None:
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
 def test_every_lane_declares_its_expected_ci_table_effect(path: Path, spec: dict) -> None:
-    """RD-149: gate step 4's detector only discriminates if every lane declared.
+    """Gate step 4's detector only discriminates if every lane declared.
 
     The step-4 fixed-seed A/B is the cross-lane interference detector, and it can
     tell interference from legitimate change only because each lane said in
     advance what it expected to move. `docs/parallel_protocol.md` stated that as a
-    CYCLE-4 FACT ("all three declare none") and nothing asserted that a later
-    cycle's lanes re-declare it — so the detector's discriminating power would
-    quietly become an assumption again (RD-91 confirmed the durable half holds;
-    this is the half that did not).
+    fact about one cycle rather than a standing requirement, so nothing made a
+    later cycle's lanes re-declare it and the detector's discriminating power
+    would quietly become an assumption again.
 
-    Declared in the PARTITION, not only in the brief's prose: RD-147's lesson is
+    Declared in the PARTITION, not only in the brief's prose: lesson is
     that when a decision lives in two places, the prose copy is the one that
     drifts, and the machine-readable file is what the next planner reads.
     """
@@ -477,7 +471,7 @@ def test_every_lane_declares_its_expected_ci_table_effect(path: Path, spec: dict
             f"{path.name}: lane {lane['id']} declares no "
             "`expected_ci_table_effect:`. Gate step 4 compares a fixed-seed "
             "ci_table.csv against the pre-lane baseline; without a declaration a "
-            "moved row cannot be told from interference (RD-91, RD-149)."
+            "moved row cannot be told from interference."
         )
 
 
@@ -530,16 +524,16 @@ def test_the_partition_declares_what_it_moves_on_the_gate(path: Path, spec: dict
             f"{path.name}: `gate:` declares it lifts nothing and unblocks nothing, "
             "with no `exception:` reason. That is permitted — a backlog-discharge "
             "cycle is legitimate — but it is a decision, and an undeclared one is "
-            "how cycle 5 spent four parallel lanes without moving RD-33a."
+            "how a cycle spends four parallel lanes without moving its gate."
         )
 
 
-#: RD-33a condition (i)'s EXPLICIT path list, as operationalized by RD-76. Kept
-#: here so the check below counts the same paths the gate does; the free text "the
-#: metric path" is what RD-76 replaced.
+#: The dataset-render gate's EXPLICIT path list (design_spec §11.1 condition i),
+#: kept here so the check below counts the same paths the gate does. The explicit
+#: list replaced free text ("the metric path"), which admitted any reading.
 #:
 #: The GATE itself lifts at zero OPEN rows on these paths, not zero blocker/major
-#: (user decision 2026-08-12, superseding RD-128's severity scoping): severity is a
+#: (user decision 2026-08-12, superseding severity scoping): severity is a
 #: skim aid, and a gate that ignores minors ships with known-open work on its own
 #: path list. The blocker/major filter below is a different question — which rows a
 #: partition should be judged on SCHEDULING — and it stays.
@@ -566,7 +560,7 @@ _ANCHOR_PATH_RE = re.compile(
     r"\b((?:src|tests|configs|docs|scripts)/[\w./*-]+?\.(?:py|yaml|yml|md|json))\b"
 )
 #: A bare module name, e.g. "pipeline.py, runtime.py, cli.py stage dispatch" —
-#: RD-20's anchor names its cross-lane file exactly this way, so a full-path-only
+#: anchor names its cross-lane file exactly this way, so a full-path-only
 #: reader would miss the one row this check exists to catch.
 _BARE_MODULE_RE = re.compile(r"\b([\w_]+\.py)\b")
 
@@ -605,20 +599,15 @@ def test_no_rows_anchor_lands_in_another_lanes_files(path: Path, spec: dict) -> 
     `test_every_row_is_fixable_inside_its_own_lane` validates the paths the
     PARTITION declares. Nothing validated the paths the LEDGER declares, and the
     two can disagree — which is how a rule-4 spanning row passes the reachability
-    check. RD-20 is the worked example: `cycle5.yaml` declares
-    `fix: [src/amcd/pipeline.py]` (lane P owns it, so the check passed), while the
-    ledger anchor names `runtime.py`, which lane B owns, and the real remedy
-    changes a dispatch signature across nine call sites in three lanes. Lane P
-    could not start it and returned it unattempted (RD-208).
-
-    Four reviewers derived this hole independently — RD-111, RD-208, RD-225,
-    RD-155 — and they are ONE defect that closes here, together.
+    check. The worked example: a partition declares `fix: [src/amcd/pipeline.py]`
+    (the lane owns it, so the check passes) while the ledger anchor names
+    `runtime.py`, which another lane owns — and the real remedy changes a dispatch
+    signature across nine call sites in three lanes, so the lane cannot start it.
 
     WHAT THIS CANNOT CHECK. The anchor is where a finding LIVES, not where its
-    remedy lands. F-60's anchor is `scenes/generator.py`, genuinely lane S's,
-    while its resolution needs `evaluation/room_acoustic.py` and
-    `configs/base.yaml` — this check passes it, and RD-225 caught it by reading.
-    Only a path a HUMAN OR REVIEWER wrote into the anchor is visible here.
+    remedy lands. A row anchored on `scenes/generator.py` whose resolution needs
+    `evaluation/room_acoustic.py` passes here. Only a path a human or reviewer
+    wrote into the anchor is visible.
     """
     if path.stem != _CURRENT_CYCLE:
         pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
@@ -650,14 +639,13 @@ def test_no_rows_anchor_lands_in_another_lanes_files(path: Path, spec: dict) -> 
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
 def test_a_fix_path_that_does_not_exist_is_declared_as_new(path: Path, spec: dict) -> None:
-    """RD-155: the partition had no notion of a fix that must CREATE a file.
+    """The partition had no notion of a fix that must CREATE a file.
 
     The ownership hook refuses a write to any path outside the lane's owned set,
     and a path that does not exist yet is refused the same way — so a row whose
-    remedy is "promote this to its own module" strands mid-session. RD-121 and
-    RR-83 both did, and so did lane S's RR-165.
+    remedy is "promote this to its own module" strands mid-session.
 
-    WHAT THIS CANNOT CHECK: those three rows declared `fix:` paths that DO exist
+    WHAT THIS CANNOT CHECK: such rows declare `fix:` paths that DO exist
     (the file the code is being promoted OUT of), so the shortfall was invisible
     at declaration time and is invisible here too. This catches the forward case —
     a partition that names a not-yet-existing path — and makes `creates:` the
@@ -679,7 +667,7 @@ def test_a_fix_path_that_does_not_exist_is_declared_as_new(path: Path, spec: dic
                         f"'{target}', which does not exist. If the remedy creates "
                         "it, list it in the row's `creates:`; the ownership hook "
                         "refuses a write to an unowned path whether or not the "
-                        "file is there yet (RD-155)."
+                        "file is there yet."
                     )
 
 
@@ -712,8 +700,8 @@ def _ids_ever_a_row() -> frozenset[str]:
     resurrection, i.e. punish the loop for completing. That is not hypothetical:
     it fired the moment cycle 5's first 44 confirmed rows were deleted.
 
-    Git history IS this project's audit trail for deleted rows (RR-25, and the
-    ledger header's own `git log -S` instructions), so it is the right oracle.
+    Git history IS this project's audit trail for deleted rows — see the ledger
+    header's own `git log -S` instructions — so it is the right oracle.
     One subprocess, cached for the session.
 
     Degrades to the empty set if git is unavailable — a shallow copy or an
@@ -735,8 +723,8 @@ def _fold_decisions() -> set[str]:
     """Ids an inbox mentions that the fold deliberately did NOT turn into a row.
 
     A lane's id block is a RESERVATION, not a promise: its bounds get quoted in
-    prose (`RD-175..199`), and a lane can leave a dangling citation to a number it
-    never raised (`RD-182`). Neither is a finding, and neither can be forced into a
+    prose, and a lane can leave a dangling citation to a number it never raised.
+    Neither is a finding, and neither can be forced into a
     row without inventing one.
 
     Every entry needs a stated reason, so that "it was never a finding" cannot
@@ -761,16 +749,15 @@ def _fold_decisions() -> set[str]:
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
 def test_every_inbox_finding_reaches_the_ledger(path: Path, spec: dict) -> None:
-    """The missing direction: inbox → ledger (RD-142, F-160 — ONE defect).
+    """The missing direction: inbox → ledger.
 
     `test_the_partition_covers_exactly_the_ledgers_open_rows` asserts ledger ↔
     partition, and it is sound, but it cannot see a finding that never became a
     row at all. That is how cycle 4's fold lost five rows including a blocker.
 
-    `docs/parallel_protocol.md` CLAIMED this file already asserted it. Lane P
-    measured otherwise — nine tests, none of which opened an inbox — and filed
-    F-160 as the same class as F-66/F-77: documentation claiming more than the
-    test checks, on the guard that exists to stop silent row loss at the fold.
+    `docs/parallel_protocol.md` once claimed this file asserted it while none of
+    its tests opened an inbox — documentation claiming more than the test checks,
+    on the guard that exists to stop silent row loss at the fold.
 
     SCOPED TO EACH LANE'S OWN id_block. An inbox also cites pre-existing ids it
     merely verified or discussed, and those get DELETED from the ledger when they
@@ -802,13 +789,13 @@ def test_every_inbox_finding_reaches_the_ledger(path: Path, spec: dict) -> None:
             "give every finding a row with a file anchor, record it as 'folded "
             "into <id>' in the inbox, or list it with a reason under the ledger's "
             "'Fold decisions' heading. A finding in none of the three is invisible "
-            "to every later cycle (RD-142, F-160)."
+            "to every later cycle."
         )
 
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
 def test_every_declared_inbox_exists(path: Path, spec: dict) -> None:
-    """A missing inbox must not read as "nothing to check" (F-211).
+    """A missing inbox must not read as "nothing to check".
 
     Both fold guards `continue` past an inbox that is not on disk, and nothing
     asserted one should be — `test_every_declared_brief_exists` covers briefs
@@ -820,7 +807,7 @@ def test_every_declared_inbox_exists(path: Path, spec: dict) -> None:
     * archiving an inbox at end of cycle (the protocol's own housekeeping) makes
       `test_every_inbox_finding_reaches_the_ledger` pass VACUOUSLY.
 
-    That is RD-148's shape one level down, inside the guard the fold rests on. A
+    That is shape one level down, inside the guard the fold rests on. A
     lane that genuinely has not reported yet says so with `reported: false`, which
     is a declaration rather than an absence.
     """
@@ -835,24 +822,24 @@ def test_every_declared_inbox_exists(path: Path, spec: dict) -> None:
             f"{path.name}: lane {lane['id']} declares inbox '{lane['inbox']}', "
             "which does not exist. If the lane has not reported yet, declare "
             "`reported: false` — an absent file otherwise makes the fold and "
-            "exit-gate checks pass by having nothing to look at (F-211)."
+            "exit-gate checks pass by having nothing to look at."
         )
 
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
 def test_unassigned_holds_only_rows_this_cycles_fold_created(path: Path, spec: dict) -> None:
-    """`unassigned:` must not become a place to park anything (F-212).
+    """`unassigned:` must not become a place to park anything.
 
     The bucket keeps the coverage identity total instead of forcing the check to
-    be weakened, which is the right trade (RD-146). But nothing constrained its
+    be weakened, which is the right trade. But nothing constrained its
     membership, so the identity would decay from "every OPEN row has a PLAN" to
     "every OPEN row is NAMED in this file" — the coverage-equal-to-its-own-scope
-    figure RD-73 exists to prevent.
+    figure exists to prevent.
 
     The constraint that makes it honest: an entry must be a finding one of THIS
     cycle's lanes actually raised. A pre-existing row cannot be parked here to
     make it look covered, and — since this same set is what exempts a consumed
-    `id_block` (F-210) — neither can a row be exempted from the collision check
+    `id_block` — neither can a row be exempted from the collision check
     by listing it.
     """
     if path.stem != _CURRENT_CYCLE:
@@ -862,7 +849,7 @@ def test_unassigned_holds_only_rows_this_cycles_fold_created(path: Path, spec: d
     if not unassigned:
         return
     # Before a lane reports, `unassigned:` is the INBOUND backlog a cycle is drawn
-    # against — carried-forward rows, legitimately. F-212's hazard is a FOLD that
+    # against — carried-forward rows, legitimately. hazard is a FOLD that
     # parks pre-existing rows there to make the coverage identity look total, and
     # a fold only happens after lanes report. So the provenance constraint applies
     # from the moment any inbox exists, and not before.
@@ -877,23 +864,21 @@ def test_unassigned_holds_only_rows_this_cycles_fold_created(path: Path, spec: d
         "own id_block in this cycle. That bucket is for rows THIS cycle's fold "
         "created; anything else parked there makes the coverage identity report "
         "its own scope, and silently exempts the id from the block-collision "
-        "check (F-212, F-210)."
+        "check."
     )
 
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
 def test_some_lane_carries_a_row_that_can_move_the_gate(path: Path, spec: dict) -> None:
-    """RD-254's accepted resolution, in full this time (RD-266).
+    """Accepted resolution, in full this time.
 
-    RD-254 asked for an assertion that "at least one lane's brief declares rows
-    anchored on a live gate condition's path list". What first shipped asserted
-    only that a `gate:` block EXISTS — a real improvement, because it moves the
-    answer from report time to planning time, but not the check that was agreed,
-    and it left `_GATE_PATH_LIST` defined and referenced nowhere.
+At least one lane's brief must declare rows anchored on a live gate
+    condition's path list. Asserting only that a `gate:` block EXISTS moves the
+    answer from report time to planning time, which is a real improvement, but it
+    is not the same check — and it leaves `_GATE_PATH_LIST` referenced nowhere.
 
-    This is the pre-measurement half of RD-255: the count of on-path
-    blocker/major rows a partition SCHEDULES is what it should be judged on, and
-    cycle 5's was zero across four lanes.
+    The count of on-path blocker/major rows a partition SCHEDULES is what it
+    should be judged on, before the cycle runs rather than after.
     """
     if path.stem != _CURRENT_CYCLE:
         pytest.skip(f"{path.name} is not the current cycle ({_CURRENT_CYCLE})")
@@ -916,14 +901,14 @@ def test_some_lane_carries_a_row_that_can_move_the_gate(path: Path, spec: dict) 
         f"{path.name}: no lane carries a blocker/major row anchored on the gate's "
         f"path list — on-path rows scheduled per lane: {per_lane}. A cycle whose "
         "lanes cannot move the gate ends where it started with a bigger ledger "
-        "(RD-81). Give the gate a lane, or declare `gate.exception` saying why "
-        "this cycle deliberately does not (RD-254, RD-266)."
+        ". Give the gate a lane, or declare `gate.exception` saying why "
+        "this cycle deliberately does not."
     )
 
 
 @pytest.mark.parametrize("path,spec", _partitions(), ids=lambda v: getattr(v, "name", ""))
 def test_no_lane_is_assigned_a_row_whose_fix_is_already_claimed(path: Path, spec: dict) -> None:
-    """Planning step 3, asserted for the first time (RD-264, RD-202).
+    """Planning step 3, asserted for the first time.
 
     "Exclude fix-applied rows from every lane; assigning one invites a second fix
     stacked on a first that nobody checked." That has been the rule since cycle 4
@@ -958,5 +943,5 @@ def test_no_lane_is_assigned_a_row_whose_fix_is_already_claimed(path: Path, spec
             "resolutions already claim a fix nobody has re-derived. A second fix "
             "stacked on an unchecked first is what planning step 3 forbids. Either "
             "DELETE the row (the fix is real) or strip the claim from its "
-            "resolution so it reads as the open work it is (RD-264)."
+            "resolution so it reads as the open work it is."
         )

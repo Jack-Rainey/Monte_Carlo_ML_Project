@@ -12,11 +12,11 @@ id pool, else the shift split name) so data/splits.py can route it with no
 name mapping.
 
 The stage's second canonical output is `placement_report.json`: per-split
-placement accounting plus three validity blocks — diffuse-field (AC-21),
-record-length (AC-22) and ISO 3382-1 §5.3 distance (AC-30) — and it enforces the
-record-length gate, which can abort the run. A geometry family declaring
-`characterization: none` is not an enclosure, so it is excluded from all three
-blocks and carries a reason instead of a number (RD-64).
+placement accounting plus three validity blocks — diffuse-field, record-length
+and ISO 3382-1 §5.3 distance — and it enforces the record-length gate, which can
+abort the run. A geometry family declaring `characterization: none` is not an
+enclosure, so it is excluded from all three blocks and carries a reason instead
+of a number.
 """
 from __future__ import annotations
 
@@ -47,9 +47,9 @@ from ..simulators.base import (
 
 
 #: Why excluding a non-enclosure from the record-length fractions is not the same
-#: as it being fine (AC-53). Emitted twice — per scene in `uncharacterized_reason`
-#: and per split in `record_decay_range`'s `uncharacterized_note` — so it is
-#: declared once here rather than drifting between the two.
+#: as it being fine. Emitted twice — per scene in `uncharacterized_reason` and per
+#: split in `record_decay_range`'s `uncharacterized_note` — so it is declared once
+#: here rather than drifting between the two.
 _RECORD_LENGTH_UNCHECKED = (
     "its record-length adequacy is therefore UNCHECKED, not merely excluded: it is "
     "still rendered into a record of fixed ir_duration, and a non-enclosure has a "
@@ -114,7 +114,7 @@ def _sample_positions(
     BELOW the minimum separation versus ABOVE the maximum. Those two have
     opposite acoustic sign — rejecting below strips high-DRR (close) pairs,
     rejecting above strips low-DRR (distant) ones — and which dominates depends
-    on the room family, so a single acceptance rate conflates them (AC-14).
+    on the room family, so a single acceptance rate conflates them.
 
     When the regime declares a `distance_range`, the pair is resampled JOINTLY
     until it satisfies the constraint. Resampling only the receiver would leave
@@ -131,18 +131,15 @@ def _sample_positions(
     lo, hi = _placement_bounds(dims, margins, regime.height_range)
 
     if regime.type == "corner":
-        # Receiver biased toward the (min, min) corner in the HORIZONTAL plane only
-        # (AC-10). Applying the fraction to z as well collapsed the receiver height
-        # band — with height_range [1.2, 1.8] and corner_frac 0.2, receivers were
-        # confined to [1.2, 1.32]. A declared height range is an ergonomic band, not
-        # a room boundary: 1.2 m is 1.2 m off the floor either way, so biasing z buys
-        # no boundary proximity while silently narrowing a reported robustness split.
+        # Horizontal plane only. A declared height range is an ergonomic band,
+        # not a room boundary — 1.2 m is 1.2 m off the floor either way — so
+        # biasing z buys no boundary proximity while narrowing a reported split.
         rcv_hi = [lo[i] + regime.corner_frac * (hi[i] - lo[i]) for i in (0, 1)] + [hi[2]]
     else:  # interior: uniform anywhere in the admissible box
         rcv_hi = hi
 
-    # Greatest separation this box admits at all — the 10 m cap is inert in a small
-    # shoebox (max ~3.7 m) but does the rejecting in a long corridor (AC-14).
+    # Greatest separation this box admits at all: which side of `distance_range`
+    # does the rejecting depends on the family, and the accounting has to say.
     max_reachable = float(np.linalg.norm(np.subtract(hi, lo)))
     stats = {"attempts": 0, "below_min": 0, "above_max": 0,
              "max_reachable_m": max_reachable}
@@ -153,8 +150,8 @@ def _sample_positions(
         rcv = tuple(float(v) for v in rng.uniform(lo, rcv_hi))
         if regime.distance_range is None:
             return src, rcv, stats
-        # Either bound may be null (RD-48): a backend imposes a minimum with no
-        # matching maximum, so each side is tested only when it is declared.
+        # Either bound may be null — a backend imposes a minimum with no matching
+        # maximum — so each side is tested only when it is declared.
         d_lo, d_hi = regime.distance_range
         d = float(np.linalg.norm(np.subtract(src, rcv)))
         if d_lo is not None and d < d_lo:
@@ -176,22 +173,18 @@ def _sample_positions(
 
 
 def _check_eval_bands_against_the_backend(config: Config) -> None:
-    """Refuse an eval band the active backend cannot render faithfully (AC-66).
+    """Refuse an eval band the active backend cannot render faithfully.
 
     A backend may realize a physical effect wrongly in a way it cannot fix, and
-    declare the band above which that error exceeds a stated tolerance. gsound
-    attenuates air absorption at a quarter of the ISO value — compiled in, not
-    exposed for pre-compensation the way surface absorption is — which is inert at
-    500/1000 Hz and reaches ~19 % of T60 at 8 kHz. Its config already said such
-    bands are "REFUSED"; this is what makes that true.
+    declare the band above which that error exceeds a stated tolerance — gsound
+    attenuates air absorption at a quarter of the ISO value, compiled in and not
+    exposed for pre-compensation, which is inert at 500/1000 Hz and reaches ~19 %
+    of T60 at 8 kHz.
 
-    Checked HERE, beside the other backend pre-flight, rather than in `Config`:
-    `config.py` is in `_CORE_SOURCES`, so importing the simulator seam from it puts
-    `simulators/base.py` into every stage's cache key. gen-scenes is the first
-    stage, so failing here is early enough to cost nothing.
-
-    A backend declaring no ceiling is not constrained — the scaffold has no physics
-    to get wrong, so it has nothing to declare.
+    Checked here rather than in `Config` because `config.py` is in `_CORE_SOURCES`,
+    so importing the simulator seam from it would put `simulators/base.py` into
+    every stage's cache key. gen-scenes is the first stage, so failing here costs
+    nothing. A backend declaring no ceiling is simply unconstrained.
     """
     limit = simulator_max_eval_freq_hz(config)
     if limit is None:
@@ -212,26 +205,21 @@ def _check_eval_bands_against_the_backend(config: Config) -> None:
 def _check_regimes_clear_backend_floor(config: Config) -> float:
     """Reject any placement regime that could emit a scene the backend cannot render.
 
-    The declared-config half of AC-13/F-48, checked before a single scene exists —
-    the only other guard fires inside render, mid-batch, with the stage sentinel
-    never written.
-
-    EVERY declared regime is checked, not just the one the id baseline names
-    (RD-45): a regime unused today is a trap for the config that selects it
-    tomorrow.
+    The declared-config check, run before a single scene exists; the realized-scene
+    backstop is `render._preflight_separations`. EVERY declared regime is checked,
+    not just the one the id baseline names — a regime unused today is a trap for
+    the config that selects it tomorrow.
 
     The backend floor is a LOWER LIMIT on the researcher's choice, never its
-    source (RD-57), so the message says to raise the config value and the
-    scientifically motivated minimum stays in the config where it belongs.
+    source, so the message says to raise the config value and the scientifically
+    motivated minimum stays in the config where it belongs.
     """
     floor = simulator_min_separation(config)
 
-    # A DECLARED minimum is required unconditionally, independently of the backend
-    # floor — including a backend declaring zero, which the `Simulator` contract
-    # allows (F-61). The researcher's minimum is a SCIENTIFIC choice about the scene
-    # distribution (base.yaml argues 1.0 m from the critical distance and ISO 3382-1
-    # §5.3); the backend floor is only a lower limit on that choice (RD-57). So the
-    # two are checked separately, in that order.
+    # A DECLARED minimum is required unconditionally, including from a backend
+    # declaring zero, which the `Simulator` contract allows. The researcher's
+    # minimum is a scientific choice about the scene distribution; the backend
+    # floor is only a lower limit on it. Hence two checks, in this order.
     missing = [
         name for name, regime in config.scenes.placement_regimes.items()
         if regime.distance_range is None or regime.distance_range[0] is None
@@ -317,56 +305,44 @@ def _room_acoustics(
     (dimensionless) — see the caveat at the α clip below. Every returned key
     carries its own unit in its name.
 
-    These are the quantities the RD-29 disclosure is actually about
-    (acoustics-reviewer AC-09). Source-receiver DISTANCE alone is nearly blind to
-    the thing that matters: direct-to-reverberant ratio depends on d/r_c, and
-    absorption moves r_c independently of d — two splits can share a median
-    distance and differ by ~11 dB in median DRR.
+    These are what characterizes a split, not source-receiver distance: DRR
+    depends on d/r_c, and absorption moves r_c independently of d, so two splits
+    can share a median distance and differ by ~11 dB in median DRR.
 
     Estimates, not measurements: diffuse-field formulae over a shoebox, reported
     so the E1 write-up can characterize the dataset it generated. The rendered
     IRs remain the source of truth for every reported metric.
 
-    VALIDITY (AC-21). The estimates above were reported with no indication of when
-    their own premise had failed — and on a high-absorption split it fails for
-    most or all scenes. So each scene also carries validity flags. No formula
-    changes and nothing is dropped: a DRR from a formula outside its domain is
-    still reported, but it is reported AS an extrapolation. The realized
-    percentages belong to a realized config, so they live in that config's own
-    comment rather than being copied here (RR-62).
+    VALIDITY. A high-absorption split falls outside the diffuse-field premise for
+    most or all of its scenes, so each scene carries validity flags beside the
+    estimates. No formula changes and nothing is dropped: a DRR from a formula
+    outside its domain is still reported, but reported AS an extrapolation.
 
-    NOT EVERY GEOMETRY IS AN ENCLOSURE (RD-64). Every quantity here — Sabine/Eyring
-    T60, room constant, critical distance, DRR — is derived from `dims` on the
-    assumption of a closed box. That holds for shoebox and corridor and fails for
-    the roadmap's outdoor and partially-open scenes (paper §6), which design_spec
-    §6 says the architecture must not preclude. So the geometry family DECLARES its
-    `characterization`, and a family declaring "none" gets a recorded reason
-    instead of a number — per "nothing leaves a result silently" — rather than
-    meaningless closed-box values in the canonical placement_report.json.
+    NOT EVERY GEOMETRY IS AN ENCLOSURE. Every quantity here — Sabine/Eyring T60,
+    room constant, critical distance, DRR — assumes a closed box. That holds for
+    shoebox and corridor and fails for the roadmap's outdoor and partially-open
+    scenes (paper §6), so the geometry family DECLARES its `characterization` and
+    a family declaring "none" gets a recorded reason instead of meaningless
+    closed-box values in the canonical placement_report.json.
     """
     if characterization == "none":
-        # An unmodelled geometry is UNCHARACTERIZED, not zero and not NaN: every
-        # numeric key is absent, so no consumer can average it. NOTE the reason
-        # below is NOT serialized per scene — `room_stats` reaches
-        # `placement_report.json` only through `_summarize` (numeric keys) and
-        # `_flag_counts` (booleans), and `SceneSpec` has no such field. What reaches
-        # the artifact is the per-split `uncharacterized_note` plus the
-        # `n_uncharacterized` count.
+        # UNCHARACTERIZED, not zero and not NaN: every numeric key is absent, so
+        # no consumer can average it. The reason below is not serialized per scene
+        # — what reaches the artifact is the per-split `uncharacterized_note` and
+        # the `n_uncharacterized` count.
         return {
             "characterization": "none",
             "uncharacterized_reason": (
                 "geometry family declares characterization: none — it is not a "
                 "closed enclosure, so Sabine/Eyring T60, room constant, critical "
                 f"distance and diffuse-field DRR are undefined for it, and "
-                f"{_RECORD_LENGTH_UNCHECKED} (AC-53)"
+                f"{_RECORD_LENGTH_UNCHECKED}"
             ),
-            # `decay_range_below_iso_t30` is OMITTED, not False (F-71). A False here
-            # reads as "measured, and within the record", so the scene entered the
-            # record-length gate's denominator as passing and N uncharacterized
-            # scenes shrank the overall over-limit fraction by N/(N+M) — a dataset
-            # whose enclosed scenes breach the limit could pass by adding
-            # non-enclosures. Omission is what `_scene_is_characterized` reads to
-            # exclude the scene from both the fraction and the gate.
+            # `decay_range_below_iso_t30` is OMITTED, not False. A False reads as
+            # "measured, and within the record", which would put the scene into the
+            # record-length gate's denominator as passing — so a dataset whose
+            # enclosed scenes breach the limit could pass by adding non-enclosures.
+            # Omission is what `_scene_is_characterized` reads to exclude it.
         }
     if characterization != "sabine":
         raise ValueError(
@@ -374,70 +350,53 @@ def _room_acoustics(
             f"'sabine' or 'none'."
         )
     if not distance > 0.0:
-        # DRR divides by d²; a coincident pair would silently report +inf into a
-        # canonical artifact. Geometrically degenerate anyway — guarded rather
-        # than clamped, so it cannot be reported as if it were a real scene
-        # (F-42; same family as the AC-13 minimum-separation gap).
+        # DRR divides by d²; a coincident pair would report +inf into a canonical
+        # artifact. Guarded rather than clamped, so it cannot be reported as if it
+        # were a real scene.
         raise ValueError(
             f"source-receiver distance must be > 0 to characterize a scene; got "
             f"{distance}. Declare a placement `distance_range` with a positive "
             f"lower bound."
         )
     volume, surface = box_volume_and_surface(dims)
-    # NOMINAL α, as configured — and it governs EVERY quantity below, not only the
-    # d_min pair: t60_*, critical_distance_m, drr_db and the record-length flag all
-    # scale with it (AC-54/AC-55/AC-56). Stated at function scope because the flag
-    # it matters most for is the record-length one, ~60 lines below.
+    # NOMINAL α, as configured, governing EVERY quantity below — t60_*,
+    # critical_distance_m, drr_db and the record-length flag all scale with it.
     #
-    # WHETHER THAT IS ALSO THE RENDERED ROOM IS THE BACKEND'S ANSWER, NOT OURS
-    # (AC-50). This module names no backend (RD-144), so it asks through the same
-    # seam it asks about record length, and RECORDS the reply: `absorption_realized`
-    # below, with `absorption_is_as_declared` beside it. On gsound the two agree
-    # under `pre_compensate` and diverge by 1.14-1.98x on T60 under `as_is`, and a
-    # reader checking a d_min or a DRR against the wrong one of them is checking a
-    # room that was never rendered.
+    # WHETHER THAT IS ALSO THE RENDERED ROOM IS THE BACKEND'S ANSWER. This module
+    # names no backend, so it asks through the simulator seam and records the
+    # reply as `absorption_realized`, with `absorption_is_as_declared` beside it.
+    # A reader checking a d_min or a DRR against the wrong one of the two is
+    # checking a room that was never rendered.
     alpha, _alpha_clipped = clip_absorption(absorption)
     alpha_realized = realized_absorption(alpha)
 
-    # Shared declarations (amcd.acoustics) — the scaffold renders from the same
-    # constant and the same formula, so the described room and the rendered room
-    # cannot drift apart (AC-24).
+    # From `amcd.acoustics`, which the scaffold also renders from, so the
+    # described room and the rendered room cannot drift apart.
     t60_sabine = sabine_rt60(volume, surface, alpha)
     # Eyring is the better estimate at high absorption, where Sabine overpredicts
     # — and ceiling_absorptive reaches α = 0.98.
     t60_eyring = eyring_rt60(volume, surface, alpha)
     # How much record the active backend will produce for THIS scene's decay, and
-    # the decay range that record therefore holds. Resolved through the caller's
-    # seam, so this module stays backend-agnostic (RD-144). Sabine, not Eyring: the
-    # longer T60 gives the smaller decay range, which errs toward refusing.
+    # the decay range that record therefore holds. Sabine, not Eyring: the longer
+    # T60 gives the smaller decay range, which errs toward refusing.
     support_s = float(realized_support_s(t60_sabine, volume, surface))
     available_decay_db = 60.0 * support_s / t60_sabine
-    # Room constant, critical distance and diffuse-field DRR come from
-    # `amcd.acoustics` for the AC-24 reason the T60s already did (RD-75): the
-    # scaffold now scales its reverberant tail from the SAME formulas, so the DRR
-    # this report publishes and the DRR the render realizes cannot diverge.
     r_c = critical_distance(surface, alpha)
 
-    # ISO 3382-1 §5.3 minimum measurement distance (AC-30): d_min = 2·sqrt(V/(c·T60)),
-    # which reduces to 2·sqrt(αS/(c·K)) for Sabine and the same with −ln(1−α) in place
-    # of α for Eyring — volume-independent (see `acoustics.min_measurement_distance`).
-    # Reported and counted rather than enforced: the criterion is PER SCENE, varying
-    # with each scene's own absorption and surface, while the config declares ONE
-    # global placement floor, so the floor cannot satisfy it everywhere. The
-    # per-scene criterion stays deferred; how far the floor falls short does not.
+    # ISO 3382-1 §5.3 minimum measurement distance. Reported and counted rather
+    # than enforced: the criterion is PER SCENE, varying with each scene's own
+    # absorption and surface, while the config declares ONE global placement
+    # floor, so no floor can satisfy it everywhere.
     #
-    # ABSORPTION-AREA CONVENTION (AC-51) — the two reverberant-field radii in this
-    # record descend from DIFFERENT conventions, and the record has to say so:
+    # ABSORPTION-AREA CONVENTION — the two reverberant-field radii in this record
+    # descend from DIFFERENT conventions, and the record has to say so:
     #   * `critical_distance_m` uses the Hopkins–Stryker room constant R = Sα/(1−α);
     #   * `iso_min_distance_*_m` descends from ISO's Sabine absorption area A = Sα.
-    # Against ISO's OWN radius sqrt(Sα/16π) the ratio is 1.907 at EVERY α — the
-    # standard's "d_min ≈ 2× the reverberation radius" rationale never depends on α
-    # and never inverts. What depends on α is the comparison against the radius THIS
-    # record publishes: d_min/r_c = 1.907·sqrt(1−α), which falls below 1 at α ≈
-    # 0.725. So `receiver_inside_critical_distance` and
-    # `below_iso_min_distance_sabine` swap which is the stricter flag there (the
-    # Eyring flag swaps at α ≈ 0.889). Neither number is wrong under its own
-    # definition, which is why both definitions are stated.
+    # Against ISO's OWN radius sqrt(Sα/16π) the ratio is 1.907 at every α. Against
+    # the radius THIS record publishes it is 1.907·sqrt(1−α), which falls below 1
+    # at α ≈ 0.725 — so `receiver_inside_critical_distance` and
+    # `below_iso_min_distance_sabine` swap which is stricter there. Neither number
+    # is wrong under its own definition, which is why both definitions are stated.
     d_min_sabine = min_measurement_distance(alpha, surface, "sabine")
     d_min_eyring = min_measurement_distance(alpha, surface, "eyring")
 
@@ -446,9 +405,8 @@ def _room_acoustics(
         "volume_m3": volume,
         "surface_m2": surface,
         "absorption": alpha,
-        # What the ACTIVE BACKEND builds from the nominal α above (AC-50/AC-54).
-        # Equal to it whenever the backend realizes what it is given; when it is
-        # not, every closed form in this record describes the declared room and
+        # What the ACTIVE BACKEND builds from the nominal α above. Where the two
+        # differ, every closed form in this record describes the declared room and
         # this is the one that was rendered.
         "absorption_realized": float(alpha_realized),
         "absorption_is_as_declared": bool(
@@ -458,15 +416,15 @@ def _room_acoustics(
         "t60_eyring_s": float(t60_eyring),
         # Hopkins–Stryker: r_c = sqrt(R/16π) with R = Sα/(1−α). See the
         # absorption-area note above for why this and `iso_min_distance_*_m` are
-        # not on one convention (AC-51).
+        # not on one convention.
         "critical_distance_m": r_c,
         "d_over_rc": distance / r_c if r_c > 0 else float("inf"),
-        # ISO's Sabine absorption area A = Sα — NOT the room constant above (AC-51).
+        # ISO's Sabine absorption area A = Sα — NOT the room constant above.
         "iso_min_distance_sabine_m": d_min_sabine,
         "iso_min_distance_eyring_m": d_min_eyring,
         # Diffuse-field DRR: direct 1/(4πd²) against the reverberant field 4/R.
         "drr_db": diffuse_field_drr_db(surface, alpha, distance),
-        # ── Validity indicators (AC-21) ──────────────────────────────────────
+        # ── Validity indicators ──────────────────────────────────────────────
         # Sabine and Eyring agree only for small α; the ratio is a direct,
         # assumption-free readout of how far the diffuse-field model is being
         # stretched.
@@ -477,45 +435,30 @@ def _room_acoustics(
         # the diagonal, up to sqrt(3)× larger. The exact per-scene condition is the
         # next flag.)
         "rc_exceeds_max_dim": bool(r_c > max(dims)),
-        # The SHARPEST per-scene condition (AC-29): inside r_c the receiver sits in
-        # the DIRECT field, so the diffuse-field DRR being reported has no
-        # reverberant field to divide by.
+        # The sharpest per-scene condition: inside r_c the receiver sits in the
+        # DIRECT field, so the diffuse-field DRR being reported has no reverberant
+        # field to divide by.
         "receiver_inside_critical_distance": bool(distance < r_c),
-        # AC-30's realized disclosure: this scene's own ISO 3382-1 §5.3 floor against
-        # the separation actually drawn. Both estimates are carried because they
-        # disagree substantially at high α, and the reader needs to see by how much.
+        # This scene's own ISO 3382-1 §5.3 floor against the separation actually
+        # drawn. Both estimates are carried because they disagree substantially at
+        # high α, and the reader needs to see by how much.
         "below_iso_min_distance_sabine": bool(distance < d_min_sabine),
         "below_iso_min_distance_eyring": bool(distance < d_min_eyring),
-        # AC-22's design-time record-length flag, re-founded on the BACKEND'S OWN
-        # REALIZED SUPPORT rather than on `ir_duration` (AC-175, AC-184).
-        #
-        # `ir_duration` is the window the pipeline ALLOCATES. It is not what a
-        # backend fills, and gating against it asks whether the decay fits a buffer
-        # instead of whether the record will hold the decay. On gsound those differ
-        # enormously: the adaptive energy trim closes the record as a sub-linear
-        # power of T60, so the captured fraction COLLAPSES as rooms get more
-        # reverberant, and the largest declared room's record is shorter than the
-        # T30 it is measuring. Against a 4.25 s `ir_duration` that scene passed;
-        # against realized support it does not.
+        # The design-time record-length flag, founded on the BACKEND'S OWN
+        # REALIZED SUPPORT rather than on `ir_duration`. `ir_duration` is the
+        # window the pipeline ALLOCATES, not what a backend fills, and on gsound
+        # the two differ enormously: the adaptive energy trim closes the record as
+        # a sub-linear power of T60, so the captured fraction collapses as rooms
+        # get more reverberant.
         #
         # The criterion is DECAY RANGE, not seconds, because that is what ISO
-        # 3382-1 states and what the estimator's own admissibility bound applies:
-        # a record holds 60·support/T60 dB of decay, and T30 needs 45 dB of it.
-        # `support_s` is resolved by the caller through the simulator seam, so this
-        # module names no backend (RD-144).
+        # 3382-1 states: a record holds 60·support/T60 dB of decay, and T30 needs
+        # 45 dB of it.
         #
-        # STILL NOT A MEASUREMENT (F-60). Sabine from geometry × a scalar α, erring
-        # long so the flag declares a scene unsupported rather than silently
-        # truncating it. Sabine also assumes a 4V/S mean free path and under-predicts
-        # decay in a disproportionate enclosure — base.yaml's corridor family. The
-        # realized check, a FITTED T30 against the realized record, is F-185; the
-        # per-render falsification of `support_s` itself is in the backend.
-        #
-        # α: nominal, as everywhere in this module (RD-144). Whether the backend
-        # realizes that α is the backend's own declared convention, and where it
-        # pre-compensates so the rendered room IS the declared room, this flag is
-        # evaluated at the right decay — which is what closes F-186. A backend that
-        # renders an uncorrected room decays longer than stated and this under-reads.
+        # STILL NOT A MEASUREMENT — Sabine from geometry × a scalar α, erring long
+        # so the flag declares a scene unsupported rather than silently truncating
+        # it. Sabine assumes a 4V/S mean free path and under-predicts decay in a
+        # disproportionate enclosure, such as the corridor family.
         "record_decay_range_db": available_decay_db,
         "record_support_s": support_s,
         "decay_range_below_iso_t30": bool(available_decay_db < iso_t30_decay_range_db),
@@ -526,12 +469,9 @@ def _room_acoustics(
 #: therefore skipped by `_disclose_and_gate_record_length` rather than scored.
 #:
 #: Empty today: every top-level key is currently a split. It is a DECLARED set
-#: rather than an assumption because the roadmap is actively pushing metadata into
-#: this artifact — AC-54/RD-144 want the absorption convention declared in it,
-#: RD-131 wants an AC-54 caveat there, and AC-30/AC-50's disclosure work invites
-#: more. A gate that hardcoded "every top-level key is a split" would foreclose
-#: that; one that indexes blindly raises a bare KeyError instead (S-F4). Adding a
-#: metadata key means adding it here, in the same commit.
+#: rather than an assumption because the roadmap keeps pushing metadata into this
+#: artifact, and a gate that hardcoded "every top-level key is a split" would
+#: foreclose that. Adding a metadata key means adding it here, in the same commit.
 #:
 #: The set is checked DISJOINT from the run's generation-plan regimes before it is
 #: applied. Skipping is silent by construction, so an entry here that names a real
@@ -545,9 +485,8 @@ def _regime_label(config: Config, name: str) -> str:
     """How to name one `placement_report.json` key in an operator-facing message.
 
     The report is keyed by generation-plan regime, and in frac mode the `id` key is
-    a POOL three declared splits wide. Calling it a "split" in a warning invites the
-    reader to hear `train` (S-F7) — the docstring above said so, but the docstring
-    is not what an operator reads.
+    a POOL three declared splits wide, so calling it a "split" in a warning
+    invites the reader to hear `train`.
     """
     if not config.id_pool_is_counted and name == "id":
         return f"regime 'id' (pools {'/'.join(config.id_pool_splits)})"
@@ -559,12 +498,12 @@ def _disclose_declared_support_corner(config: Config, verbosity) -> dict:
 
     Disclosure only — never a threshold. The corner is the product of two
     independent extremes (largest room, lowest absorption) and has near-zero
-    probability of being drawn, so gating on it would reject configs whose realized
-    scenes are all fine (RD-56).
+    probability of being drawn, so gating on it would reject configs whose
+    realized scenes are all fine.
 
     `Config.worst_case_t60` returns a reasoned `None` when no family declares
-    `characterization: sabine`; that is the config RD-112's gate warning is about,
-    and formatting it unconditionally is what once made that warning unreachable.
+    `characterization: sabine`, which must be formatted as such rather than
+    assumed numeric.
     """
     corner = config.worst_case_t60()
     if corner["t60_sabine_s"] is None:
@@ -593,13 +532,12 @@ def _warn_regimes_over_limit(
     """Name every regime whose OWN over-limit fraction exceeds the declared limit.
 
     `per_split` maps regime -> (over-limit count, scored, attempted). Three states
-    are distinguished rather than collapsed, because they are different facts:
-    a regime that generated nothing (S-F6), one whose scenes are all
-    uncharacterized so its fraction is UNDEFINED (RD-64/F-71), and one genuinely
-    over its limit (RD-65).
+    are distinguished rather than collapsed, because they are different facts: a
+    regime that generated nothing, one whose scenes are all uncharacterized so its
+    fraction is UNDEFINED, and one genuinely over its limit.
 
-    Warnings, not gates — the gate is the overall fraction (RD-56) — and emitted
-    BEFORE it can raise, so a failing run still names the regimes responsible.
+    Warnings, not gates — the gate is the overall fraction — and emitted BEFORE it
+    can raise, so a failing run still names the regimes responsible.
     """
     for name, (count, scored, attempted) in per_split.items():
         label = _regime_label(config, name)
@@ -607,13 +545,13 @@ def _warn_regimes_over_limit(
             emit(verbosity, "warning",
                  f"  WARNING: {label} generated 0 scenes, so the record-length gate "
                  f"has nothing to score for it. A declared split with no scenes is a "
-                 f"fact about this run — reported, not skipped (S-F6).")
+                 f"fact about this run — reported, not skipped.")
             continue
         if not scored:
             emit(verbosity, "warning",
                  f"  WARNING: {label}: 0 of {attempted} scenes are "
                  f"characterized, so its over-limit fraction is UNDEFINED — "
-                 f"reported as null, never as 0.0 (RD-64/F-71).")
+                 f"reported as null, never as 0.0.")
             continue
         frac = count / scored
         if frac > limit:
@@ -622,7 +560,7 @@ def _warn_regimes_over_limit(
                  f"exceed ir_duration {config.ir_duration} s — above this config's "
                  f"own scenes.max_frac_below_iso_t30_decay_range ({limit}). The gate is "
                  f"the OVERALL fraction and may still pass; a shift split far over on "
-                 f"its own is a fact about that split's decay distribution (RD-65).")
+                 f"its own is a fact about that split's decay distribution.")
 
 
 def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) -> None:
@@ -632,36 +570,34 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     Not on a measurement: `decay_range_below_iso_t30` is Sabine from geometry, and
     nothing in gen-scenes compares a RENDERED decay against `ir_duration`. The
     instrument's limitations are named at the flag's own definition in
-    `_room_acoustics`; the realized check is the F-60 residual (F-185). It is still
-    worth having as the only check that runs BEFORE a batch is rendered.
+    `_room_acoustics`. It is still worth having as the only check that runs BEFORE
+    a batch is rendered.
 
-    AC-22 in the shape RD-56 settled. The two halves differ in kind: the CORNER
-    (`Config.worst_case_t60`) is the product of two independent extremes and has
-    near-zero probability of being drawn, so it is printed and stamped, never used
-    as a threshold; the GATE is `scenes.max_frac_below_iso_t30_decay_range` applied to
-    the scenes that actually exist, which is the population the metrics are
-    computed over.
+    The two halves differ in kind. The CORNER (`Config.worst_case_t60`) is the
+    product of two independent extremes and has near-zero probability of being
+    drawn, so it is printed and stamped, never used as a threshold. The GATE is
+    `scenes.max_frac_below_iso_t30_decay_range` applied to the scenes that actually
+    exist, which is the population the metrics are computed over.
 
-    The gate is the OVERALL fraction, the disclosure per split (RD-56): a per-split
+    The gate is the OVERALL fraction and the disclosure is per split: a per-split
     gate would let the smallest split set the tolerance for every other one. Every
-    split over the limit is still WARNED about unconditionally, whether or not the
-    overall gate trips, because the per-shift breakdown IS the research result
-    (RD-65).
+    split over the limit is warned about unconditionally, whether or not the
+    overall gate trips, because the per-shift breakdown IS the research result.
 
     `report` is keyed by generation-plan REGIME, not declared split — in frac mode
     `train`/`valid`/`test_id` are pooled as one `id` entry and separated later by
-    `data/splits.py`; in count mode each is its own entry (S-F7). The messages
-    below say which they mean.
+    `data/splits.py`; in count mode each is its own entry. The messages below say
+    which they mean.
 
     Scores only CHARACTERIZED scenes (rule at `_scene_is_characterized`); a gate
-    that scored none is UNSCORED, never passed (F-71/RD-112).
+    that scored none is UNSCORED, never passed.
     """
     corner = _disclose_declared_support_corner(config, verbosity)
     limit = config.scenes.max_frac_below_iso_t30_decay_range
 
-    # S-F4, the OVER-declared direction. Skipping is silent by construction, so a
-    # real regime named here would leave the warning loop and the gate sums with no
-    # error at all. Checked before the set is used, against the run's own plan.
+    # The over-declared direction: skipping is silent by construction, so a real
+    # regime named in `_NON_SPLIT_REPORT_KEYS` would leave both the warning loop
+    # and the gate sums with no error at all.
     regimes = {entry[0] for entry in _generation_plan(config)}
     masked = regimes & _NON_SPLIT_REPORT_KEYS
     if masked:
@@ -677,7 +613,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     for name, entry in report.items():
         if name in _NON_SPLIT_REPORT_KEYS:
             continue
-        # Diagnosed, not a bare KeyError from the next line (S-F4).
+        # Diagnosed, not a bare KeyError from the next line.
         if not isinstance(entry, dict) or "record_decay_range" not in entry:
             raise ValueError(
                 f"placement_report key {name!r} is neither a split record nor a "
@@ -691,9 +627,8 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
         block = entry["record_decay_range"]
         attempted = entry["n_scenes"]
         # `_flag_counts` PUBLISHES the scored count as the block's own `n_scenes`.
-        # Read it, and cross-check against the emit-iff-nonzero `n_uncharacterized`
-        # contract rather than deriving from that contract alone — a change to
-        # `_flag_counts` must then break the gate loudly, not silently (RD-113).
+        # Read it, and cross-check against the derived count rather than deriving
+        # alone — a change to `_flag_counts` must break the gate loudly.
         derived = attempted - block.get("n_uncharacterized", 0)
         scored = block.get("n_scenes", derived)
         if scored != derived:
@@ -702,7 +637,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
                 f"{scored} but its own counts imply {derived} "
                 f"(n_scenes {attempted} − n_uncharacterized "
                 f"{block.get('n_uncharacterized', 0)}). Two expressions for the "
-                f"scored denominator have diverged (AC-24 shape); the gate refuses "
+                f"scored denominator have diverged; the gate refuses "
                 f"to pick one."
             )
         per_split[name] = (block["decay_range_below_iso_t30"]["count"], scored, attempted)
@@ -714,7 +649,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
     attempted_total = sum(attempted for _, _, attempted in per_split.values())
     if not total:
         # Falling through here would be a silent pass over a gate that measured
-        # nothing (RD-112).
+        # nothing.
         if attempted_total:
             # The cause is what this run GENERATED, not what the config declares: a
             # config can declare a `sabine` family and still generate no scene from
@@ -737,7 +672,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
                  f"scenes — no scene in this run came from a family declaring "
                  f"characterization: sabine, so no closed-form T60 exists to compare "
                  f"against ir_duration {config.ir_duration} s.{lever} The gate is "
-                 f"UNSCORED, not passed (RD-112).")
+                 f"UNSCORED, not passed.")
         return
 
     if total != attempted_total:
@@ -748,8 +683,8 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
         emit(verbosity, "warning",
              f"  WARNING: the record-length gate scored {total} of "
              f"{attempted_total} scenes; {attempted_total - total} are excluded as "
-             f"uncharacterized (RD-64) and their record-length adequacy is UNCHECKED "
-             f"(AC-53). The verdict below covers the scored scenes only.")
+             f"uncharacterized and their record-length adequacy is UNCHECKED. "
+             f"The verdict below covers the scored scenes only.")
     if (over / total) > limit:
         lines = "\n".join(
             f"    {name}: {count}/{scored} scenes"
@@ -758,7 +693,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
         excluded = attempted_total - total
         exclusion = (
             f"\n{excluded} of {attempted_total} scenes are excluded from this "
-            f"fraction as uncharacterized (RD-64)." if excluded else ""
+            f"fraction as uncharacterized." if excluded else ""
         )
         raise ValueError(
             f"{over} of {total} scenes ({over / total:.3%}) get less than "
@@ -768,7 +703,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
             f"{lines}{exclusion}\n"
             f"This is measured against the backend's DECLARED REALIZED SUPPORT, not "
             f"against ir_duration ({config.ir_duration} s), which is only the window "
-            f"allocated (AC-175, AC-184). A backend whose record is shorter than the "
+            f"allocated. A backend whose record is shorter than the "
             f"window will fail here while appearing to 'fit'.\n"
             f"A T30/EDT fitted over a truncated record measures the truncation, not "
             f"the room. Narrow the geometry/absorption ranges, "
@@ -780,7 +715,7 @@ def _disclose_and_gate_record_length(config: Config, report: dict, verbosity) ->
 
 
 def _scene_is_characterized(room: dict, flags: tuple[str, ...]) -> bool:
-    """True for a `characterization: sabine` scene, False for a `none` one (RD-64):
+    """True for a `characterization: sabine` scene, False for a `none` one:
     a non-enclosure carries a reason instead of the closed-form quantities `flags`
     describe, so it can be counted neither for nor against them."""
     return all(flag in room for flag in flags)
@@ -798,9 +733,9 @@ def _flag_counts(
     Reported as counts rather than a bare boolean so a reader sees how much of a
     split is affected: "all of a split is outside the diffuse-field domain" and
     "one scene is" are very different disclosures, and the flag alone cannot tell
-    them apart (AC-21/AC-22).
+    them apart.
 
-    `uncharacterized_consequence` is REQUIRED, not defaulted (AC-53): what the
+    `uncharacterized_consequence` is REQUIRED, not defaulted: what the
     exclusion COSTS differs per block, so a default would hand a new block a
     sentence that does not describe it — the silent exclusion this project forbids.
     Keyword-only and outside `**context`, so it shapes the note rather than landing
@@ -820,7 +755,7 @@ def _flag_counts(
         out["uncharacterized_note"] = (
             "scenes whose geometry family declares characterization: none are "
             "excluded from these fractions — the closed-form model they measure "
-            f"does not apply to a non-enclosure (RD-64). {uncharacterized_consequence}"
+            f"does not apply to a non-enclosure. {uncharacterized_consequence}"
         )
     for flag in flags:
         count = sum(1 for r in modelled if r[flag])
@@ -847,41 +782,39 @@ def _summarize(values: list[float]) -> dict:
 def run_gen_scenes(config: Config, run_dir: Path, ctx: RunContext) -> None:
     """Generate the config's scene specs; write them and `placement_report.json`.
 
-    Clears stale `scene_*.json` first (F-27), then writes one spec per scene plus
-    the canonical per-split report into `run_dir/scenes/`.
+    Clears stale `scene_*.json` first, then writes one spec per scene plus the
+    canonical per-split report into `run_dir/scenes/`.
 
     Raises `ValueError` from the record-length gate if the config's realized draws
     breach `scenes.max_frac_below_iso_t30_decay_range`. No stage sentinel is written in
     that case, so render will not proceed past it.
     """
-    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
     verbosity = ctx.verbosity
     out_dir = run_dir / "scenes"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Remove any previously generated specs before writing this set (F-27).
     # Scene ids are positional (`scene_0000`…), so regenerating with FEWER scenes
-    # leaves high-numbered orphans behind; render and preprocess glob the
-    # directory and would pull them into the dataset, under a different config,
-    # while placement_report.json declared the smaller set.
+    # leaves high-numbered orphans that render and preprocess would glob into the
+    # dataset under a different config, while placement_report.json declared the
+    # smaller set.
     for stale in out_dir.glob("scene_*.json"):
         stale.unlink()
 
     # Config-level pre-flight: no scene is generated under a placement regime the
-    # active backend could not render (AC-13/F-48/RD-45).
+    # active backend could not render.
     _check_regimes_clear_backend_floor(config)
     _check_eval_bands_against_the_backend(config)
 
-    # The record-length gate's denominator (AC-175, AC-184). Resolved ONCE here and
-    # passed down as a plain callable, so `_room_acoustics` never touches the
-    # registry and this module still names no backend (RD-144). Validation of the
-    # declaration happens on the first call, before any scene is written.
+    # The record-length gate's denominator. Resolved once here and passed down as
+    # a plain callable, so `_room_acoustics` never touches the registry and this
+    # module names no backend. The declaration is validated on the first call,
+    # before any scene is written.
     def support_of(t60_s: float, volume_m3: float, surface_m2: float) -> float:
         return simulator_realized_support_s(
             config, t60_s, volume_m3, surface_m2, config.ir_duration)
 
-    # The other backend fact this module must record without naming a backend
-    # (AC-50): what the renderer's room actually absorbs, given a nominal alpha.
+    # The other backend fact this module records without naming a backend: what
+    # the renderer's room actually absorbs, given a nominal alpha.
     def realized_alpha_of(alpha_nominal: float) -> float:
         return simulator_realized_absorption(config, alpha_nominal)
 
@@ -908,12 +841,10 @@ def run_gen_scenes(config: Config, run_dir: Path, ctx: RunContext) -> None:
         rejected = {"below_min": 0, "above_max": 0}
         unreachable_max = 0
         room_stats: list[dict] = []
-        # (scene, reason) for every scene this stage could not characterize — the
-        # per-unit pair the project requires, mirroring the eval stage's drops.csv
-        # and probe.py's `dropped`. Before AC-153 the reason existed only in memory:
-        # `room_stats` reaches the report through `_summarize` (numeric keys) and
-        # `_flag_counts` (booleans), so the string died there and the disclosure
-        # survived only as an aggregate count.
+        # (scene, reason) for every scene this stage could not characterize,
+        # mirroring the eval stage's drops.csv. `room_stats` reaches the report
+        # only through `_summarize` (numeric) and `_flag_counts` (boolean), so
+        # without this the reason would survive only as an aggregate count.
         uncharacterized: list[dict[str, str]] = []
 
         for _ in range(count):
@@ -976,33 +907,30 @@ def run_gen_scenes(config: Config, run_dir: Path, ctx: RunContext) -> None:
         report[split_regime] = {
             "n_scenes": count,
             "seed": split_seed,
-            # AC-153: the per-scene (unit, reason) pairs, emitted ONLY when
-            # non-empty — same emit-iff discipline as `n_uncharacterized`, so a
-            # fully characterized split carries no empty list and the canonical
-            # report is unchanged. The aggregate lives in each flag block's
-            # `n_uncharacterized`; this is the per-unit record underneath it.
+            # The per-scene (unit, reason) pairs, emitted only when non-empty so
+            # a fully characterized split carries no empty list. The aggregate is
+            # each flag block's `n_uncharacterized`; this is the record under it.
             **({"uncharacterized": uncharacterized} if uncharacterized else {}),
             "placement_regime": axes["placement"],
             "height_range_declared": regime.height_range,
             "distance_range_declared": regime.distance_range,
             "placement_attempts": attempts_total,
             "acceptance_rate": (count / attempts_total) if attempts_total else None,
-            # Split by SIDE (AC-14): rejecting below the minimum strips close,
-            # high-DRR pairs; rejecting above the maximum strips distant, low-DRR
-            # ones. Shoeboxes reject mostly below and corridors mostly above, so
-            # one pooled rate hides which tail of the DRR distribution was cut.
+            # Split by SIDE: rejecting below the minimum strips close, high-DRR
+            # pairs; rejecting above the maximum strips distant, low-DRR ones.
+            # Shoeboxes reject mostly below and corridors mostly above, so one
+            # pooled rate hides which tail of the DRR distribution was cut.
             "rejected_below_min": rejected["below_min"],
             "rejected_above_max": rejected["above_max"],
             "rooms_that_cannot_reach_max_distance": unreachable_max,
             "source_receiver_distance_m": _summarize(distances) if distances else None,
-            # Source and receiver kept SEPARATE (AC-10): pooling them hid a
-            # corner-bias bug that collapsed only the receiver height band.
+            # Source and receiver kept SEPARATE: a placement regime may bias one
+            # and not the other, and pooling would hide it.
             "source_height_m": _summarize(src_heights) if src_heights else None,
             "receiver_height_m": _summarize(rcv_heights) if rcv_heights else None,
-            # The DRR-relevant descriptors (AC-09) — see _room_acoustics. Guarded
-            # like the three siblings above (F-46): `_summarize` reduces over the
-            # list, so an empty split reached numpy's bare "zero-size array to
-            # reduction operation minimum" instead of a named, readable summary.
+            # The DRR-relevant descriptors — see `_room_acoustics`. Guarded like
+            # the siblings above: `_summarize` reduces over the list, so an empty
+            # split would raise numpy's bare zero-size-reduction error.
             **{
                 f"{key}": (
                     _summarize([r[key] for r in room_stats if key in r])
@@ -1014,12 +942,11 @@ def run_gen_scenes(config: Config, run_dir: Path, ctx: RunContext) -> None:
                             "sabine_eyring_ratio", "iso_min_distance_sabine_m",
                             "iso_min_distance_eyring_m")
             },
-            # WHICH ROOM THE BLOCK ABOVE DESCRIBES (AC-50/AC-54). Every quantity in
-            # it — T60, r_c, DRR, both d_min variants — is a closed form in the
-            # NOMINAL absorption, and whether the renderer builds that room is the
-            # backend's convention, not this module's. Counted rather than asserted
-            # so a split that is partly rendered under a different absorption than it
-            # declares cannot read as fully faithful.
+            # WHICH ROOM THE BLOCK ABOVE DESCRIBES. Every quantity in it — T60,
+            # r_c, DRR, both d_min variants — is a closed form in the NOMINAL
+            # absorption, and whether the renderer builds that room is the
+            # backend's convention. Counted rather than asserted, so a split partly
+            # rendered under a different absorption cannot read as fully faithful.
             "absorption_as_declared": _flag_counts(
                 room_stats, ("absorption_is_as_declared",),
                 uncharacterized_consequence=(
@@ -1028,10 +955,9 @@ def run_gen_scenes(config: Config, run_dir: Path, ctx: RunContext) -> None:
                     "backend still renders it under whatever convention it declares."
                 ),
             ),
-            # Validity of the estimates directly above (AC-21) and of the record
-            # length against them (AC-22). Counts, not just a flag, so the reader
-            # sees HOW MUCH of a split is outside the diffuse-field domain rather
-            # than only that some of it is.
+            # Validity of the estimates directly above, and of the record length
+            # against them. Counts rather than a flag, so the reader sees HOW MUCH
+            # of a split is outside the diffuse-field domain.
             "diffuse_field_validity": _flag_counts(
                 room_stats,
                 ("alpha_above_diffuse_limit", "rc_exceeds_max_dim",
@@ -1048,16 +974,15 @@ def run_gen_scenes(config: Config, run_dir: Path, ctx: RunContext) -> None:
             "record_decay_range": _flag_counts(
                 room_stats, ("decay_range_below_iso_t30",),
                 uncharacterized_consequence=(
-                    f"For each of them {_RECORD_LENGTH_UNCHECKED} (AC-53). The "
+                    f"For each of them {_RECORD_LENGTH_UNCHECKED}. The "
                     f"n_uncharacterized count above is the number of scenes nothing "
                     f"checked."
                 ),
                 iso_t30_decay_range_db=config.scenes.iso_t30_decay_range_db,
             ),
-            # AC-30: the REALIZED shortfall of the single global placement floor
-            # against the per-scene ISO 3382-1 §5.3 minimum, so the E1 report
-            # discloses it as measured rather than asserting compliance. The
-            # declared floor lives in the config; this is what it bought.
+            # The REALIZED shortfall of the single global placement floor against
+            # the per-scene ISO 3382-1 §5.3 minimum, so the E1 report can disclose
+            # it as measured rather than assert compliance.
             "below_iso_min_distance": _flag_counts(
                 room_stats,
                 ("below_iso_min_distance_sabine", "below_iso_min_distance_eyring"),
@@ -1075,15 +1000,15 @@ def run_gen_scenes(config: Config, run_dir: Path, ctx: RunContext) -> None:
             ),
         }
 
-    # Canonical, not verbosity-gated. Two jobs: it is the rejection-sampling
-    # accounting ("nothing leaves a result silently" — how many draws were
-    # discarded to satisfy distance_range, RD-37), and it QUANTIFIES the realized
-    # source-receiver distance distribution per split. The latter is what lets the
-    # E1 report state exactly which distance distribution stood in for Research
-    # I's unspecified mid_pair/far_pair sub-ranges (RD-29).
-    # Every top-level key here is a SPLIT RECORD. A metadata key must be declared in
-    # `_NON_SPLIT_REPORT_KEYS` in the same commit that writes it, or the gate below
-    # refuses the report (S-F4).
+    # Canonical, not verbosity-gated. Two jobs: the rejection-sampling accounting
+    # (how many draws were discarded to satisfy distance_range), and the realized
+    # per-split source-receiver distance distribution — which is what lets the E1
+    # report state exactly what stood in for Research I's unspecified mid_pair /
+    # far_pair sub-ranges.
+    #
+    # Every top-level key here is a SPLIT RECORD. A metadata key must be declared
+    # in `_NON_SPLIT_REPORT_KEYS` in the same commit that writes it, or the gate
+    # below refuses the report.
     (out_dir / "placement_report.json").write_text(json.dumps(report, indent=2))
 
     _disclose_and_gate_record_length(config, report, verbosity)

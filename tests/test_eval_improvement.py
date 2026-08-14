@@ -1,9 +1,9 @@
-"""Per-metric improvement kill tests (ledger F-07, F-08).
+"""Per-metric improvement kill tests.
 
-KT-1 proves the improvement flag is computed PER METRIC from that metric's own
-(low, pred, high) triple — a metric can never inherit another metric's flag
-(F-07). KT-2 proves the stats improvement pct is bounded [0, 100] even with a
-NaN-bearing group, the exact `test_geometry_shift/C50 = 150%` pathology (F-08).
+The improvement flag is computed PER METRIC from that metric's own
+(low, pred, high) triple — a metric can never inherit another metric's flag —
+and the stats improvement pct stays bounded [0, 100] even with a NaN-bearing
+group, the `test_geometry_shift/C50 = 150%` pathology.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from tests.conftest import QUIET, tiny_config
 
 
 def test_improvement_is_per_metric_not_borrowed() -> None:
-    """KT-1 (F-07): a scene where energy MSE improves but T30 worsens must report
+    """A scene where energy MSE improves but T30 worsens must report
     improved=True for energy and improved=False for T30 — no shared flag."""
     # energy_mse: high_ref = 0, pred closer to 0 than baseline → improved.
     energy = MetricTriple(low=4.0, pred=1.0, high=0.0, kind="match_reference", unit="s")
@@ -33,15 +33,14 @@ def test_improvement_is_per_metric_not_borrowed() -> None:
 
     assert energy_improved is True, "energy MSE should improve on this triple"
     assert t30_improved is False, (
-        "T30 worsened but reported improved — the flag was borrowed from energy (F-07)"
+        "T30 worsened but reported improved — the flag was borrowed from energy"
     )
     assert energy_ratio > 1.0 and t30_ratio < 1.0
 
 
 def test_undefined_improvement_is_none_not_false() -> None:
     """A NaN in any CONSUMED leg of the triple → improvement undefined (None), never
-    False — so `stats` excludes it from BOTH numerator and denominator (F-08
-    precondition)."""
+    False — so `stats` excludes it from BOTH numerator and denominator (precondition)."""
     for triple in (
         MetricTriple(np.nan, np.nan, np.nan, kind="match_reference", unit="s"),
         MetricTriple(np.nan, 12.3, np.nan, kind="match_reference", unit="s"),  # missing baseline+ref
@@ -54,7 +53,7 @@ def test_undefined_improvement_is_none_not_false() -> None:
 
 
 def test_maximize_minimize_improvement_semantics() -> None:
-    """F-20: a maximize/minimize metric scores from (low, pred) alone — the high
+    """A maximize/minimize metric scores from (low, pred) alone — the high
     reference leg is structurally absent (NaN) and must NOT unscore it (that NaN
     is exactly what unscored energy_snr_db pre-fix). Pre-fix behaviour returns
     None here; the kind taxonomy returns a real flag."""
@@ -72,7 +71,7 @@ def test_maximize_minimize_improvement_semantics() -> None:
 
 
 def test_unknown_kind_fails_loud() -> None:
-    """No hidden default (F-20): an undeclared/unknown kind is an error, never a
+    """No hidden default: an undeclared/unknown kind is an error, never a
     silent fall-back to match-reference."""
     bad = MetricTriple(1.0, 2.0, 3.0, kind="best_effort", unit="s")
     with pytest.raises(ValueError, match="kind"):
@@ -94,7 +93,7 @@ def test_paired_improvement_sign_consistent_for_maximize_minimize() -> None:
 
 
 def test_pct_improved_bounded_with_nan_group() -> None:
-    """KT-2 (F-08): a (split, metric) group of 3 scenes with one NaN row must yield
+    """A (split, metric) group of 3 scenes with one NaN row must yield
     pct_improved ∈ [0, 100]. Pre-fix, n=2 (NaN dropped) while n_improved counted the
     full group → 150%."""
     cfg = tiny_config()
@@ -130,12 +129,12 @@ def test_pct_improved_bounded_with_nan_group() -> None:
         if r["n_scored"] > 0:
             assert 0.0 <= r["pct_improved"] <= 100.0, (
                 f"{r['metric']}: pct_improved={r['pct_improved']} out of [0,100] "
-                f"(n_improved={r['n_improved']}, n_scored={r['n_scored']}) — F-08"
+                f"(n_improved={r['n_improved']}, n_scored={r['n_scored']})"
             )
 
 
 def test_pct_bounded_when_improved_column_is_pure_bool() -> None:
-    """Guard the currently-implicit dtype invariant: the F-08 bound must hold even
+    """Guard the currently-implicit dtype invariant: the bound must hold even
     when `improved` round-trips as pure `bool` (no None anywhere — the case when
     every metric is defined for every scene and no diagnostic-only metric injects
     None). Pins `improved.notna()` + `== True` against a silent dtype regression."""

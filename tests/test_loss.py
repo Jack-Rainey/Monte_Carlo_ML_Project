@@ -1,6 +1,6 @@
 """Loss-construction invariants (design_spec §2 H2, §3, invariant #7 "δ vs signal scale").
 
-These are the F-01 kill probes: they prove the Huber knee δ, quoted in dB in config,
+These are the kill probes: they prove the Huber knee δ, quoted in dB in config,
 stays O(1)-meaningful in the z-scored domain the trainer actually optimizes — i.e. the
 loss does NOT silently degenerate to MSE (the H2 pathology).
 """
@@ -19,7 +19,7 @@ def test_delta_db_to_norm_preserves_db_threshold() -> None:
 
 
 def test_huber_delta_active_in_training_domain() -> None:
-    """The falsifier's F-01 kill-or-confirm probe, on the REAL (trainer) operands.
+    """Kill-or-confirm: is the Huber δ inert on the REAL (trainer) operands?
 
     Draw a realistic residual distribution in dB (std ~3 dB), express it in the
     z-scored domain the criterion sees, and assert a materially non-trivial fraction

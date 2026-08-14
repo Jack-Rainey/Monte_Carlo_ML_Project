@@ -29,21 +29,21 @@ from amcd.simulators.base import SceneSpec
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _OVERLAYS = _REPO_ROOT / "configs" / "overlays"
 #: The suite composes the same layers a dry-run invocation does, in the same
-#: order, so the backend is declared in exactly one file repo-wide (RD-51) and
+#: order, so the backend is declared in exactly one file repo-wide and
 #: tests cannot pass against a switch that has drifted from the real one.
 SIMULATOR_DRY_RUN = _OVERLAYS / "simulator_dry_run.yaml"
 TEST_TINY = _OVERLAYS / "test_tiny.yaml"
 
 #: The canonical dry-run invocation as a layer list, so a test that means "the
 #: documented dry run" says so once instead of restating three paths that could
-#: fall out of step with the README and the F-51 error message.
+#: fall out of step with the README and the error message.
 CANONICAL_DRY_RUN = (_BASE_YAML, SIMULATOR_DRY_RUN, _OVERLAYS / "dry_run.yaml")
 
-#: The reported metric band set, read from the config that governs it (RD-187).
+#: The reported metric band set, read from the config that governs it.
 #:
 #: `build_representation` takes it as a cross-cutting argument beside `sample_rate`,
 #: so a probe that wants a representation has to supply one. Read rather than
-#: written as `[500.0, 1000.0]`: the whole point of RD-187 is that this set is
+#: written as `[500.0, 1000.0]`: the point of the seam is that this set is
 #: declared ONCE, and a test-file literal would be the third declaration.
 EVAL_FREQS: list[float] = [
     float(f) for f in yaml.safe_load(_BASE_YAML.read_text())["iso_eval_freqs"]
@@ -62,12 +62,12 @@ def tiny_cli_args() -> list[str]:
     return args
 
 # Stage functions require an explicit Verbosity (no default outside the CLI
-# layer — RD-09). Verbosity is a runtime output level, never an
+# layer). Verbosity is a runtime output level, never an
 # experiment-governing value (CLAUDE.md), so a shared constant here does not
 # violate the no-values-in-conftest rule. save=0 doubles as a standing check
-# of the F-23 guarantee: every canonical artifact tests rely on must exist at
+# of the guarantee: every canonical artifact tests rely on must exist at
 # the lowest save level.
-#: The runtime context every stage function and `Pipeline` takes (RD-20). A
+#: The runtime context every stage function and `Pipeline` takes. A
 #: `RunContext`, not a bare `Verbosity`: the dispatch signature is
 #: `(config, run_dir, ctx)`, and a test that passed the verbosity directly
 #: would be asserting against a signature the pipeline does not use.

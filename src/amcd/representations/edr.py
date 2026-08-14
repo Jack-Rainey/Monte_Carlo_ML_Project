@@ -27,7 +27,7 @@ class EDRRepresentation:
         self.sample_rate = sample_rate
         #: The reported metric bands (`config.iso_eval_freqs`). Accepted and unused:
         #: `build_representation` passes it to every representation so a rep that
-        #: NEEDS it never has to grow its own copy of the band set (RD-187).
+        #: NEEDS it never has to grow its own copy of the band set.
         self.eval_freqs_hz = list(eval_freqs_hz)
 
     @property

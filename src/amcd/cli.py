@@ -21,12 +21,12 @@ def main() -> None:
 
 
 def common_options(fn):
-    """The option set shared by every stage command and `all` (RR-19).
+    """The option set shared by every stage command and `all`.
 
     The two verbosity defaults are the sanctioned exception to
     no-hidden-defaults (CLAUDE.md "Output verbosity is not an experiment
     value"): runtime output levels only, quarantined to this CLI layer —
-    `Config` never carries them (RD-09). Default 1 on both axes is the
+    `Config` never carries them. Default 1 on both axes is the
     provenance/timing rung, so a bare invocation is non-blocking yet never
     lacks reproducibility metadata (config snapshot, seeds, git SHA,
     timings); save=0 deliberately omits provenance and is never a default.
@@ -94,7 +94,7 @@ def _invoke(
     emit(verbosity, "timing", f"Run dir: {run_dir.resolve()}")
     # The CLI is where the runtime context is ASSEMBLED — it is the layer that
     # knows the machine and the invocation, which is exactly what RunContext
-    # carries and Config must not (RD-20).
+    # carries and Config must not.
     pipeline = Pipeline(cfg, run_dir, RunContext(verbosity), force=force)
     if stage is None:
         pipeline.run_all()

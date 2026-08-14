@@ -6,7 +6,7 @@
 # Propagation speed the scaffold uses to place the direct arrival at d/c, and
 # declares into canonical render provenance. Config-governed BECAUSE the scaffold
 # genuinely obeys it — unlike gsound, whose 344 m/s is compiled into C++ and can
-# therefore only be DECLARED, never configured (ledger RD-19).
+# therefore only be DECLARED, never configured.
 #
 # 343.0 is the textbook value at 20 °C. The ~1 m/s difference from gsound is
 # immaterial to every current consumer: at the largest source-receiver separation

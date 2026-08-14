@@ -32,8 +32,8 @@ model:
 # ── Audio ─────────────────────────────────────────────────────────────────────
 sample_rate: 48000
 # The record must be long enough for the longest decay this config's own declared
-# scene support admits, or T30/EDT measure the truncation rather than the room
-# (AC-22). The worst corner here is the largest shoebox at the lowest absorption —
+# scene support admits, or T30/EDT measure the truncation rather than the room.
+# The worst corner here is the largest shoebox at the lowest absorption —
 # 12 x 10 x 5 m (V = 600 m3, S = 460 m2) at alpha = 0.05 → Sabine T60 = 4.20 s —
 # so 3.0 s (the Research I value) did NOT cover base's support. 4.25 s covers it
 # with margin rather than by equality. Config load recomputes this corner from the
@@ -46,12 +46,12 @@ ir_duration: 4.25
 ambisonics_order: 3
 
 # ── Simulation ray budgets ────────────────────────────────────────────────────
-# (RD-12) These are DIFFUSE ray counts: they drive gsound's `diffuse_count`, while
+# These are DIFFUSE ray counts: they drive gsound's `diffuse_count`, while
 # `specular_count` is declared in configs/simulators/gsound_sir.yaml and held fixed
 # across both legs. So "ray budget" always means the diffuse budget, never a total.
-# They stay TOP-LEVEL rather than moving into the simulator block (RD-40): as the
+# They stay TOP-LEVEL rather than moving into the simulator block: as the
 # swept research axis they must survive a simulator name change, and a plugin
-# block's params do not (F-11 name-change scoping).
+# block's params do not (name-change scoping).
 low_ray_budget: 5000        # low leg — swept-capable research axis (E4)
 high_ray_budget: 200000     # converged reference — fixed
 
@@ -72,7 +72,7 @@ scenes:
   # Per-axis clearance (m) keeping sources/receivers off the surfaces. Kept
   # uniform at 0.5 here: Research I's asymmetric 0.3 m ceiling margin belongs to
   # configs/research_i.yaml, and putting it here would silently re-generate every
-  # existing dry-run dataset (RD-36).
+  # existing dry-run dataset.
   margins:
     wall: 0.5
     floor: 0.5
@@ -81,11 +81,11 @@ scenes:
   # Exceeding it raises with the geometry that made the constraint unreachable.
   max_placement_attempts: 1000
   # Largest fraction of generated scenes whose record cannot hold an admissible
-  # decay (AC-22). ZERO here: "the record covers the scene" is enforced rather than
+  # decay. ZERO here: "the record covers the scene" is enforced rather than
   # asserted. A run that trips this has widened the geometry/absorption ranges, or
   # is using a backend whose realized record is shorter than the window.
   #
-  # NOTE, and it is the point of AC-175/AC-184: this now binds against the ACTIVE
+  # NOTE, and it is the point: this binds against the ACTIVE
   # BACKEND'S REALIZED SUPPORT, not against `ir_duration`. Under `dry_run` the two
   # coincide, because the scaffold fills its whole window. Under `gsound_sir` they
   # do not, and a config that passed at 4.25 s can fail here — correctly.
@@ -99,14 +99,14 @@ scenes:
   #
   # The rate was 2.8% (17/600) until 2026-08-13 and the difference is not drift:
   # the law behind it predicted realized support from T60, and a crossed probe
-  # measured T60's effect on the record at 0.00-0.49% (AC-186). The old law
+  # measured T60's effect on the record at 0.00-0.49%. The old law
   # under-counted the very censoring this key exists to bound. Note that
   # configs/research_i.yaml now measures 5.56% against the same 0.05 and is
   # REFUSED — see design_spec 11.2; that is an open research decision, not a
   # number to be tuned until it passes.
   #
   # It is NOT hidden by this number. Those scenes still render; their T30 comes back
-  # unscored WITH A REASON from the estimator's own ISO bound (AC-176), and the
+  # unscored WITH A REASON from the estimator's own ISO bound, and the
   # per-split scored-vs-attempted counts carry it into the report. The gate is a
   # regression tripwire on the censoring RATE; the censoring itself is disclosed.
   max_frac_below_iso_t30_decay_range: 0.05
@@ -116,7 +116,7 @@ scenes:
   # same question at design time and measurement time, and should agree.
   iso_t30_decay_range_db: 45.0
   # Absorption above which the diffuse-field closed forms (Sabine, Eyring, critical
-  # distance, DRR) become extrapolations rather than estimates (AC-21). ~0.3 is the
+  # distance, DRR) become extrapolations rather than estimates. ~0.3 is the
   # usual textbook limit. Scenes above it are FLAGGED in placement_report.json and
   # summarized per split — never dropped, and no formula changes — so the E1 reader
   # can see when a reported DRR comes from a model whose premise has failed.
@@ -126,7 +126,7 @@ scenes:
     # shoebox's so geometry_shift is a genuine held-out region.
     # `characterization` states which closed-form model applies; no default, so an
     # outdoor / partially-open family (paper §6) cannot silently inherit closed-box
-    # Sabine numbers (RD-64).
+    # Sabine numbers.
     shoebox:  { dims: [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]], characterization: sabine }
     corridor: { dims: [[15.0, 30.0], [1.5, 3.0], [2.4, 3.5]], characterization: sabine }
   placement_regimes:
@@ -136,7 +136,7 @@ scenes:
     # here — Research I's 1.2-1.8 m is pinned in configs/research_i.yaml, the
     # config that claims RI faithfulness.
     #
-    # `distance_range` is NOT left unconstrained (F-48/AC-13). Both regimes
+    # `distance_range` is NOT left unconstrained. Both regimes
     # declare a 1.0 m MINIMUM with no maximum ([lo, null]). Three reasons, in
     # order of weight:
     #   1. Acoustics. At d = 0.3 m in a mid-sized base room (S ~ 200 m2, alpha 0.2
@@ -146,7 +146,7 @@ scenes:
     #      near-field sub-population where the denoising task is trivially easy.
     #      1.0 m sits near DRR ~ 0 dB.
     #
-    #      CAVEAT ON THAT ARITHMETIC (AC-60). 20*log10(r_c/d) is the textbook
+    #      CAVEAT ON THAT ARITHMETIC. 20*log10(r_c/d) is the textbook
     #      INVERSE-SQUARE DRR, and the pinned upstream backend does not implement
     #      inverse-square: gsSoundPropagator.cpp computes geometric spreading as
     #      1/(4*pi*(1 + d^2)), not 1/(4*pi*d^2). Direct-path energy error against
@@ -163,7 +163,7 @@ scenes:
     #      to 2*sqrt(alpha*S/(c*K)), which is VOLUME-INDEPENDENT — so "the largest
     #      room" is not a corner of it at all, and the figure "~2.6 m at the
     #      largest" that stood here was not a corner but the largest shoebox at
-    #      alpha = 0.2 (AC-30).
+    #      alpha = 0.2.
     #
     #      THE REAL RANGE, over every geometry x material corner the config
     #      declares — and note that `ceiling_absorptive` puts alpha in [0.85, 0.98]
@@ -177,12 +177,12 @@ scenes:
     #      (12x10x5 m) at alpha 0.98. `corridor` sits inside both ends despite its
     #      length, because d_min follows SURFACE, not extent.
     #
-    #      THESE ARE THE RENDERED CORNERS, not merely the configured ones (AC-50).
+    #      THESE ARE THE RENDERED CORNERS, not merely the configured ones.
     #      They are computed from the declared nominal alpha, and that is correct
     #      for the shipped backend because `absorption_convention: pre_compensate`
     #      passes 1-(1-alpha)^2 to `createbox`, which makes the realized absorption
-    #      equal the declared one (AC-54, configs/simulators/gsound_sir.yaml). Under
-    #      the `as_is` convention — reachable, and what every pre-AC-54 measurement
+    #      equal the declared one (configs/simulators/gsound_sir.yaml). Under
+    #      the `as_is` convention — reachable, and what every earlier measurement
     #      was taken under — the rendered room has alpha_eff = 1-sqrt(1-alpha) and
     #      the same corner gives ~5.35 m Sabine / ~8.07 m Eyring instead. The
     #      convention decides which of the two a reader should apply, so a run's
@@ -194,12 +194,12 @@ scenes:
     #      per-regime schema cannot express it today), and the realized per-split
     #      shortfall is a DISCLOSURE owed by `placement_report.json`, which
     #      `scenes/generator.py` writes — outside this lane, recorded in the lane-M
-    #      inbox. AC-30 does NOT close on this edit (RD-111).
+    #      inbox. does NOT close on this edit.
     #   3. It matches Research I's minimum, so base and research_i.yaml share a
     #      separation floor and stay comparable on this axis.
     # This is a RESEARCH choice. The backend's own floor (dry_run 0.3 m;
     # gsound_sir source_radius + listener_radius = 0.2 m) is only a lower limit on
-    # it, checked at gen-scenes — never the source of the number (RD-57).
+    # it, checked at gen-scenes — never the source of the number.
     # Satisfiable: the smallest base room's admissible box admits 3.16 m.
     interior_random:
       { type: interior, corner_frac: null, height_range: null, distance_range: [1.0, null] }
@@ -246,31 +246,42 @@ report_format: text
 # Render-stage quality-control gates (§6 render QC record / §7). QC decides which
 # renders are ADMITTED to the dataset, and E1 is "reproduce the old null", so a
 # silently different admission rule confounds the reproduction — which is why all
-# FOUR of Research I's criteria are declared here rather than the two that were
-# (RD-18). RI states them at docs/research_I_paper.md §B.4 and Figure 5.
+# FOUR of Research I's criteria are declared here rather than the two that were.
+# RI states them at docs/research_I_paper.md §B.4 and Figure 5.
 #
-# Unused by the dry_run path (its synthetic IRs are clean by construction) —
-# the criteria themselves await the real render backend. Declaring them now is
-# what makes that implementation a matter of reading config rather than of
-# rediscovering four numbers.
+# Scored by `src/amcd/simulators/qc.py` at the render stage, on every backend and
+# every scene, into `renders/qc_failures.csv`.
 #
-# THE ONSET CHECK IS PAIRED, NOT ABSOLUTE (RD-18). RI l.480: "a direct-path onset
-# mismatch within the configured tolerance BETWEEN THE LOW-RAY AND HIGH-RAY
-# RENDERS ... the same physical arrival represented at a consistent sample
-# location across each paired example". This key was named `max_onset_ms` and
-# described as a bound on one IR's onset, which is a different criterion: a scene
-# whose geometry puts the direct arrival at 8 ms is perfectly well paired and
-# would have been rejected. Renamed rather than left to the implementation,
-# because nothing reads it yet and a name that states the wrong criterion is what
-# the implementation would have been written against.
+# THE ONSET CHECK IS PAIRED, NOT ABSOLUTE: the tolerance bounds the onset
+# MISMATCH BETWEEN the low-ray and high-ray legs, never either leg's own onset.
+# RI l.480: "a direct-path onset mismatch within the configured tolerance BETWEEN
+# THE LOW-RAY AND HIGH-RAY RENDERS ... the same physical arrival represented at a
+# consistent sample location across each paired example". A scene whose geometry
+# puts the direct arrival at 8 ms is perfectly well paired.
 onset_mismatch_tolerance_ms: 2.0
 
-# THE ENERGY FLOOR NEEDS ITS REFERENCE, OR IT IS NOT A LEVEL (RD-18). RI's figure
+# THE ENERGY FLOOR NEEDS ITS REFERENCE, OR IT IS NOT A LEVEL. RI's figure
 # gives 1e-10 as a LINEAR total energy; -60 dB stood here with no reference stated,
 # which reads as -60 dB re 1.0 and is then ~40 dB STRICTER than RI's (1e-10 is
 # -100 dB re 1.0). Both halves are declared so the comparison is checkable:
 # `min_energy_db` is dB re `min_energy_reference`, and RI is reproduced by
 # reference 1.0 with -100.0.
+#
+# THE FLOOR IS ON THE W CHANNEL — a DELIBERATE DEPARTURE from RI, which states
+# its floor over the all-channel total. Every reported ISO-3382 metric reads W
+# alone, so a total-energy floor does not bound the quantity that decides whether
+# a scene is measurable. The two are not convertible by a constant either: the
+# theoretical (N+1)^2 offset under N3D holds only for a plane wave or a
+# mutually-incoherent field, while the MEASURED offset on real renders is +3.8 to
+# +8.4 dB and moves with the ray budget on a fixed scene. `qc.py` records
+# `total_energy_db` per leg as a non-gating disclosure so the RI comparison stays
+# checkable.
+#
+# BUDGET-DEPENDENT BY CONSTRUCTION: fewer diffuse rays carry less energy, so this
+# floor admits differently at different `low_ray_budget` values. At E4, where the
+# budget is swept, it must either be held fixed across arms — accepting that a low
+# arm may refuse to build a dataset — or declared per arm AND reported, because
+# per-arm floors make the comparison one between differently-admitted scene sets.
 #
 # -60.0 re 1.0 is base.yaml's own choice and is deliberately stricter than RI's:
 # below it an IR carries too little energy for the ISO estimator's decay range to
@@ -281,11 +292,42 @@ min_energy_db: -60.0
 min_energy_reference: 1.0
 
 # Retained-path export bounds. RI: non-empty path data, and a file within the
-# configured size bound of 128 MB (Figure 5). `max_path_file_mb` was declared FIXED
-# in docs/design_spec.md §11.1's role table while being absent from every config —
-# a hidden default in the strict sense, since nothing could set it (RD-18).
+# configured size bound of 128 MB (Figure 5). Both are skipped with a recorded
+# reason on a backend that exports no paths, never counted as passes.
 max_path_file_mb: 128.0
 require_non_empty_path_file: true
+
+# ── How much attrition a dataset may carry before it is not the dataset ───────
+# A scene that fails a gating criterion is EXCLUDED, per RI §B.4 ("Examples
+# failing these checks were excluded from the dataset"), not a reason to discard
+# the batch. These bound how far that may go.
+#
+# WHY A BOUND EXISTS AT ALL: per-example exclusion has no natural floor, so a
+# systematically broken backend does not fail — it quietly yields a small dataset
+# that still trains, still reports, and answers a different question than the one
+# asked. Excluding 700 of 720 scenes one at a time must be an error, not a result.
+#
+# PER SPLIT AS WELL AS OVERALL, and the per-split bound is the one that binds.
+# The energy floor bites hardest where absorption is highest, which is
+# `test_material_shift`'s `ceiling_absorptive` regime by construction. 5 lost
+# scenes is 0.7 % of 720 and 4.2 % of a 120-scene shift split, so a global-only
+# bound is close to blind to the failure that would actually distort a result:
+# attrition concentrated on a shift axis is a selection effect ON that axis, and
+# the per-split comparison is the primary output.
+#
+# 0.05 is a "something is wrong" threshold, not a statistical criterion. Attrition
+# below it is still REPORTED per split — the report renders admitted/generated for
+# every split whatever these values are, so a bound is never what makes attrition
+# visible.
+max_excluded_frac: 0.05
+max_excluded_frac_per_split: 0.05
+
+# Tighter, and deliberately so: a refusal is a statement about the BACKEND, not
+# about the scene. It also leaves nothing on disk, so a re-run retries the scene
+# and — pygsound exposing no RNG seed — may admit it next time. Membership under
+# refusal is therefore not reproducible the way a QC exclusion is, which is
+# re-derivable from persisted artifacts. Non-zero wants a look.
+max_refused_frac: 0.01
 
 # ── D0a headroom-probe verdict thresholds (design_spec §4) ────────────────────
 d0a_gap_large_db: 3.0
@@ -296,7 +338,7 @@ d0b_t30_jnd_frac: 0.05      # 5% of reference T30
 d0b_edt_jnd_frac: 0.05      # 5% of reference EDT (ISO 3382-1 Annex A: EDT limen == T limen)
 d0b_c50_jnd_db: 1.0         # 1 dB absolute
 
-# Coverage D0b needs before it will clear a split at all (S-F1). The verdict used
+# Coverage D0b needs before it will clear a split at all. The verdict used
 # to degrade to INDETERMINATE only when a split scored NOTHING, so a split that
 # lost most of its scenes to unresolvable bands or failed loads could still print
 # PASS on the remainder — and that remainder is a selected subset, not a sample:
@@ -310,7 +352,7 @@ d0b_c50_jnd_db: 1.0         # 1 dB absolute
 # per-metric scored-vs-attempted counts, which are reported either way.
 d0b_min_scored_frac: 0.8
 
-# ── D0b absolute-level sweep (AC-37) ─────────────────────────────────────────
+# ── D0b absolute-level sweep ─────────────────────────────────────────
 # `min_db` is an ABSOLUTE floor on encoded band energy, and `decode` rescales the
 # carrier's band power to `10**(env/10)` — so wherever true power sits below the
 # floor the decode BOOSTS the carrier up to it, injecting a non-decaying energy
@@ -335,10 +377,10 @@ d0b_min_scored_frac: 0.8
 # have refused anyway.
 d0b_level_sweep_db: [0.0, -10.0, -20.0, -25.0, -30.0]
 
-# ── Ray-budget convergence tolerance (RD-17, RD-263) ──────────────────────────
+# ── Ray-budget convergence tolerance ──────────────────────────
 # The high leg (`high_ray_budget`) is treated as a CONVERGED REFERENCE by every
 # paired-improvement metric, by D0a's headroom and by D0b's carrier test, and until
-# the RD-17 probe ran nothing had ever checked that. These declare what "converged"
+# the probe ran nothing had ever checked that. These declare what "converged"
 # means, so the probe reports a verdict against a stated threshold rather than an
 # eyeballed one.
 #
@@ -348,13 +390,13 @@ d0b_level_sweep_db: [0.0, -10.0, -20.0, -25.0, -30.0]
 # threshold would be measuring the raytracer's Monte-Carlo noise, not its adequacy.
 #
 # The probe is a TOLERANCE CHECK over a handful of scenes, NOT a CI-backed
-# convergence claim, and must be reported as such (RD-263).
+# convergence claim, and must be reported as such.
 convergence:
   t30_frac: 0.05            # matches d0b_t30_jnd_frac
   c50_db: 1.0               # matches d0b_c50_jnd_db
   band_energy_frac: 0.05    # per-band energy, relative
 
-  # ── THE PROBE RAN, AND C50 FAILED (AC-187) ──────────────────────────────────
+  # ── THE PROBE RAN, AND C50 FAILED ──────────────────────────────────
   #
   # 200,000 vs 800,000 rays over 10 scenes through the production ISO path:
   #
@@ -385,9 +427,13 @@ convergence:
   # faithfulness fixes the budget regardless of what convergence would prefer.
   #
   # Declared per metric so the reference's adequacy is an explicit contract rather
-  # than an assumption each metric inherits silently. A metric absent from this map
-  # is one the probe found converged; `reporting/tables.py` renders a caveat for
-  # every metric present in it, and refuses a name that is not a reported metric.
+  # than an assumption each metric inherits silently. `reporting/tables.py` renders
+  # a caveat for every metric present here, and refuses a name that is not a
+  # reported metric.
+  #
+  # ABSENT FROM BOTH MAPS BELOW MEANS "THE PROBE MEASURED IT AND IT CONVERGED" —
+  # never "nobody looked". A quantity nobody measured goes in
+  # `reference_unmeasured`, so silence is only ever a measurement.
   reference_unconverged:
     C50:
       worst_deviation: 3.24
@@ -395,11 +441,43 @@ convergence:
       unit: dB
       n_within_tolerance: 12
       n_cells: 20
+    # T30 also failed and was previously undeclared, which — under the
+    # absent-means-converged rule below — asserted a convergence the measurement
+    # contradicts. Milder than C50 but not clean: 2 further cells were unscored
+    # (the record truncates the decay), so 18 of 20 were scored at all.
+    T30:
+      worst_deviation: 0.070
+      tolerance: 0.05         # == t30_frac above
+      unit: fraction
+      n_within_tolerance: 16
+      n_cells: 18
+
+  # ── THE THIRD QUANTITY WAS NEVER MEASURED ────────────────────────────────
+  # `band_energy_frac` above declares a tolerance for per-band energy, and no run
+  # has ever checked anything against it: the only convergence artifact on disk
+  # carries T30 and C50 verdicts and zero band-energy cells. Under a two-state
+  # contract its absence would have asserted a convergence nothing tested — and it
+  # is the quantity that matters most downstream, because the model's output domain
+  # is per-channel log power spectrograms.
+  #
+  # Not measured before E1 by decision (2026-08-14, design_spec §11.3): the probe
+  # costs ~3.2 h against the ~14 h render it would gate, and it cannot change what
+  # E1 does — Research I pins 200,000 rays (paper Figure 5), so faithfulness fixes
+  # the budget whatever convergence would prefer. Non-convergence at RI's budget is
+  # itself a finding about RI, and the ray-count scoping that settles it belongs to
+  # Research II.
+  reference_unmeasured:
+    band_energy:
+      reason: >-
+        the ray-budget probe has never scored per-band energy; `band_energy_frac`
+        declares a tolerance nothing has been checked against, so the reference
+        leg's adequacy in the model's own output domain is unknown, not established
+      gate: E4 ray-count scoping (Research II)
 
 
 # ── ISO 3382 evaluation bands (Hz) — design_spec §7 / §3 ──────────────────────
 #
-# DECLARED ONCE, HERE (RD-187). The AC-37 headroom guard in
+# DECLARED ONCE, HERE. The headroom guard in
 # configs/representations/spectrogram.yaml is calibrated against the REPORTED metric
 # bands, so it reads this set — handed to `build_representation` as a cross-cutting
 # argument beside `sample_rate`. It used to hold a mirror copy
@@ -410,11 +488,11 @@ iso_eval_freqs: [500, 1000]
 
 # Direct-arrival onset detection: integration starts at the first sample this many dB
 # below the peak (§3 metric path). -20 dB below the peak is the ISO 3382-1:2009
-# start-of-response convention (not an arbitrary gate). (RD-05/AC-08 provenance)
+# start-of-response convention, not an arbitrary gate.
 metric_onset_rel_db: -20.0
 
 # How far the energy-threshold onset detector may disagree with GEOMETRY before
-# geometry adjudicates (AC-181). The direct arrival's position is not an estimate:
+# geometry adjudicates. The direct arrival's position is not an estimate:
 # it is |src - rcv| / c, and the render records both. The detector still places it
 # within this window, because it is the thing that knows about filter smearing and
 # sub-sample timing; outside the window it has landed on a reflection and is
@@ -446,19 +524,19 @@ metric_onset_tolerance_ms: 1.0
 
 # ── The octave-band filter the reported metrics are computed through ──────────
 #
-# The ORDER is an experiment parameter, not an implementation detail (F-143). It
+# The ORDER is an experiment parameter, not an implementation detail. It
 # is not fixed by ISO 3382-1: the standard asks for IEC 61260 class 1, which this
 # filter fails at any order reachable here. What the order actually buys is a
 # TRADE — steeper skirts give better out-of-band rejection and a LONGER ringing
 # floor, and that floor (`_band_resolvable_decay_s`) decides which bands carry the
-# AC-38 resolvability caveat into a reported number. 4 is shipped because the
+# resolvability caveat into a reported number. 4 is shipped because the
 # floors it produces (T30 20.36 / 10.16 ms, EDT 9.56 / 4.80 ms at 500 / 1000 Hz)
 # sit below the decays base.yaml's declared support admits, while the rejection it
 # gives is enough for one scalar absorption across all simulated bands. Both halves
 # of that sentence move if the order does, which is why neither is a literal.
 #
 # `stopband_rejection_db` is the MEASURED consequence, declared so it cannot rot
-# the way the resolvability floors did (AC-65/RD-186). Keyed by octaves outside the
+# the way the resolvability floors did. Keyed by octaves outside the
 # band; each bound is the worse of the two eval bands at that offset, rounded
 # outward ~1 dB against scipy point releases, and applied on both sides. Measured
 # through `_band_energy` with a pure tone at 48 kHz:
@@ -480,16 +558,16 @@ metric_octave_filter:
 # How many times the octave filter's OWN decay a room's decay must exceed to be
 # resolvable in that band. The floor is MEASURED per (metric, band) from the
 # filter's impulse response and scales as 1/f; the values live in ONE place,
-# `_band_resolvable_decay_s` in evaluation/room_acoustic.py (RR-39). This declares
-# only the safety margin (AC-26/AC-27).
+# `_band_resolvable_decay_s` in evaluation/room_acoustic.py. This declares
+# only the safety margin.
 #
-# THIS IS A PROJECT-DEFINED CRITERION, NOT ISO 3382-2's (AC-26-R6). The floor is
+# THIS IS A PROJECT-DEFINED CRITERION, NOT ISO 3382-2's. The floor is
 # the FILTER'S OWN measured decay times this margin — defensible, and measured
 # through the very path it governs — but a reader will take "what the band can
 # resolve" for the standard's rule, and it is not. ISO 3382-2:2008 expresses the
 # same concern as a bandwidth-time product, BT > 16.
 #
-# B IS THE REALIZED BANDWIDTH, NOT THE NOMINAL ONE (AC-108). `sosfiltfilt` runs the
+# B IS THE REALIZED BANDWIDTH, NOT THE NOMINAL ONE. `sosfiltfilt` runs the
 # section forwards and backwards, so the power response is |H|⁴ rather than |H|²
 # and the equivalent noise bandwidth is NARROWER than the octave's nominal
 # fc·(√2 − 1/√2). Measured by integrating |H|⁴: **317.46 Hz at 500 Hz and 634.96 Hz
@@ -505,14 +583,14 @@ metric_octave_filter:
 # 500 Hz (4.88 ms at 1000 Hz) — not the ~4.5 ms a nominal-B reading gives. Stated
 # so the two criteria are not conflated; the standard's form is not adopted because
 # it takes no account of this filter's realized ringing, which is what actually
-# limits us. The floor's VALUE is ratified on the AC-38 grounds below and does not
+# limits us. The floor's VALUE is ratified on the grounds below and does not
 # move with this correction.
 #
-# THE MARGIN'S CALIBRATION DID NOT REPRODUCE, AND HAS BEEN RESTATED (AC-101).
-# superseded wording is in git history and docs/ledger_inbox/M.md (RR-115).
+# THE MARGIN'S CALIBRATION DID NOT REPRODUCE, AND HAS BEEN RESTATED.
+# superseded wording is in git history and docs/ledger_inbox/M.md.
 #
 # BUT THE POPULATION IS THE GOVERNING PARAMETER, AND IT IS NOT A PROPERTY OF THE
-# ESTIMATOR (F-137). Holding seed, N, code path and duration rule fixed and changing
+# ESTIMATOR. Holding seed, N, code path and duration rule fixed and changing
 # ONLY the true-T60 grid moves the conclusion entirely:
 #
 #     grid 0.015-0.30 s   m1.0 +5.91  m1.5 +4.15  m2.0 +3.63  m3.0 +2.97 %
@@ -525,15 +603,16 @@ metric_octave_filter:
 # named no population, which is the actual defect: a calibration whose governing
 # parameter is undeclared cannot be checked.
 #
-# THE CAUSAL ATTRIBUTION THIS COMMENT ONCE MADE IS REFUTED (F-136). It blamed the
-# AC-36/F-67 energy fold moving the floors (AC-65's drift). Re-running the identical
-# protocol against the OLD pre-AC-36 floors gives +6.23 / +4.53 / +3.82 / +3.17 %,
+# THE CAUSAL ATTRIBUTION THIS COMMENT ONCE MADE IS REFUTED. It blamed the
+# energy fold moving the floors. Re-running the identical
+# protocol against the OLD earlier floors gives +6.23 / +4.53 / +3.82 / +3.17 %,
 # i.e. the floor drift accounts for 0.32 pp of the 6.9 pp gap at margin 1.0 — about
-# 5 % of it. The floor drift is real (AC-65) but it is NOT why these numbers differ.
+# 5 % of it. The floor drift is real but it is NOT why these numbers differ.
 # The remaining difference is unattributed, and is left unattributed rather than
 # given a second guess.
 #
-# 2.0 IS KEPT ANYWAY, and the reason is AC-38 rather than this calibration. Since
+# 2.0 IS KEPT ANYWAY, and the reason is the disclose-don't-censor rule rather
+# than this calibration. Since
 # the floor now DISCLOSES rather than suppresses, a margin that is too wide costs
 # extra caveats and biases nothing; only a margin that is too NARROW would let an
 # unresolvable band be reported without one. The calibration is therefore no longer
@@ -542,7 +621,7 @@ metric_octave_filter:
 # replaces, and is written as such rather than restated with fresh numbers as
 # though nothing had changed.
 #
-# WHAT THIS MARGIN NOW GOVERNS — a DISCLOSURE, not a suppression (AC-38).
+# WHAT THIS MARGIN NOW GOVERNS — a DISCLOSURE, not a suppression.
 # The threshold's independence from the datum was only half the fix; the DECISION
 # was still `fitted_value < floor`, which censors the estimator's own low tail and
 # biases the surviving split mean upward. RE-DERIVED on the current tree (200
@@ -568,12 +647,12 @@ metric_octave_filter:
 # counted in `n_bands_resolvability_limited`. Only `pred` is suppressed, and only
 # in a band the PHYSICAL legs themselves resolve — a model that produced nothing
 # measurable where the physics is fine has failed, but a band no leg can resolve
-# is still a like-for-like paired comparison and keeps its datum (RD-93).
+# is still a like-for-like paired comparison and keeps its datum.
 metric_band_resolvability_margin: 2.0
 
 # EDT below this is variance-limited, not filter-limited: measured sd 24-31 % of
 # T60 here, against 6-10 % for T30. A disclosure bound, never a suppression
-# threshold — eval counts how many scenes fall below it per split (AC-27/RD-78).
+# threshold — eval counts how many scenes fall below it per split.
 metric_edt_variance_limited_s: 0.15
 
 # ── Stats: bootstrap CI (design_spec §9) ──────────────────────────────────────
@@ -592,7 +671,7 @@ bootstrap_alpha: 0.05
 bootstrap_min_n_for_calibrated_ci: 4
 bootstrap_power: 0.8
 
-# ISO 3382-1 SNR ADMISSIBILITY, in dB of USABLE decay, per reported metric (AC-176).
+# ISO 3382-1 SNR ADMISSIBILITY, in dB of USABLE decay, per reported metric.
 # The standard requires the decay to be measurable over >= 45 dB before a T30 may
 # be reported, and >= 20 dB for EDT. Nothing enforced this and nothing could: a
 # Schroeder backward integral terminates at -inf dB by construction, so the

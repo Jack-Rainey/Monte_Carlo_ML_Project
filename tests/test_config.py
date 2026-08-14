@@ -29,7 +29,7 @@ class TestConfigLoad:
     def test_load_dry_run_overrides_base(self) -> None:
         cfg = Config.load(*CANONICAL_DRY_RUN)
         assert cfg.simulator.name == "dry_run"
-        # F-11 scoping: switching the simulator name must not leave gsound_sir's
+        # Name-change scoping: switching the simulator must not leave gsound_sir's
         # params attached to dry_run — dry_run gets ITS OWN params file, and none
         # of gsound's keys (which its schema would reject) come along.
         assert set(cfg.simulator.params) == {
@@ -76,7 +76,7 @@ class TestConfigLoad:
             Config.with_overrides(nonexistent_param=42)
 
     def test_nonpositive_huber_delta_rejected(self) -> None:
-        # F-07: δ ≤ 0 is a degenerate loss knee; reject at config load.
+        # δ ≤ 0 is a degenerate loss knee; reject at config load.
         with pytest.raises(Exception):
             Config.with_overrides(huber_delta=0.0)
 
@@ -86,17 +86,17 @@ class TestConfigLoad:
             Config.with_overrides(metric_onset_rel_db=5.0)
 
     def test_nonpositive_bootstrap_resamples_rejected(self) -> None:
-        # F-08: n_resamples <= 0 → degenerate CIs (the headline evidence). Fail at load.
+        # n_resamples <= 0 → degenerate CIs (the headline evidence). Fail at load.
         with pytest.raises(Exception):
             Config.with_overrides(bootstrap_n_resamples=0)
 
     def test_bootstrap_alpha_out_of_range_rejected(self) -> None:
-        # F-08: alpha must be a (0,1) significance level.
+        # alpha must be a (0,1) significance level.
         with pytest.raises(Exception):
             Config.with_overrides(bootstrap_alpha=1.5)
 
     def test_bootstrap_power_not_above_alpha_rejected(self) -> None:
-        # F-17: power ≤ alpha makes mdes() silently return ≈0 (a zero effect already
+        # power ≤ alpha makes mdes() silently return ≈0 (a zero effect already
         # "achieves" power = alpha) — reject the nonsensical config at load.
         with pytest.raises(Exception):
             Config.with_overrides(bootstrap_power=0.05, bootstrap_alpha=0.05)
@@ -104,7 +104,7 @@ class TestConfigLoad:
             Config.with_overrides(bootstrap_power=0.03, bootstrap_alpha=0.05)
 
     def test_colliding_explicit_seeds_rejected(self) -> None:
-        # F-04 / inv #5: two aspects sharing an explicit seed couples them.
+        # Invariant #5: two aspects sharing an explicit seed couples them.
         with pytest.raises(Exception):
             Config.with_overrides(
                 seeds={"master": 42, "split_assignment": 7, "weight_init": 7}
@@ -112,17 +112,17 @@ class TestConfigLoad:
 
     def test_missing_model_config_raises(self) -> None:
         # An unknown plugin name has no params file and is not registered → fail loud
-        # at load (F-12: the registry, not a file, is the source of truth for names).
+        # at load — the registry, not a file, is the source of truth for names.
         with pytest.raises(Exception):
             Config.with_overrides(model={"name": "no_such_model"})
 
 
 class TestPluginSeam:
-    """Representation/model `{name, params}` seam: name-scoped params (F-11) and
-    registry-as-source-of-truth for name validity (F-12)."""
+    """Representation/model `{name, params}` seam: name-scoped params and
+    registry-as-source-of-truth for name validity."""
 
     def test_rep_params_do_not_bleed_across_name_switch(self) -> None:
-        """F-11: switching representation.name on a layer that set the prior rep's
+        """Switching representation.name on a layer that set the prior rep's
         params must NOT carry those params into the new rep. test_tiny sets
         spectrogram n_fft/hop_length; a waveform override must land with clean params
         and build, not fail with `n_fft` extra_forbidden deep in preprocess."""
@@ -142,7 +142,7 @@ class TestPluginSeam:
         assert type(rep).__name__ == "WaveformRepresentation"
 
     def test_registered_stub_needs_no_params_file(self) -> None:
-        """F-12: `edr` is registered but ships no configs/representations/edr.yaml.
+        """`edr` is registered but ships no configs/representations/edr.yaml.
         Selecting it must load (empty params) and reach the stub's own
         NotImplementedError at build/use — NOT a FileNotFoundError at load."""
         import numpy as np
@@ -167,7 +167,7 @@ class TestPluginSeam:
 
 
 class TestVersionsJsonNamesTheMachine:
-    """F-74: the compute device was auto-selected, never recorded, never stamped.
+    """The compute device was auto-selected, never recorded, never stamped.
 
     `versions.json` recorded six package versions, the git sha, the dirty flag and
     `code_version` — and no device or host. Under the project's two-host
@@ -198,7 +198,7 @@ class TestVersionsJsonNamesTheMachine:
         self, tmp_path: Path
     ) -> None:
         """The stamp must agree with the selector `train` and `infer` actually use,
-        or the record describes a different run than the one on disk (F-56's rule,
+        or the record describes a different run than the one on disk (rule,
         applied to the device)."""
         from amcd.device import select_device
 
@@ -226,7 +226,7 @@ class TestVersionsJsonNamesTheMachine:
 
 
 class TestConfigRootIsNotAssumedToBeASourceCheckout:
-    """F-73: `configs/` was resolved three levels up from the module and nowhere
+    """`configs/` was resolved three levels up from the module and nowhere
     else, so a wheel install into site-packages could not find `base.yaml` and
     failed with a bare FileNotFoundError deep inside `_merge_yaml`."""
 
@@ -262,7 +262,7 @@ class TestConfigRootIsNotAssumedToBeASourceCheckout:
         assert isinstance(resolved, Path)
 
     def test_no_candidate_points_somewhere_nothing_ships(self) -> None:
-        """RD-109: a search path that can never match is not a provision.
+        """A search path that can never match is not a provision.
 
         `amcd/configs/` was listed FIRST as a place a future packaged build might
         put `configs/`. No build ever did — `pyproject.toml` declares no package
@@ -282,7 +282,7 @@ class TestConfigRootIsNotAssumedToBeASourceCheckout:
         assert unshippable == [], (
             f"config root candidate(s) {unshippable} hold no base.yaml in this "
             f"installation. A candidate no build populates makes the resolver "
-            f"claim support for a layout that does not work (RD-109)."
+            f"claim support for a layout that does not work."
         )
 
     def test_the_resolved_root_actually_holds_base_yaml(self) -> None:
@@ -292,7 +292,7 @@ class TestConfigRootIsNotAssumedToBeASourceCheckout:
 
 
 class TestFingerprintExemptionsAreWellFormed:
-    """F-65's exemption table is a CLAIM about the fingerprint contract, so it has
+    """Exemption table is a CLAIM about the fingerprint contract, so it has
     to be checkable itself — an exemption naming a field that no longer exists
     would silently widen the guard's blind spot."""
 
@@ -338,14 +338,14 @@ class TestRoleGrammar:
         assert [s.low_ray_budget for s in siblings] == [1000, 5000, 20000]
 
     def test_tuned_value_outside_space_rejected(self) -> None:
-        # F-05: a tuned operating point outside its declared space must fail loudly.
+        # a tuned operating point outside its declared space must fail loudly.
         with pytest.raises(Exception):
             Config.with_overrides(
                 learning_rate={"tune": {"space": [1.0e-4, 1.0e-2]}, "value": 0.5}
             )
 
     def test_sweep_with_stray_value_rejected(self) -> None:
-        # F-05: a stray `value` on a sweep node is silently ignored otherwise.
+        # a stray `value` on a sweep node is silently ignored otherwise.
         with pytest.raises(Exception):
             Config.with_overrides(
                 low_ray_budget={"sweep": [1000, 5000], "value": 1000}
@@ -357,6 +357,41 @@ class TestRoleGrammar:
             Config.with_overrides(
                 learning_rate={"tune": {"space": [0, 1]}, "value": True}
             )
+
+
+class TestSweptPluginName:
+    """A plugin NAME is a swept axis: cross-model comparison and the multiple-
+    raytracer axis (paper §6) are expressed in the role grammar, not by hand-editing
+    the config between runs. Requires names to resolve BEFORE params attach."""
+
+    def test_a_swept_name_selects_index_zero_for_a_single_run(self) -> None:
+        cfg = Config.with_overrides(
+            representation={"name": {"sweep": ["spectrogram", "waveform"]}}
+        )
+        assert cfg.representation.name == "spectrogram"
+        assert cfg.resolved_roles["representation.name"]["role"] == "swept"
+
+    def test_each_sibling_attaches_its_own_params_file(self) -> None:
+        # The point of resolving the name first. `spectrogram.yaml` exists and
+        # `waveform` has no params file, so a shared attached tree would give one
+        # sibling the other's schema.
+        cfg = Config.with_overrides(
+            representation={"name": {"sweep": ["spectrogram", "waveform"]}}
+        )
+        siblings = cfg.expand_sweeps()
+        assert [s.representation.name for s in siblings] == ["spectrogram", "waveform"]
+        assert "bands_per_octave" in siblings[0].representation.params
+        assert siblings[1].representation.params == {}
+
+    def test_a_tuned_name_is_rejected_as_categorical(self) -> None:
+        with pytest.raises(Exception, match="categorical"):
+            Config.with_overrides(
+                model={"name": {"tune": {"space": [0, 1]}, "value": 0.5}}
+            )
+
+    def test_an_unswept_config_still_returns_itself(self) -> None:
+        cfg = Config.with_overrides()
+        assert cfg.expand_sweeps() == [cfg]
 
 
 class TestSeedReproducibility:
@@ -430,7 +465,7 @@ class TestSeedReproducibility:
 
 
 class TestSplitRoleVocabulary:
-    """F-44: `role` routes a split through the entire pipeline, so an unrecognised
+    """`role` routes a split through the entire pipeline, so an unrecognised
     role must fail at config load — not silently produce a split that is generated,
     rendered and preprocessed and then appears in no result."""
 

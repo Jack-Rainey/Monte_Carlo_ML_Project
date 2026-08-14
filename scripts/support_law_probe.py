@@ -9,7 +9,7 @@ That prediction is a config-declared law, and the shipped one
 exponent is -0.001 +/- 0.011 — indistinguishable from zero.
 
 THE PROBLEM THIS PROBE EXISTS FOR: those 44 renders cannot say what should
-replace it. `rd17_convergence_probe._probe_scenes` scales all three dimensions by
+replace it. `ray_budget_convergence_probe._probe_scenes` scales all three dimensions by
 one interpolation factor, so every room it has ever produced is geometrically
 SIMILAR, and for similar boxes the mean free path 4V/S is proportional to
 V**(1/3) exactly. Measured over those renders, corr(log V, log 4V/S) = 1.0000.

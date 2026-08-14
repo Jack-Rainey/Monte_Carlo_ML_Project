@@ -12,7 +12,6 @@ def compute_perceptual_metrics(
     """
     Perceptual metrics for preview rendering (future listening study).
     Stubbed — returns no metrics. Producer contract: (triples with a declared
-    improvement `kind` each, nan_reasons keyed (metric, leg)) — see metric_row
-    (F-20/F-21).
+    improvement `kind` each, nan_reasons keyed (metric, leg)) — see metric_row.
     """
     return {}, {}

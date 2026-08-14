@@ -66,8 +66,8 @@ from the STFT energy grid — that is non-standard and (per the falsifier)
 near-circular against an FFT-filtered reference. This rule governs §3, §4 (D0b),
 and the eval stage; D1 and D3 are subordinate to it.
 
-**Reported ISO absolutes are paired-comparison quantities, not literature values
-(AC-17/RD-44).** Lundeby truncation is noise-floor dependent, and in this study the
+**Reported ISO absolutes are paired-comparison quantities, not literature
+values.** Lundeby truncation is noise-floor dependent, and in this study the
 noise floor IS the independent variable (ray budget). Truncating each leg at its own
 index therefore manufactures a metric difference with no acoustic cause — measured
 at a −50 dB floor with identical decay and only the floor scaled by √40 (the
@@ -75,8 +75,7 @@ at a −50 dB floor with identical decay and only the floor scaled by √40 (the
 at −30 dB, against a declared T30 JND of 0.05. All legs of a comparison are
 therefore integrated over **one shared Schroeder window per (scene, band)**,
 derived from the **physical legs only** (`low`/`high`) and *applied* to `pred`: a
-model output must never set the window used to measure its own ground truth
-(RD-43).
+model output must never set the window used to measure its own ground truth.
 
 Two consequences that must be stated wherever these numbers are reported:
 
@@ -95,7 +94,7 @@ never as a small number. The floor is the octave filter's **own** decay in that
 band times `metric_band_resolvability_margin` — measured per (metric, band), and
 independent of the value being tested. Thresholding on the fitted value instead
 censors the estimator's low tail and biases the surviving mean (+31.2 % measured
-at true T60 = 0.06 s); AC-26/AC-27. EDT below `metric_edt_variance_limited_s` is
+at true T60 = 0.06 s). EDT below `metric_edt_variance_limited_s` is
 variance-limited rather than filter-limited and is **disclosed and counted per
 split**, never suppressed.
 
@@ -141,7 +140,7 @@ Each stage consumes/produces declared artifacts; nothing passes via globals.
 | Stage | Input | Output (artifact) |
 |---|---|---|
 | gen-scenes | scene config | scene specs (JSON), deterministic from seed |
-| render | scene spec + simulator backend **(x86)** | paired IRs `(C,T) float32` low+high, retained-path file, QC record |
+| render | scene spec + simulator backend **(x86)** | paired IRs `(C,T) float32` low+high, retained-path file, per-scene `meta.json`, and the batch-wide QC record (`renders/qc_failures.csv`, canonical; `renders/qc_record.csv` at save level 4) |
 | preprocess | raw IRs | energy tensors (per-channel log third-octave), **train-only** norm stats, split assignment, carrier refs |
 | train | normalized energy tensors | checkpoint (+ resolved config stamp); valid-based selection |
 | infer | checkpoint + low-ray inputs | predicted energy envelopes **+ decoded IR (required, D3)** |
@@ -241,22 +240,30 @@ learning_rate: { tune: { space: [1.0e-4, 1.0e-2], scale: log } }
 loss_weights:  { tune: { ... } }
 # swept: research axis, every value reported on test
 low_ray_budget: { sweep: [1000, 2000, 5000, 20000] }
+# a plugin NAME is a swept axis too — one sibling per model, each attaching its
+# own configs/models/<name>.yaml
+model: { name: { sweep: [vanilla_cnn, unet] } }
 ```
+
+A swept name resolves **before** its params file attaches, since the name is what
+selects that file; `expand_sweeps()` therefore expands names first and then each
+selected plugin's own axes, because two plugins do not share a parameter schema.
+A name is categorical, so it may be `sweep`t but never `tune`d.
 
 **Starter role classification (from the paper's appendices):**
 
 | Role | Parameters |
 |---|---|
-| fixed | sample_rate 48k, ir_duration **per config** (base.yaml 4.25 s, research_i.yaml 3.0 s RI-pinned — see §11.2), base_seed 42, high_ray_budget 200k, QC thresholds — all four config-declared (`onset_mismatch_tolerance_ms`, `min_energy_db` + `min_energy_reference`, `max_path_file_mb`, `require_non_empty_path_file`); the onset one is a low-vs-high MISMATCH tolerance, not a bound on either IR's own onset, and the energy floor is a level only because its reference is declared beside it (RD-18) — normalization scheme |
+| fixed | sample_rate 48k, ir_duration **per config** (base.yaml 4.25 s, research_i.yaml 3.0 s RI-pinned — see §11.2), base_seed 42, high_ray_budget 200k, QC thresholds — all four config-declared (`onset_mismatch_tolerance_ms`, `min_energy_db` + `min_energy_reference`, `max_path_file_mb`, `require_non_empty_path_file`); the onset one is a low-vs-high MISMATCH tolerance, not a bound on either IR's own onset, and the energy floor is a level only because its reference is declared beside it — normalization scheme |
 | tuned (on valid) | learning_rate, batch_size, loss-term weights, Huber δ, model depth/width/kernel/dilation, early-stopping patience |
 | swept (research) | low **diffuse** ray budget (was fixed 5k), retained-path count k, band resolution (representation study); ambisonic_order = fixed-3 v1 but sweep-capable |
 
-*The ray budgets are **diffuse** ray counts (RD-12): `low_ray_budget` /
+*The ray budgets are **diffuse** ray counts: `low_ray_budget` /
 `high_ray_budget` drive GSound's `diffuse_count`, while `specular_count` is
 declared in `configs/simulators/gsound_sir.yaml` and held fixed across both legs,
 so the swept axis is never a moving total. Both counts are stamped into canonical
 render meta. They stay top-level config fields rather than simulator params so the
-swept axis survives a simulator name change (RD-40).*
+swept axis survives a simulator name change.*
 
 *Scene parameters — per-split counts, total dataset size, and the
 placement / material / geometry regimes — are all config-declared. The Research I
@@ -288,7 +295,7 @@ class Representation(Protocol):                                   # + registry; 
     center_freqs: "list[float]"                                   # band metadata ([] if band-less)
     def encode(self, ir: "ndarray[C,T]") -> "Tensor": ...        # → energy domain (dB log energy)
     def decode(self, env: "Tensor", carrier: "ndarray[C,T]") -> "ndarray[C,T]": ...   # env in dB
-    def loss(self, pred: "Tensor", target: "Tensor", delta: float) -> "Tensor": ...   # δ in operand domain (cf. F-06)
+    def loss(self, pred: "Tensor", target: "Tensor", delta: float) -> "Tensor": ...   # δ in operand domain
 
 class Model(Protocol):                                            # nn.Module + registry
     def forward(self, x: "Tensor", aux: "Tensor | None" = None) -> "Tensor": ...
@@ -379,6 +386,86 @@ grant:
 30 is also the smallest count at which a probe starts to say anything about
 statistical significance; the superseded ≤4/≤6 grants could not.
 
+**A FAILED batch is never re-rendered to pay for a scoring decision.** The render
+stage records, per scene, a fingerprint of the config inputs that determine the IR
+BYTES plus a digest of the scene spec itself, and reuses any scene that still
+carries both and whose recorded artifact digests re-verify. QC admission
+thresholds sit in the STAGE fingerprint but deliberately not in that per-scene
+one. So the two cases that matter at 720 scenes cost only what they must: a batch
+that RAISED — on a QC failure or a backend refusal — leaves no sentinel, so the
+re-run after adjusting a threshold re-scores the persisted renders instead of
+re-rendering them; and a mid-batch kill costs only the scenes not yet written.
+
+**A COMPLETE batch is a different case, and it costs a full re-render.** With a
+success sentinel on disk, changing a QC threshold is a fingerprint mismatch,
+which raises rather than silently re-running — the decision belongs to a human —
+and the only route past it is `--force`, which deliberately overrides per-scene
+reuse. Under a backend that declares `rng_seeded: false` those re-rendered IRs
+are not the ones the earlier numbers were computed over, so this is a new dataset
+and must be reported as one. Changing an admission rule on a finished dataset is
+a methodology change; it is not meant to be cheap.
+
+Every render also records its own per-leg wall-clock into `meta.json`, which is
+what makes the estimate above a measurement.
+
+**What DOES discard a persisted dataset — and what only re-scores it.** Two
+lists, because the difference is the difference between 14 hours and seconds.
+
+RE-RENDERS every scene (in the per-scene artifact fingerprint):
+
+    src/amcd/__init__.py   config.py    runtime.py    registry.py
+    acoustics.py           provenance.py
+    simulators/render.py   simulators/base.py   simulators/<active backend>.py
+    simulators/_gsound_worker.py   (under the gsound_sir backend)
+
+RE-SCORES every scene, re-rendering none (in the STAGE fingerprint only):
+
+    simulators/qc.py       evaluation/room_acoustic.py
+
+The split is the point: neither of the second pair can change one IR sample —
+they decide which renders are ADMITTED — so a QC failure at scene 700 of 720,
+fixed in `qc.py`, must not discard the 700 renders that are already correct. The
+worker is on the first list and would otherwise be invisible: it is exec'd as
+text in the x86 subprocess, so no import closure can see it.
+
+Comment and docstring edits are exempt from both —
+`provenance._semantic_digest` hashes the AST with docstrings stripped — so
+documentation work is free. `src/amcd/scenes/**` is on neither list and still
+forces a full re-render by a different route: it moves `gen-scenes`' fingerprint,
+`render` then refuses on the upstream sha, and the documented escape is `--force`,
+which suppresses per-scene reuse. Anything on the re-render list either lands
+BEFORE a full-dataset render or is accepted as a re-render cost, and the decision
+is recorded either way.
+
+### 11.1a A scene can leave the study two ways, and they are not the same number
+
+Both reduce what a reported figure was computed over, so both are disclosed — but
+folding them into one denominator would state something false about each.
+
+**EXCLUDED — never in the dataset.** The render stage refused to admit the scene:
+the backend raised `SceneRefused`, or a gating QC criterion failed (RI §B.4). It is
+absent from `renders/manifest.json`, so it is never encoded, never trained on and
+never evaluated. Counted per split in `preprocessed/meta.json`'s `split_attrition`
+and rendered in that split's report section as `admitted/generated`. Bounded by
+`max_excluded_frac`, `max_excluded_frac_per_split` and `max_refused_frac`, because
+per-example exclusion has no natural floor and a broken backend would otherwise
+yield a small dataset rather than an error.
+
+**UNSCORED — in the dataset, but one metric could not be measured on it.** The
+scene is admitted, encoded, trained on and evaluated; a particular metric on a
+particular leg came back undefined, most often because the record truncates the
+decay before ISO 3382-1's fit range. The row is logged to `metrics/drops.csv` as
+`(unit, reason)` and the split's `n scored / attempted` carries the count.
+
+**Unscored scenes stay in (user decision, 2026-08-14.)** Five of 720 under
+`configs/research_i.yaml` return an unscored T30 for exactly this reason. They are
+retained: the study measures whether a learned denoiser improves the metrics across
+the population, and a scene whose T30 the estimator cannot resolve still carries a
+usable IR pair, still trains the model, and still scores on every other metric.
+Dropping it would discard real data to make a table look complete, and would bias
+the retained set toward the decays the estimator finds easy — the same selection
+effect the attrition bounds exist to catch.
+
 **The dataset-render gate.** No full-dataset (720-scene) `gsound_sir` render until
 BOTH conditions hold. This lives here rather than in the review ledger because it
 is a standing rule of the study, not an unsolved defect — a gate carried as a
@@ -390,16 +477,64 @@ ledger row drifted its own lift condition three times.
   free-text version ("the metric path") admitted whatever reading was convenient.
   Severity is not a criterion: the gate lifts at zero OPEN, not at zero
   blocker/major.
-- **(ii)** The ray-budget probe has validated the high leg
-  (`high_ray_budget`) as a converged reference against the config-declared
-  `convergence:` tolerances, on **all three** declared quantities — per-band
-  energy, T30 and C50 — through the production ISO path, driven via
-  `build_simulator`.
+- **(ii)** Every quantity `convergence:` declares a tolerance for — per-band
+  energy, T30 and C50 — has a DECLARED STATE, and the report renders it. Each is
+  exactly one of: measured and within tolerance (absent from both maps); measured
+  and outside it (`convergence.reference_unconverged`, with its worst deviation
+  and within/total cell counts); or never measured
+  (`convergence.reference_unmeasured`, with the reason and the gate that
+  discharges it). `reporting/tables.py` carries the first two onto every affected
+  row and names the third in the footer.
+
+  This is an EVIDENCE-AND-DISCLOSURE condition, not a pass condition, and §11.3
+  is why.
+
+  **The condition used to require the probe to have RUN on all three, and it no
+  longer does (user decision, 2026-08-14).** Per-band energy will not be measured
+  before E1: the probe costs ~3.2 h against the ~14 h render it would gate, and it
+  cannot change what E1 does, since RI pins 200,000 rays. Requiring a run that will
+  not happen would have made the gate unliftable, while dropping the requirement
+  without replacement would have let absence read as convergence — hence the third
+  state. The measurement is owed at E4 ray-count scoping, not here.
 
 Condition (ii) exists because every paired-improvement number in the project, D0a's
 headroom and D0b's carrier test all treat that leg as ground truth, and nothing had
 ever checked it. It is a tolerance check over a handful of scenes, never a
 CI-backed convergence claim, and must be reported as such.
+
+### 11.3 The 200,000-ray reference is not converged in C50 (user decision, 2026-08-14)
+
+**This is a declared limitation of Research I's design, carried deliberately into
+E1, not an unsolved defect.** E1 reproduces Research I, and RI ran 720 scenes at a
+high-ray budget of 200,000 (Figure 5). Measuring that leg against an 800,000-ray
+reference through the production ISO path finds it is NOT converged:
+
+| quantity | within the declared tolerance | worst deviation |
+|---|---|---|
+| C50 | 12 of 20 (scene, band) cells, tol 1.0 dB | 3.24 dB |
+| T30 | 16 of 18 scored cells, tol 5 % | 7.0 % |
+| per-band energy | never measured | — |
+
+The C50 failures are **not** confined to the reverberant corner — α 0.383, 0.467
+and 0.550 are interior to the declared shoebox support — so the caveat attaches to
+essentially every reported row rather than to a small subpopulation.
+
+**The decision is to proceed at 200,000 and disclose, for two reasons.** First,
+E1's question is whether this pipeline reproduces RI's null, and reproducing it at
+a budget RI did not use would answer a different question. Second, the remedy is
+not affordable and would not be verified: an 800k reference needs a 3.2M-ray leg
+to check it in turn, at roughly 10 h per scene.
+
+**Research II is where this closes.** That study is expected to render more than
+720 scenes and can pin a higher `high_ray_budget` from the start, which is the
+condition under which C50 converges. Recording it here, at the gate, so a later
+session does not rediscover the non-convergence and read it as a blocker: it is a
+known limitation of the reference leg, priced and accepted.
+
+**What the study owes in exchange**, and what condition (ii) above now requires:
+the deviation is declared in `convergence.reference_unconverged`, the report
+renders it per affected row, and no absolute or paired improvement for an
+unconverged metric may be compared against Research I or the literature.
 
 ### 11.2 The reverberant corner is not measurable on GSound-SIR (user decision, 2026-08-12; numbers re-derived 2026-08-13)
 
@@ -427,7 +562,7 @@ admissible above T60 ≈ 1.85 s" is withdrawn.
 reshape its declared population around it. Consequences, all deliberate:
 
 - Affected scenes still render. Their T30 comes back **unscored with a reason** from
-  the estimator's own ISO bound (AC-176) — never as a truncation-biased number — and
+  the estimator's own ISO bound — never as a truncation-biased number — and
   the per-split scored-vs-attempted counts carry that into the report.
 - **`configs/base.yaml`: 23/600 = 3.83 %** censored (was reported as 2.8 % under the
   refuted law, which under-counted the censoring it exists to bound). Concentrated in

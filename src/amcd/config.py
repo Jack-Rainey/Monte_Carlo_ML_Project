@@ -18,6 +18,11 @@ concrete scalar and its role metadata is recorded separately (for stamping and,
 later, the search engine). Every stage therefore reads plain scalars — the role
 grammar never leaks past `Config.load`.
 
+A plugin NAME (`model.name`, `simulator.name`, `representation.name`) may be swept
+like any other leaf, which is what expresses cross-model comparison and the
+multiple-raytracer axis (paper §6). It resolves BEFORE its params file attaches,
+because the name is what selects which params file that is.
+
 No value has a behavioral default in this module: everything comes from a YAML
 layer or raises. `configs/base.yaml` holds the defaults.
 """
@@ -42,7 +47,7 @@ from .acoustics import sabine_rt60
 #: Where `configs/` lives: beside `src/`, in the checkout this package was
 #: installed from.
 #:
-#: ONE CANDIDATE, because there is one layout (RD-109). A second entry pointing at
+#: ONE CANDIDATE, because there is one layout. A second entry pointing at
 #: `amcd/configs/` was listed FIRST here as a provision for shipping `configs/` as
 #: package data — but no build ever shipped it, `pyproject.toml` declares no
 #: package data, and a search path that can never match is not a provision, it is a
@@ -57,8 +62,8 @@ from .acoustics import sabine_rt60
 #:
 #: Kept as a tuple rather than collapsed to a single Path so that change stays a
 #: one-line addition, and so the error message keeps enumerating what it tried
-#: (F-73: before any of this, a missing `base.yaml` surfaced as a bare
-#: `FileNotFoundError` from inside `_merge_yaml`, naming a path three parents up).
+#: (without it a missing `base.yaml` surfaces as a bare `FileNotFoundError` from
+#: inside `_merge_yaml`, naming a path three parents up).
 _CONFIG_ROOT_CANDIDATES = (
     Path(__file__).parent.parent.parent / "configs",  # source checkout: repo/configs
 )
@@ -93,18 +98,17 @@ def _require_configs() -> None:
             f"is built from.\n  Tried:\n{tried}\n"
             "  Install from a source checkout, where `configs/` sits beside `src/` "
             "— `pip install -e .` (README). A non-editable wheel does NOT ship "
-            "`configs/` and is not supported (RD-109). There is no built-in "
+            "`configs/` and is not supported. There is no built-in "
             "fallback: a value that governs an experiment never has a default in "
             "Python."
         )
-    # The plugin params directories too, not just base.yaml (F-80). A root holding
+    # The plugin params directories too, not just base.yaml. A root holding
     # base.yaml but none of these — precisely the half-finished "ship configs/ as
     # package data" the message above recommends — used to win the candidate race
     # and then load a VALIDATED Config with `representation.params={}` and
     # `simulator.params={}`, because `_attach_params_block` cannot distinguish a
     # missing DIRECTORY from "this registered plugin needs no params file". The run
-    # died later on a pydantic missing-field error naming neither, which is the
-    # confusion F-73 exists to end.
+    # would otherwise die later on a pydantic missing-field error naming neither.
     missing = [d.name for d in (_MODELS_DIR, _REPS_DIR, _SIMS_DIR) if not d.is_dir()]
     if missing:
         raise FileNotFoundError(
@@ -152,8 +156,8 @@ ID_POOL_TAG = "id"
 #: Names inside `preprocessed/` that are NOT split directories. A split declared
 #: with one of these names would collide with that directory — `carrier` in
 #: particular is exempted from the stale-split sweep, so a split named `carrier`
-#: would be permanently exempted from clearing and reinstate the F-25 leak for
-#: itself. Reserved for the same reason as ID_POOL_TAG (F-38).
+#: would be permanently exempted from clearing and leak stale scenes into itself.
+#: Reserved for the same reason as ID_POOL_TAG.
 RESERVED_SPLIT_NAMES = (ID_POOL_TAG, "carrier")
 
 #: The roles the pipeline spine understands. `role` is what routes a split: `train`
@@ -162,7 +166,7 @@ RESERVED_SPLIT_NAMES = (ID_POOL_TAG, "carrier")
 #: understood by NO stage, so it is generated, RENDERED and preprocessed and then
 #: appears in no result at all — reproduced with a one-character typo: nine stages
 #: `[done]`, exit 0, the split present in preprocessed/meta.json with scenes on disk
-#: and absent from ci_table.csv and summary.txt (F-44).
+#: and absent from ci_table.csv and summary.txt.
 #:
 #: Declared as a tuple + explicit membership check rather than a typing.Literal, to
 #: match the house pattern (RESERVED_SPLIT_NAMES above, METRIC_KINDS in
@@ -177,7 +181,7 @@ SPLIT_ROLES = ("train", "valid", "test")
 #: pooled). Declared as data rather than inline `if`s so that k-fold or repeated
 #: holdout — a plausible instantiation of the roadmap's deeper hyperparameter
 #: search (research_I_paper.md §6) — relaxes `valid` to a range here instead of
-#: needing the validation rewritten (RD-53).
+#: needing the validation rewritten.
 REQUIRED_ROLE_COUNTS = {"train": 1, "valid": 1}
 
 
@@ -283,6 +287,33 @@ def _sweep_axes(node: Any, path: str = "") -> dict[str, int]:
     return axes
 
 
+def _plugin_name_sweep_axes(merged: dict) -> dict[str, int]:
+    """The swept `<kind>.name` axes, which must be expanded before params attach.
+
+    Read off the declared tree rather than the attached one, where the name has
+    already been collapsed to whichever value this run selected.
+    """
+    axes: dict[str, int] = {}
+    for kind in _PLUGIN_BLOCKS:
+        block = merged.get(kind)
+        name = block.get("name") if isinstance(block, dict) else None
+        if _is_role_node(name) and "sweep" in name:
+            axes[f"{kind}.name"] = len(name["sweep"])
+    return axes
+
+
+def _selections(axes: dict[str, int]) -> list[dict[str, int]]:
+    """Every combination of indices over `axes`, as path → index maps.
+
+    No axes yields ONE empty selection, not none: "nothing swept here" is one run,
+    which is what lets a caller loop uniformly over swept and unswept trees alike.
+    """
+    return [
+        dict(zip(axes, combo))
+        for combo in itertools.product(*(range(n) for n in axes.values()))
+    ]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Nested sub-models
 # ─────────────────────────────────────────────────────────────────────────────
@@ -367,7 +398,7 @@ class SplitSpec(BaseModel):
 
 
 class ConvergenceTolerance(BaseModel):
-    """When the high ray-budget leg counts as a converged reference (RD-17).
+    """When the high ray-budget leg counts as a converged reference.
 
     Set to the same JND tolerances the D0b carrier test uses, deliberately: a
     reference is converged when doubling the rays again would not move a reported
@@ -385,7 +416,7 @@ class ConvergenceTolerance(BaseModel):
     band_energy_frac: float
 
     #: Metrics the probe found the reference leg is NOT converged for, each with the
-    #: measurement (AC-187). Absent from this map = converged.
+    #: measurement. Absent from this map = converged.
     #:
     #: Every paired improvement treats the high leg as ground truth. Where that
     #: premise is measured false the number is still reported — suppressing it would
@@ -397,9 +428,31 @@ class ConvergenceTolerance(BaseModel):
     #: cell counts say how much of the probe missed rather than only that some did.
     reference_unconverged: dict[str, "UnconvergedMetric"] = {}
 
+    #: Quantities this block declares a tolerance for that NOBODY HAS MEASURED.
+    #:
+    #: THE THIRD STATE, and the reason the contract needs one. With only two maps,
+    #: absence has to mean "measured and converged", so a quantity the probe never
+    #: ran on asserts a convergence nothing tested — silently, and most loudly for
+    #: the quantity closest to the model's own output domain. The same three-state
+    #: discipline as `qc.QCRecord.passed`: a skip is not a pass.
+    #:
+    #: Absent from BOTH maps therefore means measured-and-converged, and only that.
+    reference_unmeasured: dict[str, "UnmeasuredMetric"] = {}
+
+    @model_validator(mode="after")
+    def _no_quantity_is_both(self) -> "ConvergenceTolerance":
+        both = sorted(set(self.reference_unconverged) & set(self.reference_unmeasured))
+        if both:
+            raise ValueError(
+                f"convergence: {both} are declared BOTH unconverged and unmeasured. "
+                f"A quantity was either measured (and then converged or not) or it "
+                f"was not; the two maps are exclusive."
+            )
+        return self
+
 
 class UnconvergedMetric(BaseModel):
-    """What the ray-budget probe measured for one metric it failed (AC-187)."""
+    """What the ray-budget probe measured for one metric it failed."""
 
     model_config = {"extra": "forbid"}
 
@@ -422,12 +475,27 @@ class UnconvergedMetric(BaseModel):
     n_cells: int
 
 
+class UnmeasuredMetric(BaseModel):
+    """A convergence quantity nobody has measured, and why not.
+
+    Carries no measurement by construction — that is the point. Both fields are
+    required so an entry cannot decay into a bare name: `reason` is what a report
+    reader is owed, and `gate` is what stops the entry from becoming permanent by
+    naming the stage at which it is expected to be discharged.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    reason: str
+    gate: str
+
+
 class MetricOctaveFilter(BaseModel):
     """The octave-band filter the reported ISO-3382 metrics are computed through.
 
     ONE BLOCK, because the two fields are one design: the ORDER sets the realized
     stopband rejection, and the rejection is the property that has to be pinned so
-    the declaration cannot rot the way the resolvability floors did (AC-65).
+    the declaration cannot rot the way the resolvability floors did.
     Declaring the order without the rejection would let a change to the first pass
     the suite while silently invalidating every figure quoted for the second.
     """
@@ -436,12 +504,12 @@ class MetricOctaveFilter(BaseModel):
 
     #: Butterworth section order, per band, before `sosfiltfilt` doubles it.
     #:
-    #: EXPERIMENT-GOVERNING, hence declared (F-143). It is not fixed by ISO 3382-1,
+    #: EXPERIMENT-GOVERNING, hence declared. It is not fixed by ISO 3382-1,
     #: which asks for IEC 61260 class 1 — a conformance this filter does not meet at
     #: any order it could reach here. It is a research TRADE: steeper skirts buy
     #: out-of-band rejection at the cost of a longer ringing floor, and that floor
-    #: (`_band_resolvable_decay_s`) decides which bands carry the AC-38
-    #: resolvability caveat into reported metrics. A value that moves both sides of
+    #: (`_band_resolvable_decay_s`) decides which bands carry the resolvability
+    #: caveat into reported metrics. A value that moves both sides of
     #: that trade does not belong in a `butter(4, ...)` literal.
     order: int
 
@@ -452,7 +520,7 @@ class MetricOctaveFilter(BaseModel):
     #: is applied on BOTH sides (the skirts are not symmetric in Hz, so the worse of
     #: the two holds either way).
     #:
-    #: Declared here rather than pinned in the test file (RD-186) because it is the
+    #: Declared here rather than pinned in the test file because it is the
     #: measured consequence of `order`: the two are checked against each other by
     #: `test_the_octave_filter_meets_its_declared_stopband_rejection`, which is what
     #: makes changing the order a decision rather than an accident.
@@ -470,7 +538,7 @@ class MetricOctaveFilter(BaseModel):
                 "metric_octave_filter.stopband_rejection_db is empty. The filter "
                 "fails IEC 61260 class 1, so its realized selectivity is a DECLARED "
                 "property of the design; declaring none leaves the conformance gap "
-                "unstated (AC-68/RD-186)."
+                "unstated."
             )
         for octaves, bound in self.stopband_rejection_db.items():
             if octaves < 1:
@@ -530,12 +598,12 @@ class GeometryFamily(BaseModel):
 
     #: Which closed-form acoustic characterization applies to this family. NO
     #: DEFAULT — each family states it, because the alternative is a uniform spine
-    #: assuming a property that only happens to hold today (RD-64, the same class
-    #: as the metric `kind` contract).
+    #: assuming a property that only happens to hold today — the same class as
+    #: the metric `kind` contract.
     #:
     #:   "sabine" — a closed enclosure. Sabine/Eyring T60, room constant, critical
     #:              distance and diffuse-field DRR are all derived from `dims`, and
-    #:              the AC-22 record-length gate compares against that T60.
+    #:              the record-length gate compares against that T60.
     #:   "none"   — not an enclosure. `_room_acoustics` records a (split, reason)
     #:              instead of a number, and `worst_case_t60` skips the family.
     #:
@@ -553,7 +621,7 @@ class GeometryFamily(BaseModel):
                 f"characterization must be 'sabine' (a closed enclosure) or 'none' "
                 f"(not an enclosure); got {self.characterization!r}. It has no "
                 f"default: a family that does not state it would silently receive "
-                f"closed-box Sabine numbers (RD-64)."
+                f"closed-box Sabine numbers."
             )
         if len(self.dims) != 3:
             raise ValueError(f"dims must have 3 axis ranges; got {len(self.dims)}")
@@ -608,7 +676,7 @@ class PlacementRegime(BaseModel):
     #: Metres for the source-receiver separation, enforced by rejection sampling.
     #: Research I pins 1.0-10.0 m. Unlike `height_range`, an ELEMENT may be null,
     #: because a backend imposes a MINIMUM separation with no corresponding maximum
-    #: (AC-13/F-48) and `[lo, hi]`-only could not express that. Legal spellings:
+    #: and `[lo, hi]`-only could not express that. Legal spellings:
     #:
     #:   null          no constraint at all
     #:   [lo, null]    minimum only
@@ -616,7 +684,7 @@ class PlacementRegime(BaseModel):
     #:   [lo, hi]      both, lo < hi
     #:
     #: `[null, null]` is REJECTED: a nullable element is a new sub-convention and
-    #: must not become a second way to spell the existing whole-range null (RD-48).
+    #: must not become a second way to spell the existing whole-range null.
     distance_range: list[float | None] | None
 
     @model_validator(mode="after")
@@ -690,7 +758,7 @@ class Scenes(BaseModel):
     max_placement_attempts: int
 
     #: Largest fraction of generated scenes whose Sabine T60 may exceed
-    #: `ir_duration` (AC-22). Nothing previously checked that the declared record
+    #: `ir_duration`. Nothing previously checked that the declared record
     #: length could support the decay the declared geometry x absorption ranges
     #: admit, and a T30/EDT fitted over a truncated record measures the truncation,
     #: not the room. The gate binds on the REALIZED set rather than on the support
@@ -710,17 +778,17 @@ class Scenes(BaseModel):
     #: whether the backend fills that buffer, and one gsound answers very
     #: differently: its adaptive energy trim closes the record as a sub-linear power
     #: of T60, so the largest declared room's record is shorter than the T30 it is
-    #: measuring while comfortably "fitting" a 4.25 s window (AC-175, AC-184).
+    #: measuring while comfortably "fitting" a 4.25 s window.
     #:
     #: Declared here rather than taken from `evaluation/`'s
     #: `metric_min_decay_range_db` on purpose: this is the DESIGN-TIME admission
     #: rule over closed-form estimates, that one is the MEASUREMENT-TIME bound the
-    #: estimator applies to a rendered decay (AC-176). They should agree, and a
+    #: estimator applies to a rendered decay. They should agree, and a
     #: config that sets them apart is making a deliberate statement.
     iso_t30_decay_range_db: float
 
     #: Absorption above which the diffuse-field assumptions behind Sabine/Eyring,
-    #: the critical distance and DRR stop holding well (AC-21). Textbook guidance
+    #: the critical distance and DRR stop holding well. Textbook guidance
     #: puts the practical limit near alpha = 0.3; beyond it those closed forms are
     #: extrapolations, so scenes are FLAGGED (never dropped, never recomputed) and
     #: the flag is summarized per split in scenes/placement_report.json.
@@ -746,12 +814,11 @@ class SimulatorSpec(BaseModel):
     and retained-path policy live beside the backend, so swapping simulators is a
     config edit.
 
-    NOT here (named non-goal, RD-40): `low_ray_budget` / `high_ray_budget`. They are
-    the swept research axis (design_spec §7 "Config system — three parameter roles",
-    the swept-role note) and stay TOP-LEVEL Config fields.
-    Inside a plugin block they would sit under `_merge_layer`'s F-11 name-change
-    scoping, which drops a block's `params` when the name changes — silently
-    discarding the sweep the moment a second raytracer is selected.
+    NOT here, deliberately: `low_ray_budget` / `high_ray_budget`. They are the
+    swept research axis (design_spec §7) and stay TOP-LEVEL Config fields. Inside
+    a plugin block they would sit under `_merge_layer`'s name-change scoping,
+    which drops a block's `params` when the name changes — silently discarding
+    the sweep the moment a second raytracer is selected.
     """
 
     model_config = {"extra": "forbid"}
@@ -822,14 +889,13 @@ class Config(BaseModel):
     # ── Render QC thresholds (§6 QC record / §7) ──────────────────────────────
     # All FOUR of Research I's criteria (paper §B.4, Figure 5), because QC decides
     # dataset ADMISSION and E1 is "reproduce the old null" — two of four declared
-    # meant a silently different admission rule (RD-18).
+    # meant a silently different admission rule.
 
     #: Tolerance on the direct-path onset MISMATCH BETWEEN the low-ray and high-ray
     #: renders of one scene, in ms. A PAIRED criterion, not a bound on either IR's
     #: own onset: RI's check is that the same physical arrival lands at a consistent
     #: sample location across the pair, which a scene with a genuinely late direct
-    #: arrival satisfies. Named `max_onset_ms` until RD-18, which reads as the
-    #: absolute bound it is not.
+    #: arrival satisfies. Consumed by `simulators/qc.py`.
     onset_mismatch_tolerance_ms: float
 
     #: Smallest total IR energy admitted, in dB re `min_energy_reference`.
@@ -837,17 +903,33 @@ class Config(BaseModel):
     #: What `min_energy_db` is dB RELATIVE TO. Declared rather than assumed: RI
     #: states its floor as a linear energy (1e-10), and a bare "-60 dB" is not a
     #: level until the reference is stated — read as re 1.0 it is ~40 dB stricter
-    #: than RI's, which would exclude scenes RI admitted (RD-18).
+    #: than RI's, which would exclude scenes RI admitted.
     min_energy_reference: float
 
     #: Largest retained-path export admitted, in MB. Was declared FIXED in
     #: docs/design_spec.md §11.1's role table while appearing in no config, which is
-    #: a hidden default in the strict sense — nothing could set it (RD-18).
+    #: a hidden default in the strict sense — nothing could set it.
     max_path_file_mb: float
     #: Whether a scene with an EMPTY retained-path file is refused. RI requires
     #: non-empty path data; declared as a switch rather than assumed so a future
     #: backend that exports no paths can say so instead of failing every scene.
     require_non_empty_path_file: bool
+
+    #: Largest share of the batch that may be EXCLUDED and still constitute the
+    #: dataset — overall, and within any one split. RI §B.4 excludes failing
+    #: examples rather than refusing the batch, and per-example exclusion has no
+    #: natural floor, so without these a systematically broken backend yields a
+    #: small dataset instead of an error.
+    #:
+    #: The per-split bound is the binding one: attrition concentrated on a shift
+    #: split is a selection effect on that split's own declared axis, and it can be
+    #: severe there while negligible overall.
+    max_excluded_frac: float
+    max_excluded_frac_per_split: float
+    #: The same for scenes the BACKEND refused, held tighter because a refusal
+    #: describes the backend rather than the scene, and because it leaves nothing on
+    #: disk — so unlike a QC exclusion it is not reproducible on a re-run.
+    max_refused_frac: float
 
     # D0a headroom-probe verdict thresholds (design_spec §4)
     d0a_gap_large_db: float
@@ -858,7 +940,7 @@ class Config(BaseModel):
     d0b_edt_jnd_frac: float
     d0b_c50_jnd_db: float
     #: Smallest fraction of a split's scenes that must be SCORED for D0b to return
-    #: a verdict on it rather than INDETERMINATE (S-F1). Without it the verdict
+    #: a verdict on it rather than INDETERMINATE. Without it the verdict
     #: degraded only at n == 0, so a split whose scenes almost all failed to score
     #: could still read PASS — a clearance resting on the handful that survived,
     #: and the survivors are not a random subset.
@@ -866,15 +948,15 @@ class Config(BaseModel):
 
     #: Gains (dB) the D0b probe re-encodes each scene at, to disclose how much
     #: ABSOLUTE-LEVEL margin the dataset has before `min_db` injects an energy floor
-    #: into the decode (AC-37). Not a gate — `encode` already refuses a breaching
+    #: into the decode. Not a gate — `encode` already refuses a breaching
     #: scene — but a dataset clearing the guard by 2 dB and one clearing it by 40 dB
     #: are different datasets, and nothing else says which was rendered.
     d0b_level_sweep_db: list[float]
 
     #: What "the high leg is a CONVERGED REFERENCE" means, declared rather than
-    #: eyeballed (RD-17, RD-263). Every paired-improvement metric, D0a's headroom
-    #: and D0b's carrier test treat `high_ray_budget` as ground truth, and nothing
-    #: had ever checked it. The RD-17 probe reports against these thresholds — as a
+    #: eyeballed: every paired-improvement metric, D0a's headroom and D0b's carrier
+    #: test treat `high_ray_budget` as ground truth.
+    #: `scripts/ray_budget_convergence_probe.py` reports against these thresholds — as a
     #: TOLERANCE CHECK over a handful of scenes, never as a CI-backed claim.
     convergence: "ConvergenceTolerance"
 
@@ -885,7 +967,7 @@ class Config(BaseModel):
     metric_onset_rel_db: float
 
     #: How far the energy-threshold onset detector may disagree with the geometric
-    #: direct delay before geometry adjudicates, in ms (AC-181).
+    #: direct delay before geometry adjudicates, in ms.
     #:
     #: Experiment-governing: it decides where t=0 is, and t=0 sets the C50 50 ms
     #: split, the EDT anchor and the Schroeder start together. A detector-only onset
@@ -895,28 +977,23 @@ class Config(BaseModel):
     metric_onset_tolerance_ms: float
 
     #: The octave-band filter every reported ISO-3382 metric is computed through:
-    #: its ORDER, and the out-of-band rejection that order realizes (F-143/RD-186).
+    #: its ORDER, and the out-of-band rejection that order realizes.
     metric_octave_filter: "MetricOctaveFilter"
 
     # How many times the octave filter's OWN decay a room's decay must exceed to be
     # resolvable in that band (dimensionless). The floor itself is measured per
     # (metric, band) from the filter's impulse response, so this declares the SAFETY
     # MARGIN, not the threshold — replacing a single absolute scalar that was
-    # compared against the fitted value and therefore censored its own estimator
-    # (AC-26/AC-27). Below the floor, T30/EDT is unscored-with-reason, never a small
+    # compared against the fitted value and therefore censored its own estimator.
+    # Below the floor, T30/EDT is unscored-with-reason, never a small
     # number.
     metric_band_resolvability_margin: float
 
-    # ISO 3382-1 SNR ADMISSIBILITY (AC-176), per metric, in dB of usable decay.
-    # The standard requires the decay to be measurable over >= 45 dB before a T30
-    # is permitted (>= 35 dB for T20, >= 20 dB for EDT); below that the fit is not
-    # a room-acoustic quantity. Nothing enforced it, and nothing could: a
-    # Schroeder backward integral terminates at -inf dB by construction, so the
-    # [-5, -35] dB regression window is NEVER empty however little genuine decay
-    # the record holds, and the terminal plunge is silently included in the fit.
-    # Measured through the shipped path: -0.98 % T30 error at 85 dB of available
-    # decay, -5.41 % at 42.5, -22.99 % at 30.7, -55.88 % at 18.2 -- with
-    # `nan_reason` None and `resolvability` empty at every one of those points.
+    # ISO 3382-1 SNR ADMISSIBILITY, per metric, in dB of usable decay: the
+    # standard requires >= 45 dB before a T30 is permitted, >= 35 for T20 and
+    # >= 20 for EDT, and below that the fit is not a room-acoustic quantity. How
+    # the available range is measured, and why it cannot come from the Schroeder
+    # curve: `evaluation/room_acoustic.py:_available_decay_range_db`.
     #
     # DECLARED, not hardcoded, because the value is not universal: the dry-run
     # SCAFFOLD's 0.25 s records carry only 19-30 dB (measured over all 29 canonical
@@ -929,16 +1006,15 @@ class Config(BaseModel):
     # filter-limited: measured sd 24-31 % of T60 below ~0.15 s, against 6-10 % for
     # T30. Not a suppression threshold — no threshold can remove estimator variance
     # — but a DISCLOSURE bound: eval counts, per split, how many scenes' EDT falls
-    # below it so a high-uncertainty population is never read as a point estimate
-    # (AC-27/RD-78).
+    # below it so a high-uncertainty population is never read as a point estimate.
     metric_edt_variance_limited_s: float
 
     # Stats — bootstrap CI (design_spec §9)
     bootstrap_n_resamples: int
     bootstrap_alpha: float
     #: Smallest n at which a percentile bootstrap CI is reported as a CI rather
-    #: than as an uncalibrated interval (F-M7/F-105). Below it the requested
-    #: percentile falls INSIDE the sample extremes — at n = 3,
+    #: than as an uncalibrated interval. Below it the requested percentile falls
+    #: INSIDE the sample extremes — at n = 3,
     #: P(bootstrap mean == an extreme) = 3^-3 = 3.7 % against alpha/2 = 2.5 % — so
     #: the interval cannot attain its nominal coverage no matter how many
     #: resamples are drawn. Config-declared because it is a reporting threshold on
@@ -949,9 +1025,15 @@ class Config(BaseModel):
     # Recorded role metadata (populated by load(); not a YAML field).
     resolved_roles: dict[str, dict] = {}
 
-    # Pre-resolution declared tree (with tune/sweep nodes intact), kept so
-    # expand_sweeps() can re-resolve at other selections without re-reading files.
+    # The config AS WRITTEN: merged layers, every tune/sweep node intact, and
+    # plugin params NOT yet attached. Kept so expand_sweeps() can re-resolve at
+    # other selections without re-reading files.
     _declared: dict = PrivateAttr(default_factory=dict)
+
+    # `_declared` with each plugin's params file layered in at THIS run's plugin
+    # names. Separate from `_declared` because attachment depends on the name, so
+    # a swept name has no single attached tree — see expand_sweeps().
+    _attached: dict = PrivateAttr(default_factory=dict)
 
     # ── Derived quantities ────────────────────────────────────────────────────
     @property
@@ -963,7 +1045,7 @@ class Config(BaseModel):
         return int(self.sample_rate * self.ir_duration)
 
     def worst_case_t60(self) -> dict:
-        """The longest Sabine T60 this config's DECLARED scene support admits (AC-22).
+        """The longest Sabine T60 this config's DECLARED scene support admits.
 
         A disclosure, not a threshold. Nothing previously stated the relationship
         between `ir_duration` and the decay the declared ranges allow, and the two
@@ -975,7 +1057,7 @@ class Config(BaseModel):
         independent extremes and has near-zero probability of being drawn, so
         gating on it would reject configs whose realized scenes are all fine. The
         gate is `scenes.max_frac_below_iso_t30_decay_range`, applied to the REALIZED set
-        at gen-scenes (RD-56). The E1 write-up needs this number either way, so it
+        at gen-scenes. The E1 write-up needs this number either way, so it
         is computed here and stamped into resolved.yaml.
 
         Returns the corner and the geometry/material that produced it, so the
@@ -990,7 +1072,7 @@ class Config(BaseModel):
         for family, spec in self.scenes.geometry_families.items():
             # A family that is not an enclosure has no Sabine T60 to sweep, and
             # forcing the closed-box formula onto one would put a fabricated number
-            # in `resolved.yaml` (RD-64). Skipped and NAMED, never silently omitted.
+            # in `resolved.yaml`. Skipped and NAMED, never silently omitted.
             if spec.characterization == "none":
                 skipped.append(family)
                 continue
@@ -1036,13 +1118,13 @@ class Config(BaseModel):
 
         `scenes/placement_report.json` is keyed by generation REGIME, not by split:
         in frac mode the id-pool splits share one `id` entry and are separated later
-        by `data/splits.py`, while in count mode each is its own entry (S-F7). Any
+        by `data/splits.py`, while in count mode each is its own entry. Any
         consumer that carries a per-regime number onto a per-split row has to know
         which, and getting it wrong prints a `train`-sized figure beside `test_id`.
 
         Lives here because the split/regime vocabulary does — `id_pool_is_counted`
         is the predicate directly above, and a second copy of this mapping in the
-        reporting layer is the AC-24 shape.
+        reporting layer is how the two would drift.
         """
         if split_name not in self.splits:
             raise KeyError(
@@ -1072,9 +1154,9 @@ class Config(BaseModel):
 
         The single lookup every stage goes through, so role routing lives in one
         place: adding a role later touches SPLIT_ROLES and its consumers, never the
-        enumeration logic in trainer.py / preprocess.py again (RD-53). Raises on a
+        enumeration logic in trainer.py / preprocess.py again. Raises on a
         role outside the vocabulary, so a typo cannot silently return an empty
-        tuple at a call site (F-44)."""
+        tuple at a call site."""
         if role not in SPLIT_ROLES:
             raise ValueError(
                 f"unknown split role {role!r}; expected one of {list(SPLIT_ROLES)} "
@@ -1085,7 +1167,7 @@ class Config(BaseModel):
     def the_split_with_role(self, role: str) -> str:
         """The single split carrying `role` — for roles `REQUIRED_ROLE_COUNTS` pins
         to exactly one. `Config._check` has already guaranteed the count, so this
-        never has to guess or silently take the first of several (F-44)."""
+        never has to guess or silently take the first of several."""
         names = self.split_names_with_role(role)
         if len(names) != 1:
             raise ValueError(
@@ -1101,7 +1183,7 @@ class Config(BaseModel):
         self._check_scalar_domains()
         self._check_reserved_split_names()
         # Role vocabulary + cardinality. Must run BEFORE the shift-split check,
-        # which already assumes `role == "test"` is meaningful (F-44/RD-53).
+        # which already assumes `role == "test"` is meaningful.
         self._check_split_roles()
         self._check_id_pool_sizing()
         self._check_split_seeds()
@@ -1113,10 +1195,10 @@ class Config(BaseModel):
     def _check_scalar_domains(self) -> None:
         """Ranges a §7 tuned sweep (or a typo) could otherwise drive out of bounds.
 
-        Caught at load rather than deep in torch/stats (F-07, F-08). F-08 in
-        particular: `bootstrap_n_resamples` ≤ 0 gives degenerate CIs, and CIs are
-        the load-bearing evidence for every headline claim; the D0a/D0b thresholds
-        are gate multipliers a negative value would silently invert.
+        Caught at load rather than deep in torch/stats: `bootstrap_n_resamples`
+        ≤ 0 gives degenerate CIs, which are the load-bearing evidence for every
+        headline claim, and the D0a/D0b thresholds are gate multipliers a negative
+        value would silently invert.
         """
         positive_fields = (
             "huber_delta", "learning_rate",
@@ -1129,7 +1211,7 @@ class Config(BaseModel):
                 raise ValueError(f"{field} must be > 0; got {getattr(self, field)}")
         # 0 attempts makes every scene raise "could not satisfy distance_range None
         # in 0 attempts" — loud, but misdiagnosed as a constraint problem for a
-        # config that declares no constraint at all (F-32).
+        # config that declares no constraint at all.
         if self.scenes.max_placement_attempts <= 0:
             raise ValueError(
                 f"scenes.max_placement_attempts must be > 0; "
@@ -1140,7 +1222,7 @@ class Config(BaseModel):
             if not (0.0 < getattr(self, field) < 1.0):
                 raise ValueError(f"{field} must be in (0, 1); got {getattr(self, field)}")
         # Power ≤ alpha is nonsensical (a zero effect already "achieves" power = alpha
-        # two-sided), and mdes() would silently return ≈0 instead of erroring (F-17).
+        # two-sided), and mdes() would silently return ≈0 instead of erroring.
         if self.bootstrap_power <= self.bootstrap_alpha:
             raise ValueError(
                 f"bootstrap_power must exceed bootstrap_alpha; "
@@ -1156,7 +1238,7 @@ class Config(BaseModel):
         """`id` is the generator's "hash-bucket me" tag (a split of that name
         silently captures or loses scenes instead of being routed), and `carrier` is
         a non-split directory inside preprocessed/ that the stale-split sweep
-        deliberately skips (F-38)."""
+        deliberately skips."""
         clashes = sorted(set(self.splits) & set(RESERVED_SPLIT_NAMES))
         if clashes:
             raise ValueError(
@@ -1219,7 +1301,7 @@ class Config(BaseModel):
         return any(sp.count is not None for sp in self.id_pool_splits.values())
 
     def _check_split_counts_positive(self) -> None:
-        """A declared `count` must be a real number of scenes (F-46).
+        """A declared `count` must be a real number of scenes.
 
         Count validation was asymmetric: id-pool counts had to be `> 0`, while a
         shift split's count only had to be non-None — so `count: 0` was legal
@@ -1238,7 +1320,7 @@ class Config(BaseModel):
 
     def _check_split_roles(self) -> None:
         """Every split declares a role the spine understands, and the roles the
-        pipeline can only have one of have exactly one (F-44).
+        pipeline can only have one of have exactly one.
 
         Without this, a role outside SPLIT_ROLES is understood by no stage: the
         split is generated, rendered and preprocessed, then silently absent from
@@ -1366,9 +1448,9 @@ class Config(BaseModel):
                     f"Switch to count-mode sizing, or remove the seed."
                 )
         else:
-            # F-35: count mode's contract is that every split is generated
-            # independently, so a shift split without its own seed silently falls
-            # back to the shared stream and breaks that promise asymmetrically.
+            # Count mode's contract is that every split is generated
+            # independently, so a shift split without its own seed would silently
+            # fall back to the shared stream and break that promise.
             unseeded = sorted(
                 n for n, sp in self.shift_splits.items() if sp.seed is None
             )
@@ -1418,7 +1500,7 @@ class Config(BaseModel):
     @staticmethod
     def _merge_yaml(paths: list[Path]) -> dict:
         # A missing config ROOT is a layout problem, not a missing-file problem,
-        # and the two need different messages (F-73). Checked here so every entry
+        # and the two need different messages. Checked here so every entry
         # point — load, with_overrides, expand_sweeps — is covered by one guard.
         _require_configs()
         merged: dict = {}
@@ -1430,26 +1512,17 @@ class Config(BaseModel):
 
     @classmethod
     def _from_merged(cls, merged: dict, selection: dict[str, int] | None) -> "Config":
-        # Attach each plugin's parameter block from its configs/<kind>/<name>.yaml,
-        # so the master config never bakes in model- or rep-specific fields (§7/§8).
-        # RD-13: `simulator` is attached HERE, not merely listed in _PLUGIN_BLOCKS.
-        # _PLUGIN_BLOCKS membership only scopes params across a name change (F-11);
-        # attachment is what puts the params file's contents into the tree BEFORE
-        # _resolve_roles runs, which is what lets a `sweep:` inside simulator params
-        # (e.g. the roadmap's retained-path-count axis) expand into sibling runs.
-        merged = {
-            **merged,
-            "model": _attach_params_block(merged.get("model"), "model", _MODELS_DIR),
-            "representation": _attach_params_block(
-                merged.get("representation"), "representation", _REPS_DIR
-            ),
-            "simulator": _attach_params_block(merged.get("simulator"), "simulator", _SIMS_DIR),
-        }
-
-        concrete, roles = _resolve_roles(merged, selection or {})
+        selection = selection or {}
+        attached, name_roles = _attach_plugin_blocks(merged, selection)
+        concrete, roles = _resolve_roles(attached, selection)
+        # The plugin names were collapsed before the walk, so the walk cannot see
+        # them; merged back in, a swept `model.name` appears in resolved.yaml's
+        # role table like any other axis.
+        roles.update(name_roles)
         concrete["resolved_roles"] = roles
         obj = cls(**concrete)
         obj._declared = merged
+        obj._attached = attached
         return obj
 
     @classmethod
@@ -1473,16 +1546,25 @@ class Config(BaseModel):
         Each sibling is a fully concrete Config selecting one value per swept axis
         (design_spec §7 provenance: a swept param → N sibling runs). Used by E4; a
         run with no sweeps returns just this config.
+
+        A SWEPT PLUGIN NAME IS EXPANDED FIRST, then each selected name's own params
+        are expanded under it. One product over a single attached tree would be
+        wrong: two plugin names have different parameter schemas, so the axes of
+        `vanilla_cnn.yaml` do not exist under `unet.yaml`, and pairing them would
+        invent sibling runs whose selections name parameters their model has not
+        got.
         """
-        axes = _sweep_axes(self._declared)
-        if not axes:
-            return [self]
-        names = list(axes)
+        name_axes = _plugin_name_sweep_axes(self._declared)
         siblings: list[Config] = []
-        for combo in itertools.product(*(range(axes[n]) for n in names)):
-            selection = dict(zip(names, combo))
-            siblings.append(self._from_merged(self._declared, selection))
-        return siblings
+        for name_selection in _selections(name_axes):
+            attached, _ = _attach_plugin_blocks(self._declared, name_selection)
+            for selection in _selections(_sweep_axes(attached)):
+                siblings.append(
+                    self._from_merged(self._declared, {**name_selection, **selection})
+                )
+        # One sibling and no axes means nothing was swept; return the loaded config
+        # itself rather than a re-resolved copy of it.
+        return [self] if not name_axes and len(siblings) == 1 else siblings
 
     # ── Provenance ────────────────────────────────────────────────────────────
     def stamp(self, run_dir: Path, device: str | None = None) -> None:
@@ -1512,7 +1594,7 @@ class Config(BaseModel):
             "n_samples": self.n_samples,
             "test_split_names": list(self.test_split_names),
             # The longest decay the DECLARED ranges admit, against the record
-            # length. Disclosure, never a gate (AC-22/RD-56) — the E1 write-up
+            # length. Disclosure, never a gate — the E1 write-up
             # needs it, and a config whose record does not cover its own support
             # should say so in its own provenance rather than in a comment.
             "worst_case_t60": self.worst_case_t60(),
@@ -1530,7 +1612,7 @@ class Config(BaseModel):
             except importlib.metadata.PackageNotFoundError:
                 versions[pkg] = "not-installed"
         # git sha/dirty are HUMAN provenance resolved from the PACKAGE, never the
-        # run_dir — see amcd.provenance (F-56).
+        # run_dir — see amcd.provenance.
         versions["git_sha"] = provenance.git_sha()
         versions["git_dirty"] = provenance.git_is_dirty()
         # Whole-package and human-facing, never a cache key — see amcd.provenance,
@@ -1540,8 +1622,8 @@ class Config(BaseModel):
         # INVOCATION, and stamp() runs before any stage does, so it is not a claim
         # that this code produced the run_dir's artifacts. It read as one — an
         # all-cached re-run re-stamps the current hash, so a run_dir whose renders
-        # predate a backend change carried a stamp asserting the new code made them
-        # (F-75). Per-stage truth lives in `stages/<stage>.done`
+        # predate a backend change carried a stamp asserting the new code made them.
+        # Per-stage truth lives in `stages/<stage>.done`
         # (`code_version_unscoped`). Said in the FILE below, not only here, because
         # a comment does not reach whoever reads versions.json.
         versions["code_version"] = provenance.code_version(provenance.ALL_SOURCES)
@@ -1550,7 +1632,7 @@ class Config(BaseModel):
             "cached stages may predate it — see stages/<stage>.done"
         )
         # WHICH MACHINE, beside which code — the same config and code_version give
-        # different weights on MPS and on CUDA/CPU. Neither is a cache key (F-74).
+        # different weights on MPS and on CUDA/CPU. Neither is a cache key.
         #
         # The device is PASSED IN rather than selected here. `config.py` is in
         # `_CORE_SOURCES`, which every stage's declared scope unions in, so importing
@@ -1582,7 +1664,7 @@ def _require_registered(kind: str, name: str) -> None:
     Used only on the no-params-file path: the registry — not the presence of a
     `<name>.yaml` — is the source of truth for valid names, so a parameter-free or
     stub plugin (e.g. `edr`) needs no file, while a typo'd name is still caught
-    here (with the available-names list) instead of proceeding silently (F-12)."""
+    here (with the available-names list) instead of proceeding silently."""
     import importlib
 
     pkg_name, registry_attr = _PLUGIN_REGISTRY[kind]
@@ -1602,13 +1684,14 @@ def _attach_params_block(block: Any, kind: str, config_dir: Path) -> dict:
     carries only the plugin NAME plus optional overrides; the concrete default
     parameter set lives beside the plugin so the master config stays plugin-agnostic.
 
-    A missing `<name>.yaml` is allowed only for a REGISTERED plugin (F-12): a
+    A missing `<name>.yaml` is allowed only for a REGISTERED plugin: a
     parameter-free or not-yet-implemented stub (e.g. `edr`) needs no file and gets
     empty params, so it reaches its own NotImplementedError rather than a
     file-not-found; an unknown name fails loud here.
+
+    `block["name"]` is already concrete — `_attach_plugin_blocks` collapses a swept
+    name before calling this, and is the only caller.
     """
-    if not isinstance(block, dict) or "name" not in block:
-        raise ValueError(f"config `{kind}` must be a mapping with a `name` key")
     params_file = config_dir / f"{block['name']}.yaml"
     if params_file.exists():
         with open(params_file) as f:
@@ -1624,12 +1707,60 @@ def _attach_params_block(block: Any, kind: str, config_dir: Path) -> dict:
 _PLUGIN_BLOCKS = ("model", "representation", "simulator")
 
 
+def _plugin_dirs() -> dict[str, Path]:
+    """Where each plugin kind's per-name params file lives.
+
+    A function, not a module constant, because `_MODELS_DIR` and friends are
+    derived from `_resolve_configs_dir()` at import time and tests repoint the
+    configs root.
+    """
+    return {"model": _MODELS_DIR, "representation": _REPS_DIR, "simulator": _SIMS_DIR}
+
+
+def _attach_plugin_blocks(
+    merged: dict, selection: dict[str, int]
+) -> tuple[dict, dict[str, dict]]:
+    """Layer each plugin's `configs/<kind>/<name>.yaml` into the tree.
+
+    THE NAME IS RESOLVED FIRST, and that ordering is the whole point: a
+    `{sweep: [...]}` on `model.name` or `simulator.name` selects WHICH params file
+    is attached, so the role grammar can express cross-model comparison and the
+    multiple-raytracer axis (paper §6) instead of requiring a concrete name.
+
+    Attachment then happens before `_resolve_roles` walks the tree, which is what
+    lets a `sweep:` INSIDE a params file (e.g. the retained-path-count axis)
+    expand into sibling runs too.
+
+    Returns the attached tree and the role metadata for any swept name, which the
+    caller merges into the walk's own roles.
+    """
+    out = dict(merged)
+    roles: dict[str, dict] = {}
+    for kind, config_dir in _plugin_dirs().items():
+        block = merged.get(kind)
+        if not isinstance(block, dict) or "name" not in block:
+            raise ValueError(f"config `{kind}` must be a mapping with a `name` key")
+        name = block["name"]
+        if _is_role_node(name):
+            path = f"{kind}.name"
+            if "tune" in name:
+                raise ValueError(
+                    f"{path}: a plugin name is categorical, so it cannot be `tune`d — "
+                    f"`tune` declares a numeric space to search. Use `sweep` to compare "
+                    f"named plugins as sibling runs."
+                )
+            name, roles[path] = _resolve_role_node(name, path, selection)
+            block = {**block, "name": name}
+        out[kind] = _attach_params_block(block, kind, config_dir)
+    return out, roles
+
+
 def _merge_layer(base: dict, incoming: dict) -> None:
     """Deep-merge one config layer, with plugin-block params SCOPED TO THE NAME.
 
     A `{name, params}` block's params belong to that specific plugin. When an
     incoming layer switches `model`/`representation` name, the prior name's params
-    must not bleed into the new plugin — they are for a different schema (F-11).
+    must not bleed into the new plugin — they are for a different schema.
     So drop the accumulated block's `params` on a name change, then deep-merge.
     This is the single merge primitive; use it wherever config layers combine."""
     for key in _PLUGIN_BLOCKS:

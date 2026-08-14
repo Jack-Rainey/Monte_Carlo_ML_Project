@@ -1,10 +1,10 @@
-"""Stats-stage numerics (ledger F-09, F-13/F-14/F-16, F-15, F-18).
+"""Stats-stage numerics.
 
 MDES (minimum detectable effect size) is the load-bearing "could we even have seen
 an effect this small?" number at this design's small per-split n. These pin:
-the unbiased sample std (ddof=1, F-09); the exact noncentral-t solver
-(F-13/F-14/F-16); per-group bootstrap substreams (F-15); and — F-18 — that the
-inferential σ is the std of the per-scene PAIRED improvement |low−high| − |pred−high|
+the unbiased sample std (ddof=1); the exact noncentral-t solver; per-group
+bootstrap substreams; and that the inferential σ is the std of the per-scene
+PAIRED improvement |low−high| − |pred−high|
 (design_spec §9), never the std of the absolute pred value, which diverges from it
 by up to ~2.4× in the dry run.
 """
@@ -28,7 +28,7 @@ def _achieved_power(ncp: float, df: int, t_crit: float) -> float:
     """Independent oracle: two-sided noncentral-t power at `ncp`, NOT reusing the
     module's bisection. Prefer scipy's `nct` where it is finite (a genuinely
     independent implementation); fall back to the chi-square-mixture integral in the
-    small-df hole zone where `nct.cdf` returns NaN (this is exactly the F-16 regime
+    small-df hole zone where `nct.cdf` returns NaN (this is exactly the regime
     the raw scipy recompute could not check)."""
     p = scipy.stats.nct.sf(t_crit, df, ncp) + scipy.stats.nct.cdf(-t_crit, df, ncp)
     if np.isfinite(p):
@@ -56,7 +56,7 @@ def test_bootstrap_ci_reports_sample_std_not_population() -> None:
         (4, 0.8, 0.05),
         (5, 0.8, 0.05),
         (8, 0.8, 0.05),
-        # F-16 hole zone: at low alpha / high power the root sits where scipy's
+        # Hole zone: at low alpha / high power the root sits where scipy's
         # nct.cdf is NaN, so the old nudge-then-bisect solver truncated the bracket
         # below the root and understated MDES. Plausible as a multiple-comparison
         # correction across the 6 splits. The hole-free evaluator must nail it.
@@ -65,7 +65,7 @@ def test_bootstrap_ci_reports_sample_std_not_population() -> None:
     ],
 )
 def test_mdes_achieves_target_power_via_noncentral_t(n: int, power: float, alpha: float) -> None:
-    """F-13/F-16: for n≥3 (df≥2) MDES is the EXACT small-sample effect — plugging its
+    """For n≥3 (df≥2) MDES is the EXACT small-sample effect — plugging its
     noncentrality back into the two-sided noncentral-t power reproduces the target
     power. Non-tautological: `_achieved_power` recomputes power from the returned
     effect independently of the bisection that found it (scipy `nct` where finite, a
@@ -84,7 +84,7 @@ def test_mdes_achieves_target_power_via_noncentral_t(n: int, power: float, alpha
 
 
 def test_mdes_returns_nan_for_n2_df1() -> None:
-    """F-14: at n=2 (df=1) the earlier clamp-to-1.0 solver returned a finite,
+    """At n=2 (df=1) the earlier clamp-to-1.0 solver returned a finite,
     ~2×-too-small MDES (overstating detectability). MDES must instead be N/A there —
     an unpowered 1-df test — never a finite value that misses target power."""
     assert np.isnan(mdes(1.5, 2, 0.8, 0.05))
@@ -119,10 +119,10 @@ def _run_stats_on_rows(cfg, rows: list[dict]) -> pd.DataFrame:
 
 
 def test_run_stats_mdes_uses_paired_improvement_sigma() -> None:
-    """F-18: MDES (and improvement_std) come from the per-scene PAIRED improvement
+    """MDES (and improvement_std) come from the per-scene PAIRED improvement
     |low−high| − |pred−high| (design_spec §9), never from the absolute pred values.
     Fixture is built so std(pred_val) ≠ std(paired) — following the wrong σ fails.
-    Also pins F-09 (ddof=1 sample std) on the paired quantity, and that the
+    Also pins the ddof=1 sample std on the paired quantity, and that the
     descriptive pred_std column still carries the absolute-value sample std."""
     cfg = tiny_config()
     # (low, pred, high): paired = |low−high| − |pred−high| = [0.30, 0.05, −0.10];
@@ -157,7 +157,7 @@ def test_run_stats_mdes_uses_paired_improvement_sigma() -> None:
 
 
 def test_paired_improvement_sign_matches_improved_flag() -> None:
-    """F-18 consistency: paired > 0 ⟺ improved == True, row by row, against
+    """Consistency: paired > 0 ⟺ improved == True, row by row, against
     metric_improvement itself — the stats-stage quantity and the eval-stage flag
     are the same comparison in different forms."""
     from amcd.evaluation.metric_row import MetricTriple, metric_improvement
@@ -171,7 +171,7 @@ def test_paired_improvement_sign_matches_improved_flag() -> None:
 
 
 def test_bootstrap_substream_per_group_is_order_and_set_invariant() -> None:
-    """F-15: a group's CI bounds must not depend on which OTHER groups exist —
+    """A group's CI bounds must not depend on which OTHER groups exist —
     each (split, metric, quantity) gets its own seeded substream. Pre-fix, one
     shared RNG stream meant adding metric B perturbed metric A's bounds."""
     cfg = tiny_config()
@@ -198,11 +198,11 @@ def test_bootstrap_substream_per_group_is_order_and_set_invariant() -> None:
     b = with_extra[with_extra["metric"] == "T30"].iloc[0]
     for col in ("improvement_ci_lower", "improvement_ci_upper",
                 "pred_ci_lower", "pred_ci_upper", "improvement_mdes"):
-        assert a[col] == b[col], f"{col} of T30 changed when C50 was added (F-15)"
+        assert a[col] == b[col], f"{col} of T30 changed when C50 was added"
 
 
 def test_run_stats_maximize_kind_uses_pred_minus_low() -> None:
-    """F-20: a `maximize` metric's inferential quantity is pred − low — computed
+    """A `maximize` metric's inferential quantity is pred − low — computed
     from (low, pred) alone, with the high leg structurally absent (NaN). Pre-fix,
     the spine's hardcoded |low−high| − |pred−high| saw the NaN high leg and
     silently unscored the whole group (energy_snr_db: n_scored 0 in every split)."""
@@ -226,7 +226,7 @@ def test_run_stats_maximize_kind_uses_pred_minus_low() -> None:
 
 
 def test_run_stats_rejects_mixed_or_missing_kind() -> None:
-    """F-20 fail-loud contract: one metric declares exactly one kind, and a
+    """Fail-loud contract: one metric declares exactly one kind, and a
     pre-taxonomy parquet (no kind column) is an error, never a silent guess."""
     cfg = tiny_config()
     base = {"split": "test_id", "metric": "T30", "low_val": 3.0, "pred_val": 1.0,
@@ -244,7 +244,7 @@ def test_run_stats_rejects_mixed_or_missing_kind() -> None:
 
 
 def test_run_stats_reports_attempted_vs_scored() -> None:
-    """F-21: n_attempted counts every per-scene row in the (split, metric) group;
+    """N_attempted counts every per-scene row in the (split, metric) group;
     a NaN-legged (unscored) scene shows up as the scored/attempted gap instead of
     silently shrinking the population."""
     cfg = tiny_config()

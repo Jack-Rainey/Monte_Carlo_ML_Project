@@ -11,18 +11,10 @@ ISO-3382 metrics (T30, EDT, C50).
 - **Open review findings:** [`docs/review_ledger.md`](docs/review_ledger.md)
 - **Render-backend environment + upstream API reference:** [`docs/gsound_sir_setup.md`](docs/gsound_sir_setup.md)
 
-Code and tests cite review-ledger row ids (`F-49`, `AC-17`, `RD-45`) as their
-traceability device. A resolved row is **deleted** from the ledger — git history is
-the audit trail — so a cited id that is not in the ledger is a row that was closed,
-not a mistake. Recover it with:
-
-```bash
-git log -S 'RD-45' -p -- docs/review_ledger.md   # -p shows the row, not just the commit
-```
-
-16 ids predate the ledger itself and are **listed as exceptions in the ledger
-header** — for those, `grep -rn '<id>' src/ tests/ configs/` is the record, because
-each citing comment states the finding rather than merely pointing at it.
+Comments and docstrings state the contract and the reason, never the review
+history that produced them. Findings are tracked in `docs/review_ledger.md`,
+which holds only what is still unresolved: a fixed row is **deleted**, and git
+history is its audit trail (`git log -S '<id>' -p -- docs/review_ledger.md`).
 
 ## Install
 
@@ -99,6 +91,20 @@ experiments/<run_id>/
   scenes/scene_NNNN.json        gen-scenes  + placement_report.json
   renders/scene_NNNN/           render      low.npy high.npy meta.json
                                             paths_{low,high}.parquet (gsound only)
+  renders/manifest.json         render      WHICH SCENES THE DATASET IS. Admitted
+                                            ids + a digest of that set, and every
+                                            excluded id with its category
+                                            (refused | qc_failed) and reason.
+                                            Downstream reads this, never a
+                                            directory listing — an excluded scene
+                                            keeps its artifacts on disk.
+  renders/qc_failures.csv       render      every admission criterion that FAILED,
+                                            plus every one that was NOT SCORED
+                                            (skips, non-gating disclosures).
+                                            Canonical. A clean batch still has
+                                            rows — it has none whose `passed` is
+                                            False. Every criterion, scored or not:
+                                            renders/qc_record.csv (save level 4)
   preprocessed/                 preprocess  <split>/ carrier/ splits.json meta.json
   diagnostics/                  diagnostics d0a_gap.json d0b_oracle.json
   checkpoints/best.pt           train
@@ -111,6 +117,10 @@ experiments/<run_id>/
 
 - Each stage writes a sentinel under `experiments/<run_id>/stages/`; a cached stage
   is skipped. Pass `--force` to rerun.
+- `render` additionally reuses INDIVIDUAL scenes: one whose `meta.json` records the
+  current artifact fingerprint and whose digests still verify is not re-rendered,
+  so a run that fails or is killed part-way costs only the scenes it did not
+  finish. `--force` overrides per-scene reuse as well as the stage sentinel.
 - Config layers merge left-to-right on top of `configs/base.yaml`; later `--config`
   files override earlier ones.
 - Runs stamp `config.yaml` (resolved concrete config), `resolved.yaml`
@@ -159,6 +169,11 @@ Roles are parsed and validated now; `Config.expand_sweeps()` produces the siblin
 runs. The search **engine** (grid/factorial/evolutionary) is stubbed
 (`src/amcd/search.py`) until E3 — `fixed` is fully supported today.
 
+A plugin **name** is sweepable too — `model: {name: {sweep: [vanilla_cnn, unet]}}`
+gives one sibling run per model, each attaching its own `configs/models/<name>.yaml`.
+That is how cross-model comparison and the multiple-raytracer axis are expressed
+rather than by hand-editing between runs.
+
 **Evaluation splits** are a config-declared set (`splits:` in `base.yaml`), not
 hardcoded names. Conventions: `train` / `valid` / `test_id` are the in-distribution
 train/validation/test sets (hash-bucketed from the id pool by fraction); every other
@@ -182,6 +197,7 @@ src/amcd/
   search.py         # HPO strategy stubs (grid/factorial/evolutionary → E3)
   scenes/           # procedural scene generation (config-driven ranges)
   simulators/       # dry_run (synthetic) + gsound_sir (x86 real renderer)
+                    #   + qc.py: the render-stage admission criteria
   data/             # split assignment, preprocessing, normalization
   representations/  # third-octave spectrogram / waveform / EDR encoders
   models/           # vanilla_cnn baseline (owns its Params schema)
@@ -201,6 +217,10 @@ configs/            # three kinds of file (see "Configuration is the source of t
   simulators/       #   from the master config
 scripts/            # setup_gsound_sir.py — the ref-addressable backend installer
                     # new_lane.py, lane_guard.py, lane_preflight.py — parallel lanes
+                    # ledger_review_guard.py — the ledger's Stop hook
+                    # *_probe.py — retained measurements the code's contracts cite
+                    #   (tail compensation, shared window, support law, C50 noise
+                    #   floor, ray-budget convergence)
 docs/               # research_I_paper.md, design_spec.md, review_ledger.md,
                     # verbosity.md, gsound_sir_setup.md, parallel_protocol.md
   lanes/            #   one partition file per review cycle (who owns what)

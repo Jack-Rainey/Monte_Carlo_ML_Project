@@ -1,6 +1,6 @@
 """The third-octave filter bank: declared, self-describing, and measured.
 
-Ledger row AC-19. The defect is not that the bank is wrong — energy conservation
+The defect is not that the bank is wrong — energy conservation
 within the covered range is exact and the leakage is common-mode across legs, so
 paired metrics survive it. The defect is that three consequential properties were
 UNDECLARED:
@@ -86,13 +86,13 @@ class TestLadderIsDeclaredNotHardcoded:
     def test_a_ladder_setting_that_would_hang_is_rejected_at_load(
         self, field: str, value: float
     ) -> None:
-        """AC-32: three SCHEMA-VALID settings made the construction loop run
+        """Three SCHEMA-VALID settings made the construction loop run
         forever — verified with a 3 s alarm. Not a wrong result: a hang or an OOM
         at preprocess, i.e. AFTER the render it would waste. The bound must be in
         `Params`, so the failure is a config-load error, not a stalled run.
 
         The baseline params come from `tiny_config()` rather than from literals
-        here (F-M10). A hand-written dict drifts from the schema — when
+        here. A hand-written dict drifts from the schema — when
         `min_db_headroom_octave_centres_hz` was added, the literal version still
         raised ValidationError but for the MISSING key rather than the field under
         test, so every case passed for the wrong reason. The guard below pins that:
@@ -117,7 +117,7 @@ class TestLadderIsDeclaredNotHardcoded:
     def test_band_count_is_pinned_per_sample_rate(
         self, sample_rate: int, n_fft: int, expected_bands: int
     ) -> None:
-        """F-59: the Nyquist admission rule is behaviour-preserving only at 48 kHz.
+        """The Nyquist admission rule is behaviour-preserving only at 48 kHz.
 
         The old rule (`f <= sample_rate/2 * 1.01`) gave 27 / 21 / 28 / 19 for these
         four framings; the current rule gives 27 / 21 / 27 / 18. The two disagree
@@ -171,7 +171,7 @@ class TestLadderIsDeclaredNotHardcoded:
 
 
 class TestShippedValueIsBehaviourPreserving:
-    """`min_bins_per_band: 1` is declared as a no-op ON PURPOSE (AC-19/RD-58).
+    """`min_bins_per_band: 1` is declared as a no-op ON PURPOSE.
 
     The mechanism and the measurement land now; the band-floor VALUE is a research
     decision (3 would drop every band below ~315 Hz) and is DEFERRED to E2. If that
@@ -188,7 +188,7 @@ class TestShippedValueIsBehaviourPreserving:
 
 
 class TestUndeclaredPropertiesAreNowRecorded:
-    """The three facts AC-19 found true but unstated."""
+    """Three properties of the bank that are true but not self-evident."""
 
     def test_the_lowest_bands_hold_a_single_fft_bin(self, production_rep) -> None:
         d = production_rep.band_description
@@ -205,7 +205,7 @@ class TestUndeclaredPropertiesAreNowRecorded:
         assert [round(b["center_hz"], 1) for b in sub_minimum][-3:] == [31.2, 39.4, 62.5]
 
     def test_the_band_above_nyquist_is_recorded_as_dropped(self, production_rep) -> None:
-        """F-59: a candidate excluded by the Nyquist LOOP CONDITION never became a
+        """A candidate excluded by the Nyquist LOOP CONDITION never became a
         candidate, so it could not appear in `dropped_bands` — meta.json
         under-reported which bands were removed and why."""
         d = production_rep.band_description
@@ -214,7 +214,7 @@ class TestUndeclaredPropertiesAreNowRecorded:
         assert above[0]["lo_hz"] == pytest.approx(d["represented_band_limit_hz"][1])
 
     def test_bins_outside_every_band_are_recorded(self, production_rep) -> None:
-        """AC-31: this is a property of the BANK (bin count), not of any signal's
+        """This is a property of the BANK (bin count), not of any signal's
         power — the two coincide only for a white spectrum. Named accordingly."""
         frac = production_rep.band_description["uncovered_bin_fraction"]
         assert 0.05 < frac < 0.07, f"uncovered fraction moved: {frac}"
@@ -233,7 +233,7 @@ def _decaying_ir(rep, t60: float = 0.05, seconds: float = 0.5) -> np.ndarray:
 
 
 class TestMinDbIsAnAbsoluteFloor:
-    """AC-33: `min_db` is an ABSOLUTE dB clamp (re 1.0 in STFT power of the
+    """`min_db` is an ABSOLUTE dB clamp (re 1.0 in STFT power of the
     float32 IR), not a level below the per-scene peak.
 
     The distinction is invisible today — at unit gain 131.7 dB is retained below
@@ -251,7 +251,7 @@ class TestMinDbIsAnAbsoluteFloor:
         )
 
     def test_a_scene_on_the_floor_is_refused(self, production_rep) -> None:
-        """AC-37's guard, asserted beside the property it protects.
+        """Guard, asserted beside the property it protects.
 
         The gains below (0.01 … 100) sit INSIDE what the guard admits — measured,
         gain 0.01 leaves 54.21 dB of worst-band headroom against the declared
@@ -268,7 +268,7 @@ class TestMinDbIsAnAbsoluteFloor:
         loud = self._clamped_fraction(production_rep, 100.0)
         assert quiet > loud, (
             f"clamped fraction did not fall with gain ({quiet} → {loud}); if the "
-            f"floor was made peak-relative, update the AC-33 disclosure in "
+            f"floor was made peak-relative, update the disclosure in "
             f"configs/representations/spectrogram.yaml with it"
         )
 
@@ -290,7 +290,7 @@ class TestMinDbIsAnAbsoluteFloor:
 
 
 class TestToneInBandKnownAnswer:
-    """The probe AC-19 asked to become a known-answer test."""
+    """A one-bin band peaks in the WRONG band, pinned as a known answer."""
 
     def test_a_500_hz_tone_lands_in_the_500_hz_band(self, production_rep) -> None:
         fractions = _band_fractions(production_rep, 500.0)
@@ -313,7 +313,7 @@ class TestToneInBandKnownAnswer:
         peak = production_rep.center_freqs[int(np.argmax(fractions))]
         assert peak == pytest.approx(78.7, abs=0.1), (
             "the 63 Hz mis-peak changed — if this was deliberate, update the "
-            "AC-19 disclosure and the E2 write-up with it"
+            "in-band-fraction disclosure and the E2 write-up with it"
         )
         assert 0.55 < fractions.max() < 0.62
 

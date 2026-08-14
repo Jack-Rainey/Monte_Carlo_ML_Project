@@ -1,4 +1,4 @@
-"""Unit tests for the verbosity runtime (ledger F-22/F-24/RR-19 mechanics).
+"""Unit tests for the verbosity runtime.
 
 Covers the `Verbosity` value object and the single `emit` helper: range
 validation (no silent clamp), the monotonic-superset property of the category
@@ -15,7 +15,7 @@ from amcd.runtime import CATEGORY_LEVELS, Verbosity, emit
 
 
 def test_verbosity_rejects_out_of_range() -> None:
-    """F-24: out-of-range levels are an error, never clamped."""
+    """Out-of-range levels are an error, never clamped."""
     for bad in (-1, 6, 99):
         with pytest.raises(ValueError):
             Verbosity(save=bad, show=0)
@@ -36,7 +36,7 @@ def test_unknown_category_raises() -> None:
 
 
 def test_ladder_is_monotonic_superset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """RR-19: each level enables a superset of every lower level, on both axes."""
+    """Each level enables a superset of every lower level, on both axes."""
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     for level in range(5):
         lo_show = {c for c in CATEGORY_LEVELS if Verbosity(save=0, show=level).shows(c)}
@@ -52,7 +52,7 @@ def test_ladder_is_monotonic_superset(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_warning_and_error_always_emit_to_stderr(capsys: pytest.CaptureFixture) -> None:
-    """F-24: failures are never suppressed, even at show=0, and go to stderr."""
+    """Failures are never suppressed, even at show=0, and go to stderr."""
     v = Verbosity(save=0, show=0)
     emit(v, "error", "[FAIL] boom")
     emit(v, "warning", "WARNING: empty split")
@@ -82,7 +82,7 @@ def test_ladder_categories_gate_stdout(capsys: pytest.CaptureFixture) -> None:
 
 
 def test_visual_show_requires_tty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """F-24: a blocking preview must never deadlock a headless run — live
+    """A blocking preview must never deadlock a headless run — live
     `visual` needs show>=5 AND an interactive stdout; the save axis is
     TTY-independent (the degrade path is render-and-save)."""
     v = Verbosity(save=5, show=5)

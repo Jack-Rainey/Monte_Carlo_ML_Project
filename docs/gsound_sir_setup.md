@@ -135,7 +135,7 @@ v2.11.1, so the build needs network access.
 
 ## 4. Upstream API reference (verified by introspection, not from docs)
 
-Relocated here from `docs/review_ledger.md` (RR-30): these are durable facts about
+Relocated here from `docs/review_ledger.md`: these are durable facts about
 the pinned upstream, not review findings, and the ledger holds only unresolved
 findings. Verified against SHA `608ea30f6dc4cda149c18947f9cae48bd379fa27` on
 2026-08-01 by calling into the built render env.
@@ -176,12 +176,12 @@ centres (`gsFrequencyBands.cpp:83-88`). The correct values, as pinned in
 [88.7412, 176.7767, 353.5534, 707.1068, 1414.2136, 2828.4271, 5656.8542] Hz
 ```
 
-⚠️ **The first value is 88.7412, NOT 88.4** (ledger AC-12). 88.4 is
+⚠️ **The first value is 88.7412, NOT 88.4**. 88.4 is
 √(62.5×125) — the base-two *nominal* 62.5 Hz centre — but pygsound uses the
 IEC-rounded **63** Hz, so 88.4 disagrees with the ray generator's own band
 definition by 0.384 %. Full precision is given here rather than 1 dp because a
 rounded first value is exactly how the refuted number survived: this section
-originally carried `88.4`, copied forward from a pre-AC-12 note, while
+originally carried `88.4`, copied forward from a earlier note, while
 `gsound_sir.yaml` had already been corrected. The config is the authority; if
 these two ever disagree again, the config is right.
 

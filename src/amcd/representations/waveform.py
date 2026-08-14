@@ -21,14 +21,14 @@ class WaveformRepresentation:
         model_config = {"extra": "forbid"}
 
     # Raw samples, NOT dB log energy: dB-assuming consumers (energy SNR) must see
-    # this and report their metric undefined rather than 10**(amplitude/10) (F-19).
+    # this and report their metric undefined rather than 10**(amplitude/10).
     value_domain = "amplitude"
 
     def __init__(self, sample_rate: int, eval_freqs_hz: list[float]) -> None:
         self.sample_rate = sample_rate
         #: The reported metric bands (`config.iso_eval_freqs`). Accepted and unused:
         #: `build_representation` passes it to every representation so a rep that
-        #: NEEDS it never has to grow its own copy of the band set (RD-187).
+        #: NEEDS it never has to grow its own copy of the band set.
         self.eval_freqs_hz = list(eval_freqs_hz)
 
     @property

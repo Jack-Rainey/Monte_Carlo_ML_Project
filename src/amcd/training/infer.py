@@ -18,18 +18,16 @@ from ..runtime import RunContext, emit
 
 
 def run_infer(config: Config, run_dir: Path, ctx: RunContext) -> None:
-    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
     verbosity = ctx.verbosity
     preprocessed_dir = run_dir / "preprocessed"
     checkpoint_dir = run_dir / "checkpoints"
     predictions_dir = run_dir / "predictions"
     predictions_dir.mkdir(parents=True, exist_ok=True)
 
-    # Clear previous predictions before writing this model's (F-37). Predictions
+    # Clear previous predictions before writing this model's. Predictions
     # are keyed by scene_id, not by model or split assignment, so a re-run that
     # moves a scene out of a test split — or simply trains a different model —
     # leaves the OLD model's prediction on disk under a name the eval stage globs.
-    # Same residue pattern as F-25, one stage downstream.
     for stale in (*predictions_dir.glob("*_pred.pt"),
                   *predictions_dir.glob("*_decoded_ir.npy")):
         stale.unlink()
@@ -45,7 +43,7 @@ def run_infer(config: Config, run_dir: Path, ctx: RunContext) -> None:
 
     n_channels = meta["n_channels"]
     norm_stats = meta["norm_stats"]
-    device = select_device()  # shared selector — see amcd.device (F-74)
+    device = select_device()  # shared selector — see amcd.device
 
     # Instantiate representation for D3 decode (required per §6, §3-D3)
     rep = build_representation(
@@ -64,7 +62,7 @@ def run_infer(config: Config, run_dir: Path, ctx: RunContext) -> None:
         sp for sp in config.test_split_names
         if any(s == sp for s in split_map.values())
     ]
-    # A declared test split with no scenes is dropped here silently otherwise (F-45);
+    # A declared test split with no scenes is dropped here silently otherwise;
     # eval/stats/report now report it as unscored, so the reason must be visible at
     # the stage that first drops it.
     for sp in config.test_split_names:

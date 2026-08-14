@@ -1,11 +1,10 @@
-"""End-to-end tests for the verbosity gate (ledger F-22, F-23, F-24, RD-09).
+"""End-to-end tests for the verbosity gate.
 
-One test per finding (review-loop discipline): each can fail independently so
-re-review isolates the consequential guarantee — above all F-23, that
-verbosity is side-effect-free with respect to results.
+Each test isolates one guarantee independently: verbosity is side-effect-free
+with respect to results.
 
 The two module-scoped pipeline runs use the tiny test config through the real
-CLI (`amcd all`), so the full cli → Pipeline → stage threading (F-22) is what
+CLI (`amcd all`), so the full cli → Pipeline → stage threading is what
 is exercised, not direct stage calls.
 """
 from __future__ import annotations
@@ -21,17 +20,19 @@ from amcd.cli import main
 
 from tests.conftest import tiny_cli_args
 
-# Artifacts that must exist at EVERY save level (F-23): canonical results,
+# Artifacts that must exist at EVERY save level: canonical results,
 # inter-stage inputs, and stage sentinels. Globs are relative to the run dir;
 # each must match at least once.
 CANONICAL_GLOBS = [
     "scenes/scene_*.json",
     "renders/*/low.npy",
     "renders/*/high.npy",
-    # Canonical render provenance (RD-16): the only record of how an expensive
-    # dataset was made. Previously gated at `diagnostics`, which meant the default
-    # save=1 run wrote no record at all — now written at every save level.
+    # Canonical render provenance: the only record of how an expensive dataset
+    # was made, so it is written at every save level.
     "renders/*/meta.json",
+    # The evidence behind a QC refusal — a raise whose evidence file is
+    # suppressed at the default save level is not a reportable result.
+    "renders/qc_failures.csv",
     "preprocessed/meta.json",
     "preprocessed/splits.json",
     "preprocessed/carrier/*.npy",
@@ -62,7 +63,7 @@ GATED_PATHS = [
     "report/config.yaml",    # bundle copies: provenance, save >= 1
     "report/versions.json",
 ]
-# No gated globs today: render meta.json became canonical (RD-16), and Step 4's
+# No gated globs today: render meta.json became canonical, and Step 4's
 # per-criterion QC record is the next artifact that will legitimately sit here.
 GATED_GLOBS: list[str] = []
 
@@ -93,8 +94,8 @@ def loud_run(tmp_path_factory: pytest.TempPathFactory):
     return result, run_dir
 
 
-def test_f22_show_levels_gate_console_output(quiet_run, loud_run) -> None:
-    """F-22: the flags are threaded, not inert — show=0 is silent on stdout,
+def test_show_levels_gate_console_output(quiet_run, loud_run) -> None:
+    """The flags are threaded, not inert — show=0 is silent on stdout,
     show=3 emits run identity, progress, and metrics lines."""
     quiet_result, _ = quiet_run
     loud_result, _ = loud_run
@@ -103,8 +104,8 @@ def test_f22_show_levels_gate_console_output(quiet_run, loud_run) -> None:
         assert expected in loud_result.stdout
 
 
-def test_f23_canonical_set_complete_at_save_zero(quiet_run) -> None:
-    """F-23: no functional artifact sits behind the save gate — the entire
+def test_canonical_set_complete_at_save_zero(quiet_run) -> None:
+    """No functional artifact sits behind the save gate — the entire
     canonical set exists at save=0, and only observability artifacts don't."""
     _, run_dir = quiet_run
     for pattern in CANONICAL_GLOBS:
@@ -115,7 +116,7 @@ def test_f23_canonical_set_complete_at_save_zero(quiet_run) -> None:
         assert not list(run_dir.glob(pattern)), f"gated artifact leaked at save=0: {pattern}"
 
 
-def test_f23_gated_artifacts_present_at_save_four(loud_run) -> None:
+def test_gated_artifacts_present_at_save_four(loud_run) -> None:
     """The same gated set exists once the save level admits it (so the save=0
     absences above prove gating, not a stage that never wrote them)."""
     _, run_dir = loud_run
@@ -125,8 +126,8 @@ def test_f23_gated_artifacts_present_at_save_four(loud_run) -> None:
         assert list(run_dir.glob(pattern)), f"gated artifact missing at save=4: {pattern}"
 
 
-def test_f23_results_identical_across_verbosity_levels(quiet_run, loud_run) -> None:
-    """F-23's load-bearing claim: verbosity is side-effect-free w.r.t. results.
+def test_results_identical_across_verbosity_levels(quiet_run, loud_run) -> None:
+    """Load-bearing claim: verbosity is side-effect-free w.r.t. results.
     Two independent full runs at (save=0, show=0) and (save=4, show=3) with
     identical config/seeds produce exactly equal canonical results."""
     _, dir_a = quiet_run
@@ -141,8 +142,8 @@ def test_f23_results_identical_across_verbosity_levels(quiet_run, loud_run) -> N
         == (dir_b / "report" / "summary.txt").read_text().replace(dir_b.name, "")
 
 
-def test_f24_out_of_range_levels_rejected() -> None:
-    """F-24: IntRange(0,5) — out-of-range is a usage error, never a clamp."""
+def test_out_of_range_levels_rejected() -> None:
+    """IntRange(0,5) — out-of-range is a usage error, never a clamp."""
     for flag in ("--save-verbosity", "--show-verbosity"):
         result = CliRunner().invoke(
             main, ["all", *tiny_cli_args(), flag, "6"]
@@ -151,8 +152,8 @@ def test_f24_out_of_range_levels_rejected() -> None:
         assert "is not in the range" in result.output or "Invalid value" in result.output
 
 
-def test_f24_failures_reach_stderr_at_show_zero(tmp_path: Path) -> None:
-    """F-24: fatal errors always emit, to stderr, regardless of show level.
+def test_failures_reach_stderr_at_show_zero(tmp_path: Path) -> None:
+    """Fatal errors always emit, to stderr, regardless of show level.
     `render` on a run dir with no scenes fails; show=0 must not swallow it."""
     result = CliRunner().invoke(
         main,
@@ -164,8 +165,8 @@ def test_f24_failures_reach_stderr_at_show_zero(tmp_path: Path) -> None:
     assert result.stdout == ""
 
 
-def test_rd09_default_run_writes_provenance(tmp_path: Path) -> None:
-    """RD-09: the CLI defaults (save=1) anchor to the provenance rung — a bare
+def test_default_run_writes_provenance(tmp_path: Path) -> None:
+    """The CLI defaults (save=1) anchor to the provenance rung — a bare
     invocation records config snapshot, seeds, git SHA, and timings; an
     explicit save=0 omits exactly that provenance."""
     default_dir = tmp_path / "default"
@@ -191,5 +192,5 @@ def test_rd09_default_run_writes_provenance(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     for fname in ("config.yaml", "resolved.yaml", "versions.json", "timings.json"):
         assert not (bare_dir / fname).exists(), f"save=0 wrote provenance: {fname}"
-    # ... while the stage's canonical output is untouched by the level (F-23).
+    # ... while the stage's canonical output is untouched by the level.
     assert list(bare_dir.glob("scenes/scene_*.json"))

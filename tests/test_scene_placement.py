@@ -1,21 +1,21 @@
 """Research-I-faithful scene generation and split sizing (gsound_sir gate, Step 1.5).
 
-Covers ledger rows RD-27..RD-29 (the declared RI deviations are actually what the
-config says), RD-32 (the RI overlay resolves to pure count mode despite YAML's
-inability to delete keys), RD-36 (unconstrained configs keep their exact RNG
-stream) and RD-37 (joint resampling + recorded acceptance rates).
+Covers: the declared Research I deviations are actually what the config says;
+the RI overlay resolves to pure count mode despite YAML's inability to delete
+keys; unconstrained configs keep their exact RNG stream; and joint resampling
+records its acceptance rates.
 
 The second half of the file covers what the record-length gate SCORES and what it
-DISCLOSES: F-71 (uncharacterized scenes leave the gate's denominator), RD-65 (the
-per-split over-limit warning), RD-112 (a gate that scored nothing is unscored, not
-passed), RD-113 (the derived denominator is pinned to the published one) and AC-30
+DISCLOSES: uncharacterized scenes leave the gate's denominator; the per-split
+over-limit warning; a gate that scored nothing is unscored, not passed; the
+derived denominator is pinned to the published one; and
 (the realized shortfall against ISO 3382-1 §5.3's minimum distance).
 
-Also covers S-F4 (the gate diagnoses a report key it cannot score, in both
-directions, instead of raising KeyError or silently dropping a split), S-F5 (the
+Also covers: the gate diagnoses a report key it cannot score, in both
+directions, instead of raising KeyError or silently dropping a split; the
 mixed characterized/uncharacterized split, which no shipped config can reach),
-S-F6 (a declared split that generated no scenes), AC-52 (the Eyring d_min pinned
-by known answers, not only by an inequality) and AC-53 (an excluded scene's
+a declared split that generated no scenes; the Eyring d_min pinned by known
+answers rather than only by an inequality; and an excluded scene's
 record-length adequacy is UNCHECKED, not merely excluded).
 
 The load-bearing property here is that a config CANNOT quietly mean something
@@ -87,7 +87,7 @@ class TestResearchIPin:
         assert {n: (sp.count, sp.seed) for n, sp in ri_config.splits.items()} == RI_SPLITS
 
     def test_overlay_resolves_to_pure_count_mode(self, ri_config: Config) -> None:
-        """RD-32: YAML deep-merge cannot DELETE base.yaml's `frac`/`n_id`, so the
+        """YAML deep-merge cannot DELETE base.yaml's `frac`/`n_id`, so the
         overlay must null them explicitly or the all-count validator would reject
         the very config it exists to express."""
         assert ri_config.id_pool_is_counted
@@ -95,13 +95,13 @@ class TestResearchIPin:
         assert all(sp.frac is None for sp in ri_config.splits.values())
 
     def test_geometry_shift_stays_single_axis(self, ri_config: Config) -> None:
-        """RD-27: RI's dual-axis geometry shift is deliberately NOT reproduced;
+        """RI's dual-axis geometry shift is deliberately NOT reproduced;
         invariant #10 wins. This test pins the deviation so it cannot drift back
         silently in either direction."""
         assert ri_config.splits["test_geometry_shift"].axes == {"geometry": "corridor"}
 
     def test_material_shift_omits_asymmetric_walls(self, ri_config: Config) -> None:
-        """RD-28: half of RI's material shift is inexpressible with a scalar
+        """Half of RI's material shift is inexpressible with a scalar
         absorption, so the split is weaker than RI's and must stay declared."""
         assert ri_config.splits["test_material_shift"].axes == {
             "material": "ceiling_absorptive"
@@ -194,7 +194,7 @@ class TestPlacementRegimeSchema:
             }}})
 
     def test_wall_type_not_supported(self) -> None:
-        """RD-34: RI never quantifies `near_wall`, so no `wall` type ships — a
+        """RI never quantifies `near_wall`, so no `wall` type ships — a
         regime nothing defines must not be silently selectable."""
         with pytest.raises(ValueError, match="must be interior\\|corner"):
             tiny_config(scenes={"placement_regimes": {"interior_random": {
@@ -239,7 +239,7 @@ class TestPlacementConstraints:
             })
 
     def test_height_range_outside_margins_raises(self, tmp_path: Path) -> None:
-        # `distance_range` must still clear the backend floor here (F-48), or this
+        # `distance_range` must still clear the backend floor here, or this
         # would fail on the separation pre-flight and never reach the height check.
         with pytest.raises(ValueError, match="does not fit inside the admissible"):
             self._gen(tmp_path, scenes={
@@ -251,7 +251,7 @@ class TestPlacementConstraints:
             })
 
     def test_placement_report_records_acceptance_and_distances(self, tmp_path: Path) -> None:
-        """RD-37/RD-29: rejected draws are accounted for, and the realized
+        """Rejected draws are accounted for, and the realized
         distance distribution is recorded so the E1 report can quantify what
         stood in for RI's unspecified pairing sub-regimes."""
         self._gen(tmp_path, scenes={
@@ -271,12 +271,12 @@ class TestPlacementConstraints:
 
 
 class TestRngStreamPreserved:
-    """RD-36: the constraint machinery must not perturb the unconstrained path.
+    """The constraint machinery must not perturb the unconstrained path.
 
     Asserted directly on `_sample_positions` rather than end-to-end, because
-    base.yaml itself is no longer unconstrained — F-48 gave both of its regimes a
+    base.yaml itself is no longer unconstrained — both of its regimes have a
     1.0 m minimum, so a whole-pipeline comparison would compare two constrained
-    configs and prove nothing about the null path. The property RD-36 needs is
+    configs and prove nothing about the null path. The property needed is
     narrower and is exactly this: with `distance_range: null` the loop body runs
     once and issues the same two 3-vector `uniform` calls, in the same order, as
     before the constraint existed. Switching those to per-axis scalar draws would
@@ -324,8 +324,8 @@ class TestRngStreamPreserved:
                              "max_reachable_m": stats["max_reachable_m"]}
 
     def test_the_declared_floor_is_what_does_the_rejecting(self, tmp_path: Path) -> None:
-        """F-48's floor is live, not decorative: draws below it ARE discarded, and
-        the discard is accounted for on the correct side (AC-14)."""
+        """Floor is live, not decorative: draws below it ARE discarded, and
+        the discard is accounted for on the correct side."""
         run_gen_scenes(tiny_config(scenes={"n_id": 60}), tmp_path, QUIET)
         report = json.loads((tmp_path / "scenes" / "placement_report.json").read_text())
         entry = report["id"]
@@ -336,7 +336,7 @@ class TestRngStreamPreserved:
 
 
 class TestCornerBiasIsHorizontal:
-    """AC-10: `corner_frac` must not be applied to the z axis.
+    """`corner_frac` must not be applied to the z axis.
 
     With a declared height_range, z is an ergonomic band rather than a room
     boundary — 1.2 m is 1.2 m off the floor either way — so biasing it buys no
@@ -384,10 +384,10 @@ class TestCornerBiasIsHorizontal:
 
 
 class TestPropagationDelay:
-    """AC-11: the scaffold must obey the speed of sound it declares."""
+    """The scaffold must obey the speed of sound it declares."""
 
     def test_onset_matches_distance_over_c(self) -> None:
-        from amcd.evaluation.room_acoustic import _find_onset
+        from amcd.evaluation.room_acoustic import find_onset
         from tests.conftest import dry_run_simulator
 
         cfg = tiny_config()
@@ -401,7 +401,7 @@ class TestPropagationDelay:
                 source_pos=(1.0, 1.0, 1.5),
                 receiver_pos=(1.0 + distance, 1.0, 1.5),
             )
-            onset, _ = _find_onset(sim.render(scene, 5000).ir[0], cfg.metric_onset_rel_db)
+            onset, _ = find_onset(sim.render(scene, 5000).ir[0], cfg.metric_onset_rel_db)
             expected = round(distance / c * 48000)
             assert abs(onset - expected) <= 1, (
                 f"d={distance} m: onset {onset} vs expected {expected} at c={c} m/s"
@@ -424,13 +424,13 @@ class TestConfigGuards:
     """Values that would otherwise be silently ignored or silently wrong."""
 
     def test_negative_margin_rejected(self) -> None:
-        """F-34: a negative margin places sources OUTSIDE the room, and the
+        """A negative margin places sources OUTSIDE the room, and the
         emptiness check passes because the box is merely inverted, not empty."""
         with pytest.raises(ValueError, match="must be >= 0"):
             tiny_config(scenes={"margins": {"wall": -1.0}})
 
     def test_zero_placement_attempts_rejected(self) -> None:
-        """F-32: 0 attempts made every scene fail with a message blaming a
+        """0 attempts made every scene fail with a message blaming a
         distance constraint the config never declared."""
         with pytest.raises(ValueError, match="max_placement_attempts must be > 0"):
             tiny_config(scenes={"max_placement_attempts": 0})
@@ -442,13 +442,13 @@ class TestConfigGuards:
                 "axes": {"geometry": "corridor"}}})
 
     def test_seed_on_id_pool_split_in_frac_mode_rejected(self) -> None:
-        """F-33: the researcher believes the split is independently seeded; in
+        """The researcher believes the split is independently seeded; in
         frac mode it is not, because the pool is generated from one stream."""
         with pytest.raises(ValueError, match="not independently seeded"):
             tiny_config(splits={"train": {"role": "train", "frac": 0.6, "seed": 7777}})
 
     def test_count_mode_requires_seed_on_shift_splits_too(self) -> None:
-        """F-35: count mode's contract is that EVERY split is independently
+        """Count mode's contract is that EVERY split is independently
         seeded, not just the id-pool ones."""
         with pytest.raises(ValueError, match="EVERY split"):
             tiny_config(
@@ -463,7 +463,7 @@ class TestConfigGuards:
             )
 
     def test_unknown_geometry_key_rejected(self) -> None:
-        """F-31: an unrecognised key here is a HIDDEN GEOMETRY PARAMETER."""
+        """An unrecognised key here is a HIDDEN GEOMETRY PARAMETER."""
         with pytest.raises(ValueError, match="extra_forbidden|Extra inputs"):
             tiny_config(scenes={"geometry_families": {
                 "shoebox": {"dims": [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]], "shape": "L"}}})
@@ -492,9 +492,8 @@ class TestGenerationPlan:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# The record-length gate: what it scores, and what it discloses
-# (F-71 / RD-65 / RD-112 / RD-113), plus the ISO 3382-1 §5.3 distance disclosure
-# (AC-30 / AC-50).
+# The record-length gate: what it scores and what it discloses, plus the
+# ISO 3382-1 §5.3 distance disclosure.
 #
 # Every test below constructs the population in which the defect is VISIBLE — a
 # healthy run has no uncharacterized scenes at all, so none of these fire on one.
@@ -522,9 +521,9 @@ def _scored_entry(n: int, over: int, n_none: int = 0) -> dict:
 def _openfield_config(**scene_overrides) -> Config:
     """tiny_config plus a 3-scene split whose geometry declares no enclosure.
 
-    `openfield` is the RD-64 seam exercised: a family declaring
+    `openfield` is the seam exercised: a family declaring
     `characterization: none` gets a recorded reason instead of Sabine/Eyring
-    numbers, which is the state F-71 is about.
+    numbers, which is the state is about.
     """
     return tiny_config(
         scenes={
@@ -545,7 +544,7 @@ def _openfield_config(**scene_overrides) -> Config:
 
 
 class TestUncharacterizedScenesLeaveTheRecordLengthGate:
-    """F-71: the `characterization: none` branch set `t60_exceeds_ir_duration`
+    """The `characterization: none` branch set `t60_exceeds_ir_duration`
     False rather than omitting it, so an unmodelled geometry entered the gate's
     denominator as PASSING. N of them shrink the over-limit fraction by N/(N+M)."""
 
@@ -561,7 +560,7 @@ class TestUncharacterizedScenesLeaveTheRecordLengthGate:
 
         assert block["n_scenes"] == 0, (
             "uncharacterized scenes are still in the denominator — the sibling "
-            "diffuse_field_validity block has honoured this rule all along (F-71)"
+            "diffuse_field_validity block has honoured this rule all along"
         )
         assert block["n_uncharacterized"] == 3
         assert block["decay_range_below_iso_t30"]["count"] == 0
@@ -577,7 +576,7 @@ class TestUncharacterizedScenesLeaveTheRecordLengthGate:
             alpha_limit=0.5, realized_absorption=lambda a: a, realized_support_s=lambda _t60, _v, _s: 0.1, iso_t30_decay_range_db=45.0, characterization="none",
         )
         assert "decay_range_below_iso_t30" not in room, (
-            "present-and-False reads as 'measured, and within the record' (F-71)"
+            "present-and-False reads as 'measured, and within the record'"
         )
         assert "uncharacterized_reason" in room
 
@@ -601,8 +600,8 @@ class TestUncharacterizedScenesLeaveTheRecordLengthGate:
     def test_the_derived_denominator_agrees_with_the_published_one(
         self, tmp_path: Path
     ) -> None:
-        """RD-113: the gate derives the characterized count that `_flag_counts`
-        already publishes. Two expressions for one number is how AC-24's pair
+        """The gate derives the characterized count that `_flag_counts`
+        already publishes. Two expressions for one number is how pair
         drifted apart, so they are pinned to each other here."""
         run_gen_scenes(_openfield_config(), tmp_path, QUIET)
         for name, entry in self._report(tmp_path).items():
@@ -612,7 +611,7 @@ class TestUncharacterizedScenesLeaveTheRecordLengthGate:
 
 
 class TestPerSplitOverLimitWarning:
-    """RD-65: the gate is the OVERALL fraction — right, because a per-split gate
+    """The gate is the OVERALL fraction — right, because a per-split gate
     lets the smallest split set the tolerance for train — but an overall pass can
     hide a shift split far over on its own, and the per-shift breakdown IS the
     research result. So every offending split is named, unconditionally."""
@@ -659,7 +658,7 @@ class TestPerSplitOverLimitWarning:
     def test_warnings_survive_the_quietest_verbosity(
         self, ri_config: Config, capsys
     ) -> None:
-        """QUIET is show=0. Warnings bypass the ladder entirely (F-24), which is
+        """QUIET is show=0. Warnings bypass the ladder entirely, which is
         what makes "always-emitted" true rather than aspirational."""
         _disclose_and_gate_record_length(self._cfg(ri_config), self._report(0, 1), QUIET.verbosity)
         assert "WARNING" in capsys.readouterr().err
@@ -683,9 +682,9 @@ class TestPerSplitOverLimitWarning:
     def test_a_wholly_uncharacterized_config_is_unscored_not_passed(
         self, capsys
     ) -> None:
-        """RD-112: with every scene uncharacterized the gate has nothing to measure.
-        Falling through would be F-71's own defect one level up — a silent pass at
-        exactly the outdoor/partially-open configuration the RD-64 seam enables."""
+        """With every scene uncharacterized the gate has nothing to measure.
+        Falling through would be defect one level up — a silent pass at
+        exactly the outdoor/partially-open configuration the seam enables."""
         report = {"test_openfield": _scored_entry(0, 0, n_none=3)}
         _disclose_and_gate_record_length(tiny_config(), report, QUIET.verbosity)
         warnings = capsys.readouterr().err
@@ -727,9 +726,9 @@ class TestPerSplitOverLimitWarning:
     ) -> None:
         """The test above builds the report by hand, so it never exercised the
         corner disclosure — which reached `f"{None:.2f}"` and raised TypeError
-        before RD-112's warning could be emitted. `Config.worst_case_t60` returns a
+        before warning could be emitted. `Config.worst_case_t60` returns a
         reasoned None for a config with no `sabine` family, which is the very
-        config RD-112 is about, so the warning was unreachable on it."""
+        config is about, so the warning was unreachable on it."""
         cfg = tiny_config(scenes={"geometry_families": {
             "shoebox": {"dims": [[3.0, 12.0], [3.0, 10.0], [2.4, 5.0]],
                         "characterization": "none"},
@@ -748,7 +747,7 @@ class TestPerSplitOverLimitWarning:
 
 
 class TestIsoMinimumDistanceDisclosure:
-    """AC-30: the config declares ONE global placement floor, but ISO 3382-1 §5.3's
+    """The config declares ONE global placement floor, but ISO 3382-1 §5.3's
     minimum measurement distance is per scene — it varies with each scene's own
     absorption and surface. The shortfall is measured and reported, not asserted
     away. The per-scene criterion itself stays deferred."""
@@ -765,7 +764,7 @@ class TestIsoMinimumDistanceDisclosure:
         """Sweep every declared geometry x material corner, the way
         `Config.worst_case_t60` sweeps them for the T60 corner.
 
-        DERIVED from the config, never hardcoded (AC-50): AC-30's own [0.41, 5.16] m
+        DERIVED from the config, never hardcoded: [0.41, 5.16] m
         was computed over the `mixed` regime alone, so it missed
         `ceiling_absorptive` (alpha up to 0.98) on the same shoebox family — and a
         test that restated the literals could not see the omission.
@@ -792,11 +791,11 @@ class TestIsoMinimumDistanceDisclosure:
         assert support["eyring"] == pytest.approx((0.417, 11.413), abs=0.005)
         assert support["sabine"][1] > 5.16, (
             "5.16 m is the `mixed` regime's ceiling (alpha 0.80), not the declared "
-            "support's — ceiling_absorptive reaches alpha 0.98 (AC-50)"
+            "support's — ceiling_absorptive reaches alpha 0.98"
         )
 
     def test_the_individual_corners_still_reproduce(self) -> None:
-        """AC-30's three hand-checked numbers, which are correct as far as they go —
+        """Three hand-checked numbers, which are correct as far as they go —
         they are corners of the `mixed` regime, not of the declared support."""
         assert self._d_min((3.0, 3.0, 2.4), 0.05)["iso_min_distance_sabine_m"] == \
             pytest.approx(0.41, abs=0.005)
@@ -806,14 +805,14 @@ class TestIsoMinimumDistanceDisclosure:
             pytest.approx(5.16, abs=0.005)
 
     def test_the_declared_floor_sits_near_the_bottom_of_that_range(self) -> None:
-        """The claim AC-30 refuted: 1.0 m is not "inside the band" — it is near the
+        """1.0 m is not "inside the band" — it is near the
         bottom of a support that reaches 5.71 m by Sabine and 11.41 m by Eyring."""
         lo, hi = self._declared_support(Config.load(Path("configs/base.yaml")))["sabine"]
         assert lo < 1.0 < hi
         assert 1.0 < lo + 0.25 * (hi - lo), "1.0 m is not in the band's interior"
 
     def test_the_eyring_variant_has_its_own_known_answer(self) -> None:
-        """AC-52: the inequality below pins Eyring only loosely — at alpha 0.80 ANY
+        """The inequality below pins Eyring only loosely — at alpha 0.80 ANY
         denominator under 111 in place of 24*ln10 (true value 55.26) satisfies
         `eyring > sabine`, so a wrong constant or a wrong absorption term in that
         one line passes. The reported 100 % below-d_min on test_material_shift
@@ -822,7 +821,7 @@ class TestIsoMinimumDistanceDisclosure:
         d_min_eyring = 2*sqrt(-ln(1-a)*S/(24 ln10)); at S = 460 m^2 and a = 0.80
         that is 2*sqrt(1.60944*460/55.2620) = 7.320 m.
 
-        NOMINAL alpha, as configured — pending AC-54, which may substitute the
+        NOMINAL alpha, as configured; a backend convention may substitute the
         backend's effective alpha_eff = 1-sqrt(1-alpha). If that lands, this pin
         must fail loudly rather than keep certifying a room never rendered.
         """
@@ -831,7 +830,7 @@ class TestIsoMinimumDistanceDisclosure:
         assert room["iso_min_distance_eyring_m"] == pytest.approx(7.320, abs=0.005)
 
     def test_d_min_is_independent_of_volume_at_equal_surface(self) -> None:
-        """AC-52: the volume cancellation is asserted in `_C_TIMES_SABINE_K`'s
+        """The volume cancellation is asserted in `_C_TIMES_SABINE_K`'s
         docstring and was never tested. Two rooms of EQUAL surface and different
         volume must give identical d_min for both variants — 12x10x5 (S=460,
         V=600) against 20x5x5.2 (S=460, V=520)."""
@@ -846,7 +845,7 @@ class TestIsoMinimumDistanceDisclosure:
             assert wide[key] == pytest.approx(long_[key], rel=1e-12), key
 
     def test_d_min_reproduces_the_iso_form_from_the_reported_t60(self) -> None:
-        """AC-52: the reduction is only trustworthy if it agrees with ISO 3382-1
+        """The reduction is only trustworthy if it agrees with ISO 3382-1
         §5.3 as written — d_min = 2*sqrt(V/(c*T60)) — recomputed from the SAME
         call's published T60.
 
@@ -855,14 +854,14 @@ class TestIsoMinimumDistanceDisclosure:
         not, while `SABINE_K` shipped as the rounded literal 0.161 — that implies
         343.2425 m/s against a declared 343.0, and the 0.07 % gap propagated into
         every d_min corner as a constant -0.035 % offset which had to be documented
-        rather than removed (AC-109/AC-150). `SABINE_K` is now computed from
+        rather than removed. `SABINE_K` is now computed from
         `SPEED_OF_SOUND_M_S`, so the two routes agree exactly and there is no
         offset left to document.
         """
         c = _C_TIMES_SABINE_K / SABINE_K
         assert c == pytest.approx(SPEED_OF_SOUND_M_S, rel=1e-12), (
             "the speed implied by the d_min reduction has drifted from the one "
-            "amcd.acoustics declares — the AC-24 divergence shape, on a constant"
+            "amcd.acoustics declares — the divergence shape, on a constant"
         )
 
         for dims, alpha in (((12.0, 10.0, 5.0), 0.80), ((3.0, 3.0, 2.4), 0.05)):
@@ -879,13 +878,13 @@ class TestIsoMinimumDistanceDisclosure:
                 assert room[f"iso_min_distance_{variant}_m"] == \
                     pytest.approx(at_declared, rel=1e-12), (
                         "d_min disagrees with the declared speed of sound — the "
-                        "rounding offset AC-109 removed has come back"
+                        "rounding offset removed has come back"
                     )
 
     def test_eyring_is_the_stricter_criterion_at_every_absorption(self) -> None:
         """-ln(1-a) > a for all a in (0, 1), so Eyring's shorter T60 always gives the
         larger d_min — by 0.5 % at alpha 0.02 and by ~2x at 0.98. Both are carried
-        because that spread is the disclosure: AC-30 measured 25.4 % of id below
+        because that spread is the disclosure: measured 25.4 % of id below
         d_min by Sabine against 37.2 % by Eyring."""
         for alpha in (0.02, 0.05, 0.30, 0.80, 0.98):
             room = self._d_min((12.0, 10.0, 5.0), alpha)
@@ -927,10 +926,10 @@ class TestIsoMinimumDistanceDisclosure:
 
 
 class TestTheGateDiagnosesAReportKeyItCannotScore:
-    """S-F4: the gate iterates EVERY top-level key of `placement_report.json` and
+    """The gate iterates EVERY top-level key of `placement_report.json` and
     indexes `entry["record_decay_range"]` unconditionally. A future non-split
-    metadata key — which AC-30/AC-50's disclosure work and AC-54/RD-144's
-    absorption convention both invite — raised a bare KeyError."""
+    metadata key — which the disclosure and absorption-convention work both
+    invite — raised a bare KeyError."""
 
     def test_an_undeclared_non_split_key_names_itself(self) -> None:
         report = {
@@ -968,7 +967,7 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
         """It is a seam for a coming key, not a live exemption list: anything in it
         is a split the gate has stopped scoring.
 
-        A change-detector, not the guard — it expires the moment AC-54/RD-144 add a
+        A change-detector, not the guard — it expires the moment anyone adds a
         legitimate metadata key. The invariant that SURVIVES that is the
         disjointness check below.
         """
@@ -996,8 +995,8 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
     def test_a_disagreeing_published_denominator_is_refused(self) -> None:
         """The gate reads the scored count `_flag_counts` PUBLISHES and cross-checks
         it against the emit-iff-nonzero contract. Two expressions for one number is
-        the AC-24 shape, so a disagreement stops the run rather than being resolved
-        silently in favour of either (RD-113)."""
+        the shape, so a disagreement stops the run rather than being resolved
+        silently in favour of either."""
         report = {"id": {"n_scenes": 10, "record_decay_range": {
             "n_scenes": 7,                 # published
             "n_uncharacterized": 6,        # implies 4
@@ -1008,7 +1007,7 @@ class TestTheGateDiagnosesAReportKeyItCannotScore:
 
 
 class TestTheGateNamesWhatItActuallyScored:
-    """S-F7 and the coverage disclosure. The docstring is not what an operator
+    """And the coverage disclosure. The docstring is not what an operator
     reads — the warnings are."""
 
     def test_the_frac_mode_pool_is_not_called_a_split(
@@ -1052,9 +1051,9 @@ class TestTheGateNamesWhatItActuallyScored:
 
 
 class TestTheMixedCharacterizedSplit:
-    """S-F5: `0 < n_uncharacterized < n` is the interesting case for the derived
+    """`0 < n_uncharacterized < n` is the interesting case for the derived
     denominator, and NO shipped config can reach it — one geometry family per
-    split makes characterization all-or-nothing, so RD-113's pinning test only
+    split makes characterization all-or-nothing, so pinning test only
     ever sees 0 or n. The roadmap's outdoor families make it reachable, and until
     then this is the only thing that exercises it."""
 
@@ -1084,11 +1083,11 @@ class TestTheMixedCharacterizedSplit:
         assert block["decay_range_below_iso_t30"]["count"] == 4
         assert block["decay_range_below_iso_t30"]["fraction"] == 1.0, (
             "4 of 4 characterized scenes breach: diluting to 4/10 = 0.4 is the "
-            "F-71 attack surviving inside a single split (S-F5)"
+            "uncharacterized-denominator attack surviving inside a single split"
         )
 
     def test_the_derived_denominator_agrees_on_the_mixed_case(self) -> None:
-        """RD-113's pin, on the population RD-113's own test cannot construct."""
+        """Pin, on the population test cannot construct."""
         block = _flag_counts(
             self._mixed(n_sabine=4, n_none=6, n_over=2), self.FLAGS,
             uncharacterized_consequence="unchecked.", iso_t30_decay_range_db=45.0,
@@ -1112,7 +1111,7 @@ class TestTheMixedCharacterizedSplit:
 
 
 class TestADeclaredSplitWithNoScenes:
-    """S-F6: the gate said nothing about a split that generated zero scenes, while
+    """The gate said nothing about a split that generated zero scenes, while
     `probe.py` warns for the analogous case. Reachable from config: `n_id: 0` is
     accepted and yields an `id` entry with `n_scenes: 0`."""
 
@@ -1124,7 +1123,7 @@ class TestADeclaredSplitWithNoScenes:
 
         assert "'id'" in warnings and "generated 0 scenes" in warnings, (
             "a declared split that produced nothing passed through the gate in "
-            "silence — an empty split is a fact about the run (S-F6)"
+            "silence — an empty split is a fact about the run"
         )
         report = json.loads(
             (tmp_path / "scenes" / "placement_report.json").read_text()
@@ -1144,9 +1143,9 @@ class TestADeclaredSplitWithNoScenes:
 
 
 class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
-    """AC-53: F-71's omission is acoustically right, but it leaves a residual with
+    """Omission is acoustically right, but it leaves a residual with
     no guard — a `characterization: none` scene is STILL rendered into a record of
-    fixed `ir_duration`, and after F-71 nothing checks its truncation at all. A
+    fixed `ir_duration`, and nothing checks its truncation at all. A
     non-enclosure has a finite decay too; it merely is not Sabine's."""
 
     def test_the_scene_reason_names_record_length(self) -> None:
@@ -1157,11 +1156,11 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
         reason = room["uncharacterized_reason"]
         assert "UNCHECKED" in reason and "record" in reason, (
             "the reason enumerated T60/R/r_c/DRR as undefined but never named "
-            "record length, the one thing the scene is still subject to (AC-53)"
+            "record length, the one thing the scene is still subject to"
         )
 
     def test_the_per_scene_reason_reaches_the_artifact(self, tmp_path: Path) -> None:
-        """AC-153. The test above pins a string that lived only in memory:
+        """The test above pins a string that would otherwise live only in memory:
         `room_stats` reaches `placement_report.json` through `_summarize` (numeric
         keys) and `_flag_counts` (booleans), and `SceneSpec` has no such field, so
         the (unit, reason) pair the project requires existed at split granularity
@@ -1178,7 +1177,7 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
             assert e["scene"].startswith("scene_")
             assert "UNCHECKED" in e["reason"]
         # The count in the flag block and the per-unit list must agree — one is the
-        # aggregate OF the other, not a second independent tally (AC-24 shape).
+        # aggregate OF the other, not a second independent tally (shape).
         block = report["test_openfield"]["record_decay_range"]
         assert block["n_uncharacterized"] == len(entries)
 
@@ -1186,7 +1185,7 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
         self, tmp_path: Path
     ) -> None:
         """Emit-iff-non-empty, the same discipline as `n_uncharacterized` — so the
-        canonical report is byte-unchanged by AC-153 and an empty list never reads
+        canonical report is byte-unchanged and an empty list never reads
         as 'checked and found nothing'."""
         run_gen_scenes(_openfield_config(), tmp_path, QUIET)
         report = json.loads(
@@ -1196,7 +1195,7 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
         assert "uncharacterized" in report["test_openfield"]
 
     def test_the_record_length_block_says_unchecked(self, tmp_path: Path) -> None:
-        """The known-answer test AC-53 asks for: a mixed enclosure/non-enclosure
+        """A mixed enclosure/non-enclosure
         config must report the non-enclosure count as UNCHECKED, not merely
         excluded."""
         run_gen_scenes(_openfield_config(), tmp_path, QUIET)
@@ -1208,7 +1207,7 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
         assert block["n_uncharacterized"] == 3
         assert "UNCHECKED" in block["uncharacterized_note"], (
             "the note spoke only of 'these fractions', which reads as a scoping "
-            "decision rather than an unguarded residual (AC-53)"
+            "decision rather than an unguarded residual"
         )
         # An enclosed split has nothing to exclude, so it carries no note at all.
         assert "uncharacterized_note" not in report["id"]["record_decay_range"]
@@ -1234,7 +1233,7 @@ class TestUncharacterizedRecordLengthIsUncheckedNotMerelyExcluded:
         assert "vacuous" in notes["below_iso_min_distance"]
         # Each clause must distinguish the FREE-FIELD case from the PARTIALLY-OPEN
         # one: `characterization: none` covers both, and the physics differs. One
-        # sentence spanning two heterogeneous cases is the defect AC-53 was raised
+        # sentence spanning two heterogeneous cases is the defect this was raised
         # for, one level down.
         for block in ("diffuse_field_validity", "below_iso_min_distance"):
             assert "partially-open" in notes[block], block

@@ -1,6 +1,7 @@
-"""AC-17 exercised on REAL renders: per-leg vs shared Schroeder window (RD-52).
+"""The shared Schroeder window exercised on REAL renders, against per-leg windows.
 
-AC-17 shares one integration limit across the legs of a paired comparison, because
+The eval path shares one integration limit across the legs of a paired
+comparison, because
 each leg's own Lundeby index is a function of the ray budget — so truncating legs at
 their own indices integrates them over DIFFERENT limits and manufactures a metric
 difference with no acoustic cause.
@@ -9,16 +10,16 @@ Until now that fix was exercised only by a synthetic known-answer test, because 
 defect is inert under `dry_run` by construction: the scaffold fills its whole window,
 so both legs stop at the same sample and per-leg and shared indices coincide. Its
 first exercise on real data would otherwise have been the expensive emulated render
-it was written to protect (RD-52).
+it was written to protect.
 
 The nine retained renders in `experiments/support_law/irs/` — each present at 5,000
 and 200,000 rays — make that evidence free. For every (scene, band) this reports:
 
-  * each leg's OWN truncation index, and the shared one (the minimum, per AC-17);
+  * each leg's OWN truncation index, and the shared one (the minimum);
   * T30 and C50 computed BOTH ways, and the difference sharing removes.
 
 What to read it for: the `shared` columns are what the pipeline reports, and the
-`own` columns are what it would report without AC-17. The gap between them is the
+`own` columns are what it would report without sharing. The gap between them is the
 artifact the shared window exists to delete — and it is not small on real records.
 
     python scripts/shared_window_probe.py
@@ -31,7 +32,7 @@ import numpy as np
 sys.path.insert(0, "src")
 from amcd.evaluation.room_acoustic import (  # noqa: E402
     _band_energy,
-    _find_onset,
+    find_onset,
     _iso3382_band_metrics,
     _lundeby_truncate,
     _shared_truncation_per_band,
@@ -81,8 +82,8 @@ def main() -> None:
     for name in scenes:
         low = np.load(IRS / f"{name}_b5000.npy")
         high = np.load(IRS / f"{name}_b200000.npy")
-        lw = low[0][_find_onset(low[0], ONSET_DB)[0]:]
-        hw = high[0][_find_onset(high[0], ONSET_DB)[0]:]
+        lw = low[0][find_onset(low[0], ONSET_DB)[0]:]
+        hw = high[0][find_onset(high[0], ONSET_DB)[0]:]
 
         shared = _shared_truncation_per_band(
             {"low": lw, "high": hw},
@@ -95,7 +96,7 @@ def main() -> None:
             idx, source = shared[b]
 
             # PER-LEG: each leg truncated at its own index — what the reported
-            # numbers would be without AC-17.
+            # numbers would be without a shared window.
             t_lo_own, c_lo_own = _metrics(lw, fc, n_lo, "self")
             t_hi_own, c_hi_own = _metrics(hw, fc, n_hi, "self")
             # SHARED: both legs at the minimum, which is what ships.

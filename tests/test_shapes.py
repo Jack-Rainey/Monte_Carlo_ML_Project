@@ -131,13 +131,13 @@ class TestEnergyTensorShape:
 
 
 class TestTheSpectralSlopeIsRecordedAndTheRefusalIsNotSwallowed:
-    """RD-188 — narrowing the AC-37 headroom guard removed a false rejection AND the
+    """Narrowing the headroom guard removed a false rejection AND the
     disclosure that went with it.
 
     The guard originally took a minimum across ALL bands, which is a spectral-
     FLATNESS constraint: a steeply sloped render failed it even when both REPORTED
     metric bands had ample headroom. Narrowing the operand to those bands fixed the
-    false rejection (F-M3) — and a 2nd-order 4 kHz lowpass now passes SILENTLY where
+    false rejection — and a 2nd-order 4 kHz lowpass now passes SILENTLY where
     it previously failed loudly. The slope is a real property of the render, so it is
     recorded rather than gated.
 
@@ -147,7 +147,7 @@ class TestTheSpectralSlopeIsRecordedAndTheRefusalIsNotSwallowed:
     """
 
     def test_preprocess_does_not_swallow_an_encode_refusal(self) -> None:
-        """The absence of a try/except is what makes the AC-37 guard safe.
+        """The absence of a try/except is what makes the guard safe.
 
         Swallowing a refusal per scene would silently drop scenes whose spectra sit
         near `min_db` — a population that correlates with absorption, i.e. with
@@ -166,10 +166,10 @@ class TestTheSpectralSlopeIsRecordedAndTheRefusalIsNotSwallowed:
         handlers = [n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler)]
         assert handlers == [], (
             f"preprocess.py now catches exceptions (line(s) "
-            f"{[h.lineno for h in handlers]}). If `rep.encode`'s AC-37 refusal is "
+            f"{[h.lineno for h in handlers]}). If `rep.encode`'s headroom refusal is "
             f"inside one, scenes near the min_db floor are dropped instead of "
             f"aborting the run — and which scenes those are correlates with "
-            f"absorption (RD-188)."
+            f"absorption."
         )
 
     def test_every_scene_and_leg_carries_a_slope(self, tmp_path: Path) -> None:
@@ -218,5 +218,5 @@ class TestTheSpectralSlopeIsRecordedAndTheRefusalIsNotSwallowed:
         assert slope(sloped) < slope(flat) - 5.0, (
             f"a 2nd-order 4 kHz lowpass moved the recorded slope from "
             f"{slope(flat):.1f} to only {slope(sloped):.1f} dB/decade — this is not "
-            f"measuring the spectral tilt the narrowed guard stopped seeing (RD-188)"
+            f"measuring the spectral tilt the narrowed guard stopped seeing"
         )

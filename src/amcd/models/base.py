@@ -10,7 +10,7 @@ class Model(Protocol):
 
         `aux` is the forward-looking seam for the path-conditioned variant
         (research_I_paper.md §4.4 / App. C; signature per design_spec §8): per-scene
-        path features exported by the gsound_sir backend (see DEFERRED RD-08 —
-        IRResult.paths lands with that backend). Unused by vanilla_cnn; None today.
+        path features exported by the gsound_sir backend as `IRResult.paths`.
+        Unused by vanilla_cnn; None today.
         """
         ...

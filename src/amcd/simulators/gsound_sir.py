@@ -29,7 +29,7 @@ from pydantic import BaseModel, field_validator
 
 from ..acoustics import box_volume_and_surface, predicted_support_s, sabine_rt60
 from ..registry import simulator_registry
-from .base import IRResult, PathData, SceneSpec
+from .base import IRResult, PathData, SceneRefused, SceneSpec
 
 
 #: Number of octave bands pygsound's `Context` simulates (63 Hz … 8 kHz centres,
@@ -40,18 +40,13 @@ _N_BANDS = 8
 #: Install receipt `scripts/setup_gsound_sir.py` writes into the render env's
 #: site-packages, and the JSON key holding the upstream commit it built.
 #:
-#: DUPLICATED, deliberately: the other definition is
-#: `scripts/setup_gsound_sir.py:78` (`RECEIPT_NAME`) and `:300` (`read_receipt`),
-#: which package code CANNOT import — `scripts/` has no `__init__.py`, is not
-#: installed, and is not on the `PYTHONPATH` the pipeline runs under. Reaching it
-#: would take a sys.path hack, i.e. an assumption about repo layout inside package
-#: code. Two small constants beat that.
+#: DUPLICATED, deliberately, against `scripts/setup_gsound_sir.py:78`
+#: (`RECEIPT_NAME`) and `:300` (`read_receipt`): package code cannot import
+#: `scripts/`, which has no `__init__.py`, is not installed, and is not on the
+#: `PYTHONPATH` the pipeline runs under. Reaching it would take a sys.path hack.
 #:
-#: SENT TO THE WORKER IN ITS REQUEST (F-123). The worker cannot import `amcd`, so
-#: it used to inline both names — a third copy of each. It now reads them from the
-#: JSON request it already receives, leaving `scripts/setup_gsound_sir.py` as the
-#: only other definition, and that one is unavoidable: package code cannot import
-#: `scripts/`, which has no `__init__.py` and is not installed.
+#: Sent to the worker inside its JSON request rather than inlined there, since the
+#: worker cannot import `amcd` either — so these are the only two definitions.
 _RECEIPT_NAME = "amcd_gsound_install.json"
 _RECEIPT_SHA_KEY = "commit_sha"
 
@@ -59,14 +54,14 @@ _RECEIPT_SHA_KEY = "commit_sha"
 #: **N3D, not SN3D** — verified in the auralizer binding at
 #: `auralizer/src/cpp/binding.cpp:18` ("normalization constant K(l, m) for N3D")
 #: and `:43` ("N3D/ACN ordering"), re-checked against the pinned SHA before this
-#: value was first stamped (AC-15). Getting it wrong is a per-degree sqrt(2l+1)
+#: value was first stamped. Getting it wrong is a per-degree sqrt(2l+1)
 #: error, invisible while every live scalar metric reads channel 0 (where N3D and
 #: SN3D agree exactly) and load-bearing the moment evaluation/spatial.py is filled
-#: in (RD-25).
+#: in.
 _AMBISONIC_CONVENTION = "acn_n3d"
 
 #: Whether the m != 0 channels carry a Condon-Shortley (-1)^|m| phase on top of
-#: ACN/N3D. **MEASURED, not read off the source comments** (AC-57): a single
+#: ACN/N3D. **MEASURED, not read off the source comments**: a single
 #: synthetic path pushed through `generate_ambisonic_ir` at order 1, with no
 #: propagation involved, gives channel-to-W ratios of
 #:
@@ -74,8 +69,8 @@ _AMBISONIC_CONVENTION = "acn_n3d"
 #:     +z -> [1, 0, +1.7321, 0]
 #:
 #: The magnitude sqrt(3) confirms N3D (SN3D would be 1.0) and the position of the
-#: non-zero entry confirms ACN ordering (W, Y, Z, X) — so AC-15's stamp is right
-#: about both. But X and Y are NEGATED relative to W while Z is not, which is
+#: non-zero entry confirms ACN ordering (W, Y, Z, X). But X and Y are NEGATED
+#: relative to W while Z is not, which is
 #: exactly (-1)^|m|, and negating X and Y together is a **180 degree yaw**.
 #:
 #: ABSOLUTE SCALE: upstream's SH normalization constant is the ORTHONORMAL one,
@@ -83,11 +78,11 @@ _AMBISONIC_CONVENTION = "acn_n3d"
 #: global gain on all channels, so every ratio — which is all any ISO metric or a
 #: DOA estimate reads — is unaffected, and no absolute level here is calibrated
 #: against a reference pressure. Recorded, not corrected: renormalizing would
-#: rewrite every stored IR to fix nothing (AC-57).
+#: rewrite every stored IR to fix nothing.
 #:
 #: The OBSERVED |W| is NOT that constant: the late field is
 #: `result[c, t] = normalized_sh[c] * carrier[t]` (binding.cpp:423), so a sample of
-#: the synthesis noise carrier multiplies it (AC-75). The ratios above are therefore
+#: the synthesis noise carrier multiplies it. The ratios above are therefore
 #: the only absolute-scale-free facts here, which is exactly why they are what the
 #: known-answer test asserts.
 #:
@@ -97,7 +92,7 @@ _AMBISONIC_CONVENTION = "acn_n3d"
 #: scalar metric reads channel 0, where it has no effect — and becomes
 #: load-bearing the moment evaluation/spatial.py estimates a direction, which
 #: would otherwise come out 180 degrees wrong in azimuth and look like a bug in
-#: the estimator rather than in the encoding (RD-25).
+#: the estimator rather than in the encoding.
 _SH_CONDON_SHORTLEY_PHASE = True
 
 #: Seed of the noise carrier the SH synthesis builds every IR on. Compiled into
@@ -107,7 +102,7 @@ _SH_CONDON_SHORTLEY_PHASE = True
 #: noise_gen;` at `:329` — verified against SHA 608ea30f, the value
 #: configs/simulators/gsound_sir.yaml pins.
 #:
-#: Stamped because it is LOAD-BEARING (AC-59): the carrier is one realization of a
+#: Stamped because it is LOAD-BEARING: the carrier is one realization of a
 #: random process, and a single realization moves T30 by ~2.5% and C50 by ~1 dB —
 #: about one JND.
 #:
@@ -117,21 +112,20 @@ _SH_CONDON_SHORTLEY_PHASE = True
 #: WHAT IS NOT: that the induced METRIC error therefore cancels in a paired
 #: comparison. It does not follow — the two legs occupy different delay bins, so
 #: they weight the same carrier differently, and bin occupancy is driven by the ray
-#: budget, which is the swept axis itself. A model puts the residual at sd ~0.45 dB
-#: on the paired C50 delta, ~45% of `d0b_c50_jnd_db` (AC-76, OPEN, with a
-#: zero-render experiment that settles it).
+#: budget, which is the swept axis itself. A model puts the residual at sd ~0.45
+#: dB on the paired C50 delta, ~45 % of `d0b_c50_jnd_db`.
 #:
-#: This value is also UNFALSIFIABLE from here (AC-77/F-124): it is a literal in
+#: This value is also UNFALSIFIABLE from here: it is a literal in
 #: amcd's own source, so provenance emits 42 whatever upstream does, and a
 #: provenance diff cannot move. Unlike `speed_of_sound_m_s` (cross-checked against
-#: the paths, RD-19) and `ambisonic_convention` (measured, F-93), it rests entirely
-#: on the `commit_sha` pin.
+#: the paths) and `ambisonic_convention` (measured), it rests entirely on the
+#: `commit_sha` pin.
 _SYNTHESIS_CARRIER_SEED = 42
 
 #: How this backend turns an alpha handed to `createbox` into the room it builds.
 #: Its per-bounce ENERGY factor is `sqrt(1-alpha)` where the declared physics wants
-#: `(1-alpha)` (AC-54, re-derived from pinned upstream), so the absorption it
-#: realizes is always LOWER than the one it is given.
+#: `(1-alpha)`, so the absorption it realizes is always LOWER than the one it is
+#: given.
 def _gsound_realizes(createbox_alpha: float) -> float:
     return 1.0 - math.sqrt(1.0 - createbox_alpha)
 
@@ -141,7 +135,7 @@ def _check_convention(convention: str) -> str:
         raise ValueError(
             f"absorption_convention {convention!r} is neither 'pre_compensate' nor "
             "'as_is'. It decides which room is rendered from a scene's declared "
-            "alpha, so there is no default (AC-54, RD-144)."
+            "alpha, so there is no default."
         )
     return convention
 
@@ -156,10 +150,11 @@ def _createbox_absorption(alpha_nominal: float, convention: str) -> float:
 
     `as_is` passes the nominal value straight through and renders the uncorrected
     room, whose T60 runs 1.14-1.98x longer across `base.yaml`'s declared support. It
-    is not a fallback — it is what every measurement before AC-54 was taken under,
-    and it must stay reachable so those numbers remain reproducible.
+    is not a fallback: it is what the uncorrected-room measurements in this
+    project's history were taken under, and it stays reachable so they remain
+    reproducible.
 
-    NOT THE REALIZED ABSORPTION, and the two must not be confused (AC-50): under
+    NOT THE REALIZED ABSORPTION, and the two must not be confused: under
     `pre_compensate` this returns 0.5100 for a nominal 0.30 while the room realizes
     0.30, and a closed form evaluated at the wrong one of the two describes a room
     that was never rendered. `realized_absorption` below is the other quantity.
@@ -177,11 +172,10 @@ def _createbox_absorption(alpha_nominal: float, convention: str) -> float:
 #: JSON request in, `ir.npy` + `paths.npz` + `result.json` out — so nothing has to be
 #: pickle-compatible across two Pythons of different architectures.
 #:
-#: It was a 211-line raw string inside this module until the file-ownership rule
-#: that forced that dissolved (RR-94). Binding the name to the file's TEXT keeps
-#: every consumer unchanged — `_run_worker` still writes it out, and the compile,
-#: AST-import and stub-execution tests still read it — while the worker becomes
-#: something an editor can lint, a debugger can step, and a diff can show.
+#: Bound to the file's TEXT, never imported: `_run_worker` writes it into the
+#: render env, and `docs/design_spec.md` §11.1 lists `simulators/_gsound_worker.py`
+#: in the render fingerprint precisely because an import closure cannot see a
+#: module that is exec'd as text.
 _WORKER_SRC = (Path(__file__).with_name("_gsound_worker.py")).read_text(encoding="utf-8")
 
 
@@ -205,7 +199,7 @@ class GsoundSirSimulator:
 
         #: Ray counts. `low_ray_budget`/`high_ray_budget` (top-level Config) drive
         #: gsound's DIFFUSE count; specular is declared here and held FIXED across
-        #: both legs, so the swept axis is unambiguously the diffuse budget (RD-12).
+        #: both legs, so the swept axis is unambiguously the diffuse budget.
         specular_count: int
         diffuse_depth: int
         specular_depth: int
@@ -228,17 +222,17 @@ class GsoundSirSimulator:
         #: are not free — `_check_edges_match_centres` requires each edge to be the
         #: geometric mean of its neighbours, exactly as `gs::FrequencyBands` derives
         #: them (gsFrequencyBands.cpp:83-88) — so this is a falsifiable declaration
-        #: of a compiled-in fact, not a second tunable. Needed because RD-24 requires
-        #: a path file to NAME the frequency of each `intensities` column.
+        #: of a compiled-in fact, not a second tunable. Needed because a path file
+        #: must NAME the frequency of each `intensities` column.
         band_centres_hz: list[float]
 
-        #: gsound's propagation speed. Compiled into C++ and NOT settable (RD-19),
+        #: gsound's propagation speed. Compiled into C++ and NOT settable,
         #: so it is DECLARED here and then cross-checked at render against the
         #: `speeds_of_sound` the paths themselves report — a declaration that would
         #: hard-error if upstream ever changed it, rather than a comment.
         speed_of_sound_m_s: float
 
-        #: RD-21/RD-67's QC threshold, in dB: flag a leg whose discarded tail energy
+        #: QC threshold, in dB: flag a leg whose discarded tail energy
         #: relative to the native IR's total energy exceeds this. Trimming gsound's
         #: natural IR to `ir_duration` can silently invalidate T30/EDT on the most
         #: reverberant scenes, so the loss is measured and disclosed per (scene, leg).
@@ -250,11 +244,11 @@ class GsoundSirSimulator:
         #: separate x86 interpreter (e.g. Rosetta on Apple Silicon), a config layer
         #: supplies its absolute path. Deliberately kept OUT of the canonical
         #: provenance echo (see `render._canonical_meta`): a machine-local path is
-        #: not a property of the dataset, and stamping it would make the same render
-        #: differ between hosts. Migrates to `RunContext.host` when RD-20 lands.
+        #: not a property of the dataset, and stamping it would make the same
+        #: render differ between hosts.
         render_python: str | None
 
-        #: HOW THIS BACKEND REALIZES A DECLARED ABSORPTION (AC-54, RD-144).
+        #: HOW THIS BACKEND REALIZES A DECLARED ABSORPTION.
         #:
         #: GSound sets material reflectivity to `sqrt(1-alpha)` as an AMPLITUDE
         #: coefficient (`SoundMesh.cpp:221`) and then accumulates it into a
@@ -263,7 +257,7 @@ class GsoundSirSimulator:
         #: what forces the reading: per-bounce ENERGY carries `sqrt(1-alpha)`, so
         #: the realized absorption is `alpha_eff = 1 - sqrt(1 - alpha)`.
         #:
-        #: DECLARED ON THE BACKEND, never in `scenes/generator.py` (RD-144): the
+        #: DECLARED ON THE BACKEND, never in `scenes/generator.py`: the
         #: generator defines the dataset's acoustics for EVERY simulator, so
         #: re-deriving its closed forms from one raytracer's domain confusion
         #: would make a second raytracer render a different room from the same
@@ -276,14 +270,14 @@ class GsoundSirSimulator:
         #: under. No default — this is experiment-governing.
         absorption_convention: Literal["pre_compensate", "as_is"]
 
-        #: THE RECORD THIS BACKEND CAN FILL — the compiled cap (AC-175, AC-56).
+        #: THE RECORD THIS BACKEND CAN FILL — the compiled cap.
         #: `maxIRLength` is compiled at 3.0 s and not exposed by `module.cpp`, so
         #: `ir_duration` cannot govern the native record and must be validated
         #: against this rather than assumed. Declared, not configured: setting a
         #: different value does not change the simulation.
         max_ir_length_s: float
 
-        #: THE LIMIT THAT ACTUALLY BINDS (AC-184). Upstream's adaptive energy trim
+        #: THE LIMIT THAT ACTUALLY BINDS. Upstream's adaptive energy trim
         #: closes the record long before the compiled cap — measured across the
         #: retained renders, T60 swept 45.2x while the record grew only 2.89x — so
         #: realized support is a FUNCTION of the scene's decay, not a constant:
@@ -305,13 +299,13 @@ class GsoundSirSimulator:
         predicted_support_surface_exponent: float
         #: Declared so the law states its own operating point: realized support
         #: rises with the ray budget, so a coefficient carries an implicit budget
-        #: unless it says which one it was fitted at (AC-185).
+        #: unless it says which one it was fitted at.
         predicted_support_fitted_at_ray_budget: int
 
-        #: AIR ABSORPTION IS REALIZED AT alpha_ISO/4 (AC-66) — AC-54's domain
-        #: confusion at a second call site, which pre-compensating surface alpha
-        #: does not reach. Compiled ON and not exposed, so it is DECLARED and
-        #: guarded rather than corrected: inert at 500/1000 Hz (<= 0.4% of T60),
+        #: AIR ABSORPTION IS REALIZED AT alpha_ISO/4 — the same energy-vs-amplitude
+        #: confusion as surface absorption, at a call site pre-compensation cannot
+        #: reach. Compiled ON and not exposed, so it is DECLARED and guarded rather
+        #: than corrected: inert at 500/1000 Hz (<= 0.4% of T60),
         #: ~19% at 8 kHz. `iso_eval_freqs` above the max below is refused.
         precise_early_reflections: bool
         early_reflection_threshold: float
@@ -370,8 +364,7 @@ class GsoundSirSimulator:
             (gsFrequencyBands.cpp:83-88). Checking that here is what makes
             `band_centres_hz` a declaration of a compiled-in fact rather than a
             second, independently-settable band definition that could drift from the
-            edges actually used for synthesis — the AC-12 failure mode (88.4 vs
-            88.7412) one level up.
+            edges actually used for synthesis.
             """
             expected = [
                 (a * b) ** 0.5 for a, b in zip(self.band_centres_hz, self.band_centres_hz[1:])
@@ -407,14 +400,13 @@ class GsoundSirSimulator:
         DERIVED, never separately declared: below `source_radius + listener_radius`
         gsound's source and listener spheres physically overlap, so the floor is
         already implied by two values the config states. A third config field
-        holding the same fact could disagree with the geometry it describes —
-        the divergence AC-24 was raised about.
+        holding the same fact could disagree with the geometry it describes.
         """
         return float(params["source_radius"]) + float(params["listener_radius"])
 
     @classmethod
     def models_early_reflections(cls, params: dict) -> bool:
-        """Required pre-render declaration (`Simulator`) — TRUE (AC-43).
+        """Required pre-render declaration (`Simulator`) — TRUE.
 
         This backend traces specular paths (`specular_count`, `specular_depth`) and
         synthesizes them individually up to `early_reflection_threshold` when
@@ -429,7 +421,7 @@ class GsoundSirSimulator:
 
     @classmethod
     def realized_absorption(cls, params: dict, alpha_nominal: float) -> float:
-        """Required pre-render declaration (`Simulator`) — AC-54/AC-50.
+        """Required pre-render declaration (`Simulator`).
 
         What the ROOM ENDS UP WITH, which is not what `createbox` is handed: this
         backend realizes `1 - sqrt(1 - x)` from an alpha `x`, so the two differ by
@@ -451,7 +443,7 @@ class GsoundSirSimulator:
     @classmethod
     def realized_support_s(cls, params: dict, t60_s: float, volume_m3: float,
                            surface_m2: float, window_s: float) -> float:
-        """Required pre-render declaration (`Simulator`) — AC-186, AC-175, AC-56.
+        """Required pre-render declaration (`Simulator`).
 
         Two limits, and the ADAPTIVE ENERGY TRIM binds first: the compiled 3.0 s
         `maxIRLength` is a ceiling on top of it that no rendered scene has come
@@ -479,7 +471,7 @@ class GsoundSirSimulator:
 
     @classmethod
     def max_eval_freq_hz(cls, params: dict) -> float:
-        """Highest band this backend renders faithfully enough to measure (AC-66).
+        """Highest band this backend renders faithfully enough to measure.
 
         Air absorption is realized at `air_absorption_realized_fraction` of the ISO
         value — a compiled-in domain confusion, declared rather than corrected
@@ -498,18 +490,26 @@ class GsoundSirSimulator:
         the `dry_run` scaffold invalidate a real emulated dataset. `base.py` is in
         scope because the seam it defines — `_fit_to_window`'s window contract and
         `PathData` — shapes what this backend returns.
+
+        `_gsound_worker.py` is in scope and would otherwise be invisible to every
+        automatic check: it is read as TEXT and exec'd in the x86 subprocess, so it
+        appears in no import closure — while being the code that actually calls
+        pygsound and synthesizes the IR.
         """
-        return ("simulators/gsound_sir.py", "simulators/base.py")
+        return (
+            "simulators/gsound_sir.py",
+            "simulators/_gsound_worker.py",
+            "simulators/base.py",
+        )
 
     @classmethod
     def host_scoped_params(cls) -> tuple[str, ...]:
         """`render_python` is a machine-local interpreter path, not a dataset fact.
 
-        Declared HERE rather than listed inside the render stage (F-86): the stage
+        Declared HERE rather than listed inside the render stage: the stage
         must not know what a gsound is, and a second backend's host-scoped param
         would otherwise be a second entry in a constant that only this backend can
-        justify. Redacted from canonical provenance by `render._canonical_meta`;
-        moves to `RunContext.host` when RD-20 lands.
+        justify. Redacted from canonical provenance by `render._canonical_meta`.
         """
         return ("render_python",)
 
@@ -517,9 +517,8 @@ class GsoundSirSimulator:
     def _ambisonics_order(self) -> int:
         """SH order implied by the channel count: n_channels = (order + 1)**2.
 
-        Derived rather than separately declared, for AC-24's reason — a second
-        config field holding the same fact could disagree with the channel count it
-        describes.
+        Derived rather than separately declared: a second config field holding the
+        same fact could disagree with the channel count it describes.
         """
         order = int(round(self.n_channels ** 0.5)) - 1
         if (order + 1) ** 2 != self.n_channels:
@@ -539,11 +538,11 @@ class GsoundSirSimulator:
         call that produces the paths, so requesting it would mean a second
         propagation run purely to obtain the unfiltered set the IR is synthesized
         from. `_retain` applies upstream's selection rule, with a deterministic
-        tie-break and float64 accumulation (see its docstring; AC-82).
+        tie-break and float64 accumulation (see its docstring).
 
         The split matters: retention applies ONLY to the saved artifact. Filtering
         before synthesis would change the IR itself and confound the ray-budget axis
-        under study — measured at 43.1% of path energy on a real scene (RD-123).
+        under study — measured at 43.1% of path energy on a real scene.
         """
         mode = self.params["path_retention"]["mode"]
         value = self.params["path_retention"]["value"]
@@ -590,21 +589,24 @@ class GsoundSirSimulator:
 
         Returns `(ir, disclosure)`: the fitted (n_channels, n_samples) float32 array,
         and the per-(scene, leg) record of what fitting cost. The channel axis is
-        never touched — `render()` checks it separately (RR-76).
+        never touched — `render()` checks it separately.
 
-        RD-21: trimming gsound's natural IR to `ir_duration` discards tail energy and
-        can silently invalidate T30/EDT on the most reverberant scenes, so what was
+        Trimming gsound's natural IR to `ir_duration` discards tail energy and can
+        silently invalidate T30/EDT on the most reverberant scenes, so what was
         thrown away is MEASURED and reported per (scene, leg) rather than assumed
         negligible. `discarded_tail_db` is the discarded energy relative to the
         native total; it is None — never 0.0 or -inf — when nothing was discarded,
         because an unmeasured quantity must not be rendered as a number.
 
-        `truncation_qc_flag` records the threshold breach. NOTHING CONSUMES IT YET:
-        the per-criterion QC record that acts on it is Step 4's (RD-14). It is
-        disclosure, not a gate.
+        `truncation_qc_flag` records the threshold breach. It is DISCLOSURE ONLY
+        and deliberately not a fifth admission criterion: Research I declares
+        exactly four and E1 reproduces RI, so adding one would change what the
+        reproduction admits. It is therefore NOT a backstop for a short realized
+        decay range — the estimator's own ISO decay-range bound in
+        `evaluation/room_acoustic.py` is what refuses those.
 
         IT IS ALSO STRUCTURALLY UNREACHABLE UNDER `configs/base.yaml`, AND THAT IS
-        A PROPERTY OF THE CONFIG PAIR RATHER THAN A DEFECT (F-83). The trim branch
+        A PROPERTY OF THE CONFIG PAIR RATHER THAN A DEFECT. The trim branch
         fires only when the native record EXCEEDS the window, and this backend's
         native record is bounded by the compiled `max_ir_length_s` (3.0 s, plus the
         auralizer's tail padding). Under base's `ir_duration: 4.25` the window is
@@ -649,7 +651,7 @@ class GsoundSirSimulator:
         return ir, {
             "native_ir_samples": n_native,
             "fitted_ir_samples": int(ir.shape[1]),
-            # BOTH energies, and named for the array each describes (F-84/F-111).
+            # BOTH energies, and named for the array each describes.
             # They differ whenever the trim branch fires, and it is the FITTED one
             # that is written to disk and read by every metric. Sum of squared
             # sample amplitudes, float64 accumulation, uncalibrated — no dB
@@ -666,7 +668,7 @@ class GsoundSirSimulator:
         """Falsify the declared `predicted_support_*` law against the realized record.
 
         The declaration in `configs/simulators/gsound_sir.yaml` predicts how much of
-        a scene's decay this backend's adaptive energy trim will retain (AC-184).
+        a scene's decay this backend's adaptive energy trim will retain.
         gen-scenes gates on that prediction because it runs before any render
         exists; this is the other half — the render reporting what actually
         happened, so an over-reading prediction becomes visible instead of
@@ -675,8 +677,7 @@ class GsoundSirSimulator:
 
         Uses the REALIZED absorption, not the scene's nominal alpha — the trim
         responds to the decay that was rendered, and under `pre_compensate` those
-        are the same room by construction, while under `as_is` they are not
-        (AC-54).
+        are the same room by construction, while under `as_is` they are not.
         """
         volume, surface = box_volume_and_surface(scene.dims)
         alpha_realized = self.realized_absorption(
@@ -701,36 +702,34 @@ class GsoundSirSimulator:
                 realized_s / predicted_s if predicted_s > 0.0 else float("nan")
             ),
             "support_t60_s": t60_s,
-            # What the record holds of its own decay, in dB. This is the quantity
-            # AC-176's estimator bound is applied to downstream, reported here so
-            # the refusal can be predicted from the render record alone.
+            # What the record holds of its own decay, in dB — the quantity the
+            # estimator's ISO admissibility bound is applied to downstream,
+            # reported here so a refusal is predictable from the render alone.
             "realized_decay_range_db": (
                 60.0 * realized_s / t60_s if t60_s > 0.0 else float("nan")
             ),
         }
 
-    # RD-19's declared-speed cross-check lives in the WORKER, not here (F-94). A
-    # parent-side copy over the retained subset was kept briefly as "defence in
-    # depth" and was in fact dead: it re-tested a subset of an array the worker had
-    # already accepted at the same tolerance, so it could not fail, and its empty
-    # branch was unreachable because the worker exits first (F-119).
+    # The declared-speed cross-check lives in the WORKER, not here: a parent-side
+    # copy would re-test a subset of an array the worker already accepted at the
+    # same tolerance, so it could not fail.
 
     def render(self, scene: SceneSpec, ray_budget: int) -> IRResult:
         """Render one leg of one scene through the x86 worker.
 
-        `ray_budget` is the DIFFUSE ray count (RD-12); `specular_count` is declared
+        `ray_budget` is the DIFFUSE ray count; `specular_count` is declared
         in config and held fixed across both legs, so the swept axis is unambiguously
         the diffuse budget.
         """
         energy_percentage, max_rays = self._retention_args()
         request = {
             "commit_sha": self.params["commit_sha"],
-            # Cross-checked in the worker, over the unfiltered path set (F-94).
+            # Cross-checked in the worker, over the unfiltered path set.
             "speed_of_sound_m_s": float(self.params["speed_of_sound_m_s"]),
             "dims": list(scene.dims),
-            # AC-54/RD-144: the scene declares NOMINAL alpha; this backend
-            # realizes 1-sqrt(1-alpha), so pre-compensation is what makes the
-            # rendered room the room the scene describes.
+            # The scene declares NOMINAL alpha; this backend realizes
+            # 1-sqrt(1-alpha), so pre-compensation is what makes the rendered room
+            # the room the scene describes.
             "absorption": _createbox_absorption(
                 float(scene.material_absorption),
                 str(self.params["absorption_convention"]),
@@ -748,7 +747,7 @@ class GsoundSirSimulator:
             "diffuse_depth": int(self.params["diffuse_depth"]),
             "specular_depth": int(self.params["specular_depth"]),
             "sample_rate": int(self.sample_rate),
-            # Sent rather than inlined in the worker (F-123): it cannot import
+            # Sent rather than inlined in the worker: it cannot import
             # amcd, so a literal there would be a third copy of this name.
             "receipt_name": _RECEIPT_NAME,
             "receipt_sha_key": _RECEIPT_SHA_KEY,
@@ -774,7 +773,7 @@ class GsoundSirSimulator:
                 f"expected {self.n_channels} for ambisonic order "
                 f"{self._ambisonics_order}."
             )
-        # The band axis must be named by as many centres as it has columns (F-88).
+        # The band axis must be named by as many centres as it has columns.
         # Checked against the WORKER's reported count, which is upstream's own, so a
         # config whose band declaration drifts from the compiled filterbank fails
         # here rather than producing a path file that misnames its columns.
@@ -791,14 +790,17 @@ class GsoundSirSimulator:
             )
 
         ir, truncation = self._fit_to_window(native)
-        # The other half of the AC-184 declaration: gen-scenes gated this scene on a
-        # PREDICTED record length; here is what the backend actually produced.
+        # The other half of the support declaration: gen-scenes gated this scene
+        # on a PREDICTED record length; here is what the backend produced.
         truncation.update(self._support_falsification(scene, truncation["native_ir_samples"]))
 
-        # A leg with no energy is not a leg (F-84). Tested on the FITTED array — the
-        # one written to disk and read by every metric (F-111).
+        # A leg with no energy is not a leg. Tested on the FITTED array — the
+        # one written to disk and read by every metric.
         if truncation["fitted_ir_total_energy"] <= 0.0:
-            raise ValueError(
+            # SceneRefused, not ValueError: this is a property of THIS scene's
+            # geometry, so the batch continues without it. The two checks above are
+            # backend contract violations and stay fatal.
+            raise SceneRefused(
                 f"scene {scene.scene_id!r} at diffuse budget {ray_budget}: the "
                 f"rendered IR carries zero total energy in the "
                 f"{self.n_channels} x {self.n_samples} window that would be written "
@@ -808,7 +810,7 @@ class GsoundSirSimulator:
             )
 
         # None when total energy is zero — the share is undefined there, and a 0.0
-        # would render an unscored quantity as a number (F-85).
+        # would render an unscored quantity as a number.
         kept_pct = result["kept_energy_percentage"]
         kept_pct = None if kept_pct is None else float(kept_pct)
 
@@ -834,9 +836,9 @@ class GsoundSirSimulator:
                 # The producer does not know the stage's label for this leg; the
                 # render stage stamps it when it writes the file.
                 "leg": None,
-                # RD-23: one render per (scene, budget) today, so the realization
-                # axis exists in the artifact but is not yet swept. Present so a
-                # file written now stays identifiable once it is.
+                # One render per (scene, budget) today, so the realization axis
+                # exists in the artifact but is not yet swept. Present so a file
+                # written now stays identifiable once it is.
                 "realization_index": 0,
             },
         )
@@ -848,10 +850,21 @@ class GsoundSirSimulator:
                 "simulator": "gsound_sir",
                 "ray_budget": int(ray_budget),
                 "speed_of_sound_m_s": float(self.params["speed_of_sound_m_s"]),
+                # Source-receiver separation, in metres. Required provenance
+                # because it is what lets GEOMETRY adjudicate the onset detector:
+                # with it, `floor(distance_m / speed_of_sound_m_s * fs)` is where
+                # the direct arrival must be, in both the render-stage QC criterion
+                # and the reported metric path. Emitted by the backend rather than
+                # recomputed from the scene so the speed used is the one that
+                # actually propagated the sound.
+                "distance_m": float(np.linalg.norm(
+                    np.asarray(scene.source_pos, dtype=np.float64)
+                    - np.asarray(scene.receiver_pos, dtype=np.float64)
+                )),
                 "ambisonic_convention": _AMBISONIC_CONVENTION,
                 "sh_condon_shortley_phase": _SH_CONDON_SHORTLEY_PHASE,
                 # Two RNGs, reported separately — see _SYNTHESIS_CARRIER_SEED for
-                # what that does and does not establish (AC-59/AC-76).
+                # what that does and does not establish.
                 "ray_rng_seeded": False,
                 "synthesis_carrier_seed": _SYNTHESIS_CARRIER_SEED,
                 # Kept: REQUIRED_PROVENANCE_KEYS binds every backend, and the two
@@ -871,7 +884,7 @@ class GsoundSirSimulator:
                 "num_bands": n_bands,
                 "kept_energy_percentage": kept_pct,
                 # How many paths the declared speed was falsified against — the full
-                # simulated set, not the retained subset (F-94).
+                # simulated set, not the retained subset.
                 "speed_check_num_paths": int(result["speed_check_num_paths"]),
                 **truncation,
             },
@@ -884,7 +897,7 @@ class PathRetention(BaseModel):
     Maps onto the (energy_percentage, max_rays) pair that the render worker's
     `_retain` applies — upstream's own selection rule, reproduced there rather than
     requested from `getPathData`, which is always called unfiltered so the IR is
-    synthesized from every path (RD-123):
+    synthesized from every path:
       all          → energy_percentage 100, max_rays 0
       top_percent  → energy_percentage = value
       top_k        → max_rays = value
@@ -910,7 +923,7 @@ class PathRetention(BaseModel):
         if self.value is None:
             raise ValueError(f"path_retention.mode {self.mode!r} requires a `value`")
 
-        # Range and integrality, per mode (F-92): out-of-domain values are
+        # Range and integrality, per mode: out-of-domain values are
         # REINTERPRETED by the worker's cut rule, not rejected. The two raise
         # messages below state each domain.
         if self.mode == "top_k":

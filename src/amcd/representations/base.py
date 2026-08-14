@@ -30,7 +30,7 @@ class Representation(Protocol):
     #: contract above) or "amplitude" (raw samples — the `waveform` identity rep).
     #: Declared, not inferred, and stamped into the preprocess meta so dB-assuming
     #: consumers (e.g. energy SNR's 10**(x/10) undo) key on the declared domain of
-    #: the tensors they read — never on isinstance of a concrete rep (ledger F-19).
+    #: the tensors they read — never on isinstance of a concrete rep.
     value_domain: str
 
     def encode(self, ir: np.ndarray) -> torch.Tensor:
@@ -47,8 +47,7 @@ class Representation(Protocol):
         `delta` is the Huber knee; it MUST be expressed in the same domain as
         `pred`/`target` (the operand domain), NOT raw dB — the trainer scales a
         dB δ into the z-scored operand domain before calling (see
-        training.loss.build_criterion / delta_db_to_norm; cross-ref DEFERRED
-        F-06 on unifying the two loss sources of truth)."""
+        training.loss.build_criterion / delta_db_to_norm)."""
         ...
 
 
@@ -65,14 +64,13 @@ def build_representation(
     Keeps preprocess/infer/probe rep-agnostic: adding a new output domain needs
     only a registered class with its own `Params`.
 
-    TWO CROSS-CUTTING ARGS, NOT ONE (RD-187). `sample_rate` was the only one, and
-    that is what forced `configs/representations/spectrogram.yaml` to re-declare
-    the evaluation band set as `min_db_headroom_octave_centres_hz` — a SECOND
-    declaration of `iso_eval_freqs`, i.e. the AC-24 divergence shape, held together
-    only by a test asserting the two are equal. A representation whose guard is
-    calibrated against the REPORTED metric bands has to be told what those are; it
-    cannot see the master config, and inventing its own copy is how the described
-    band set and the measured one drift apart.
+    TWO CROSS-CUTTING ARGS, NOT ONE. With `sample_rate` alone,
+    `configs/representations/spectrogram.yaml` had to re-declare the evaluation
+    band set as `min_db_headroom_octave_centres_hz` — a second declaration of
+    `iso_eval_freqs` held together only by a test asserting the two are equal. A
+    representation whose guard is calibrated against the REPORTED metric bands has
+    to be told what those are; it cannot see the master config, and inventing its
+    own copy is how the described band set and the measured one drift apart.
 
     `eval_freqs_hz` is `config.iso_eval_freqs`. Passed to every representation
     rather than only to the ones that use it, for the reason `sample_rate` is: an

@@ -6,7 +6,7 @@
 # baseline and deliberately differs; THIS file is the one that claims RI
 # faithfulness, so every RI-specified value is restated here even where base.yaml
 # already agrees — a reproduction config that silently inherits half its values
-# is not auditable (ledger RD-26).
+# is not auditable.
 #
 # ── Figure 5 / 6 coverage ─────────────────────────────────────────────────────
 # PINNED HERE:      base seed 42 · 48 kHz · 3.0 s · order 3 · float32 · ray pair
@@ -15,20 +15,20 @@
 #                   1.2-1.8 m · source-receiver separation 1.0-10.0 m · split
 #                   counts 500/60/60/40/30/30 · per-split seeds 1001-1006
 #                   the four QC thresholds — see the QC block below, which pins
-#                   all of them (RD-18 closed the two keys that did not exist)
+#                   all of them ( the two that did not previously exist are now declared)
 #
 # ── SIX DELIBERATE DEVIATIONS — this config is NOT a verbatim RI clone ────────
 # Each is arbitrated and tracked; the E1 report must disclose them per split.
 #
-# 1. (RD-27) RI's test_geometry_shift is DUAL-axis — corridor AND
+# 1. RI's test_geometry_shift is DUAL-axis — corridor AND
 #    `near_wall+far_pair` (Figure 6 l.514) — which breaks v3 invariant #10
 #    (a shift split perturbs exactly ONE axis). We keep invariant #10 and hold
 #    placement at the id regime. E1 is a methodological reproduction, not a
-#    bit-exact one (pygsound exposes no RNG seed at all — RD-23), and cloning a
+#    bit-exact one (pygsound exposes no RNG seed at all), and cloning a
 #    confounded split would make v3's own robustness claim uninterpretable.
 #    ⇒ v3's test_geometry_shift is NOT comparable to RI's 0.61 baseline rel-L2.
 #
-# 2. (RD-28/AC-20) RI's material shift targets ceiling_absorptive AND
+# 2. RI's material shift targets ceiling_absorptive AND
 #    asymmetric_walls. `asymmetric_walls` needs per-surface absorption; SceneSpec
 #    carries one scalar, so only ceiling_absorptive is applied — and that scalar
 #    is applied to ALL SIX SURFACES, not to a ceiling.
@@ -43,7 +43,7 @@
 #      Dropping asymmetric_walls weakens the shift; the scalar-on-all-surfaces
 #      implementation overshoots it by far more. The split is not comparable to
 #      RI's, and the E1 report must state the direction as measured here.
-#    ⇒ Consequences that follow (AC-21, AC-26/AC-27, RD-46): the diffuse-field
+#    ⇒ Consequences that follow: the diffuse-field
 #      model this characterization relies on has failed for 100 % of this split
 #      (Sabine/Eyring ratio median 2.51; critical distance exceeds the largest
 #      room dimension in 23 % of scenes). The split is retained for the PAIRED
@@ -58,7 +58,7 @@
 #      (measured, 200 realizations at true T60 = 0.06 s). Censoring an estimator
 #      on its own value is not a disclosure, it is a distortion.
 #
-#      UPDATED (AC-38, cycle 4) — the reversal of RD-46's original decision is now
+#      UPDATED — the reversal of the original decision is now
 #      COMPLETE, and stated here rather than left to be inferred from a diff.
 #      Cycle 3 replaced the 0.05 s scalar with the filter's own resolvable decay
 #      (~0.010-0.020 s here), which these decays clear, so suppression stopped
@@ -66,7 +66,7 @@
 #      legs entirely: a low/high value below the floor is REPORTED and flagged,
 #      never dropped, because the same censoring argument holds at any threshold
 #      (measured: +13.4 % survivor bias at true T60 = 0.02 s against +8.3 %
-#      disclosed). RD-46's decision was to SUPPRESS this split's absolutes; that
+#      disclosed). decision was to SUPPRESS this split's absolutes; that
 #      decision no longer stands anywhere in the metric path, and this split's
 #      absolutes are now reported for every scene.
 #
@@ -76,10 +76,10 @@
 #      Read this split's absolutes as high-variance diagnostics, never as physical
 #      values. NOTE: the second count reaches `metrics.parquet` only — carrying it
 #      into `ci_table.csv` and summary.txt's Caveats column is lane P's half of
-#      AC-38 and is NOT done, so at the time of writing the reported table does not
+#      and is NOT done, so at the time of writing the reported table does not
 #      show it.
 #
-# 3. (RD-29) RI's placement regimes carry `+mid_pair` / `+far_pair` pairing
+# 3. RI's placement regimes carry `+mid_pair` / `+far_pair` pairing
 #    sub-regimes whose distance sub-ranges the paper NEVER states numerically —
 #    only the global 1.0-10.0 m (Figure 5 l.502). Rather than invent them, all
 #    regimes get the global range. RI's *id* regime is `interior_random+mid_pair`,
@@ -88,7 +88,7 @@
 #    ⇒ the realized per-split distance distribution is recorded in
 #      scenes/placement_report.json so the E1 report can state what stood in.
 #
-# 4. (AC-22) RI's declared geometry x absorption support reaches Sabine T60 4.09 s
+# 4. RI's declared geometry x absorption support reaches Sabine T60 4.09 s
 #    while its Figure 5 `ir_duration` is 3.0 s, so THE RECORD DOES NOT COVER THE
 #    DECLARED SUPPORT. Structural, not a research choice — lengthening the record
 #    would stop this being a reproduction. Quantified at the `scenes:` block below.
@@ -97,7 +97,7 @@
 #    below: near_corner's corner_frac, and the absorption ranges of the `mixed`
 #    and `ceiling_absorptive` material regimes.
 #
-# 6. (AC-186, user decision 2026-08-13) `diffuse_depth` is pinned to 200, where RI
+# 6. (user decision 2026-08-13) `diffuse_depth` is pinned to 200, where RI
 #    inherited pygsound's unstated default of 100. It is the reflection-order
 #    bound, and measurement showed it is what actually sets the record length —
 #    at 100 it truncates 5.56 % of RI's own declared population below the decay
@@ -126,7 +126,12 @@ ambisonics_order: 3
 # claims RI faithfulness, so it pins RI's (paper §B.4 and Figure 5). The onset
 # tolerance and the file-size bound already agree with base.yaml and are restated
 # here rather than inherited, because a reader checking this file against Figure 5
-# must find all four in it (RD-18).
+# must find all four in it.
+#
+# The SEMANTICS match §B.4 too, and that is what makes pinning RI's thresholds
+# meaningful: a failing scene is excluded from the dataset, so this file can carry
+# RI's numbers verbatim without one bad scene stopping the reproduction. The
+# attrition bounds are inherited from base.yaml and reported per split.
 onset_mismatch_tolerance_ms: 2.0
 # RI's floor is a LINEAR total energy of 1e-10, which is -100 dB re 1.0. base.yaml's
 # -60 dB re 1.0 is ~40 dB stricter and would exclude scenes RI admitted, so
@@ -174,7 +179,7 @@ simulator:
 scenes:
   # Count mode: each id-pool split declares its own count and seed below, so
   # there is no pool to divide. Explicitly null rather than absent — a YAML
-  # overlay cannot DELETE base.yaml's `n_id: 500` (RD-32).
+  # overlay cannot DELETE base.yaml's `n_id: 500`.
   n_id: null
 
   id_regime:
@@ -212,7 +217,7 @@ scenes:
   # enough to exceed that.
   # 0.05 against a MEASURED 3.8% (27/720). Was 0.01, set when the gate compared
   # Sabine T60 against `ir_duration`; it now compares against the record GSound-SIR
-  # actually produces, which is much shorter (AC-175/AC-184). RI's 3.0 s record was
+  # actually produces, which is much shorter. RI's 3.0 s record was
   # always known not to cover its 4.09 s corner — the realized shortfall is simply
   # larger than the old instrument could see. Accepted as a renderer limitation per
   # the user decision at design_spec 11.2; the affected scenes return T30 unscored
@@ -234,16 +239,16 @@ scenes:
     # acts purely as a 1.0 m minimum; in a 24 m corridor the 10 m ceiling is what
     # does the rejecting. See deviation 3 above.
     #
-    # THE 1.0 m MINIMUM CARRIES base.yaml's AC-30/AC-50 CAVEAT, and the 10.0 m
+    # THE 1.0 m MINIMUM CARRIES base.yaml's ISO-distance CAVEAT, and the 10.0 m
     # ceiling adds one of its own. ISO 3382-1 5.3's d_min = 2*sqrt(alpha*S/(c*K))
     # over the declared geometry x material corners is [0.412, 5.712] m by Sabine
     # and [0.417, 11.413] m by Eyring — so the EYRING CORNER EXCEEDS THIS ENTIRE
     # RANGE, and no separation this config can draw satisfies the standard's
-    # criterion at that corner. Nominal alpha as configured; pending AC-54, which
+    # criterion at that corner. Nominal alpha as configured; the backend
     # has shown the rendered effective absorption is 1-sqrt(1-alpha) and therefore
     # moves both corners. Stated here as well as in base.yaml because this is the
     # config that claims Research-I faithfulness, and correcting only base.yaml
-    # would leave the two disagreeing (AC-30 / AC-50; disclosure half RD-189).
+    # would leave the two disagreeing.
     interior_random:
       type: interior
       corner_frac: null
@@ -266,7 +271,7 @@ scenes:
 # Count mode: every id-pool split states an exact count and its own seed, which
 # frac-based hash-bucketing cannot express (fracs cannot hit 500/60/60 exactly,
 # and one shared seed cannot be six). `frac: null` is explicit because the
-# overlay cannot delete base.yaml's fracs (RD-32).
+# overlay cannot delete base.yaml's fracs.
 splits:
   train:
     { role: train, frac: null, count: 500, seed: 1001 }

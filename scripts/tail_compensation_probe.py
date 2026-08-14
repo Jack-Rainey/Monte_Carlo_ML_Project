@@ -1,6 +1,6 @@
-"""F-89/RD-55: does extrapolated-tail compensation fix budget-dependent absolutes?
+"""Does extrapolated-tail compensation fix budget-dependent absolutes?
 
-IT DOES NOT, AND THIS IS THE MEASUREMENT THAT SETTLED IT. RD-55 proposed ISO
+IT DOES NOT, AND THIS IS THE MEASUREMENT THAT SETTLED IT. It was proposed to apply ISO
 3382-1's modelled-tail treatment on the reasoning that a reported absolute depends
 on where the record stopped, and that on gsound the record's native length is itself
 budget-dependent. The reasoning is sound and the remedy is the standard one; it is
@@ -39,7 +39,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, "src")
-from amcd.evaluation.room_acoustic import _band_energy, _find_onset, _lundeby_truncate
+from amcd.evaluation.room_acoustic import _band_energy, find_onset, _lundeby_truncate
 
 SR = 48000
 ORDER = 4
@@ -113,8 +113,8 @@ def _legs(name, fc):
     """(low, high) truncated band energies for one scene and band."""
     low = np.load(IRS / f"{name}_b5000.npy")
     high = np.load(IRS / f"{name}_b200000.npy")
-    lw = low[0][_find_onset(low[0], ONSET_DB)[0]:]
-    hw = high[0][_find_onset(high[0], ONSET_DB)[0]:]
+    lw = low[0][find_onset(low[0], ONSET_DB)[0]:]
+    hw = high[0][find_onset(high[0], ONSET_DB)[0]:]
     el, eh = _band_energy(lw, fc, SR, ORDER), _band_energy(hw, fc, SR, ORDER)
     return el[: _lundeby_truncate(el, SR)], eh[: _lundeby_truncate(eh, SR)]
 

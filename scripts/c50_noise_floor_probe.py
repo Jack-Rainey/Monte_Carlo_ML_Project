@@ -19,7 +19,8 @@ same scene N times at one budget — is impossible without a patched build. This
 uses the available surrogate: budgets that differ by a few percent. 200k, 210k and
 220k are the same budget physically; no convergence argument distinguishes them.
 So the spread of C50 ACROSS those three is an estimate of what a single
-realization is worth, and AC-187's 200k-vs-800k deltas can be read against it.
+realization is worth, so the convergence probe's 200k-vs-800k deltas can be
+read against it.
 
 WHAT THIS CAN AND CANNOT CONCLUDE. It is an UPPER bound on sampling noise, not a
 noise floor: record length itself moves with the ray budget, and the shared

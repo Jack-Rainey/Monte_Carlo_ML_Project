@@ -1,4 +1,4 @@
-"""Signal-metric value-domain guard (ledger F-19).
+"""Signal-metric value-domain guard.
 
 `energy_snr_db` undoes a dB encoding (10**(x/10)). The waveform rep encodes raw
 amplitude, so that undo is meaningless there — pre-guard, the E1 waveform run
@@ -29,7 +29,7 @@ def _fake_tensors(seed: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
 
 def test_energy_snr_undefined_for_amplitude_domain_rep() -> None:
-    """F-19: on the waveform (amplitude) path, energy_snr_db must be the documented
+    """On the waveform (amplitude) path, energy_snr_db must be the documented
     all-NaN triple — never a finite-but-garbage 10**(amplitude/10) number. The
     domain comes from the rep's declaration, exactly what preprocess stamps."""
     rep = build_representation("waveform", {}, sample_rate=8000, eval_freqs_hz=EVAL_FREQS)
@@ -44,7 +44,7 @@ def test_energy_snr_undefined_for_amplitude_domain_rep() -> None:
     out, nan_reasons = compute_signal_metrics(pred, high, low, value_domain=rep.value_domain)
     snr = out["energy_snr_db"]
     assert math.isnan(snr.pred) and math.isnan(snr.low) and math.isnan(snr.high)
-    # No silent exclusion (F-21): both consumed legs carry an explicit reason.
+    # No silent exclusion: both consumed legs carry an explicit reason.
     assert "amplitude" in nan_reasons[("energy_snr_db", "low")]
     assert "amplitude" in nan_reasons[("energy_snr_db", "pred")]
     # The operand-domain MSE stays defined for amplitude reps.
@@ -53,7 +53,7 @@ def test_energy_snr_undefined_for_amplitude_domain_rep() -> None:
 
 def test_energy_snr_finite_for_db_domain_rep() -> None:
     """The dB path (spectrogram/EDR declare "db") scores SNR as a `maximize`
-    metric (F-20): finite pred AND low legs (improvement = SNR(pred) − SNR(low)),
+    metric: finite pred AND low legs (improvement = SNR(pred) − SNR(low)),
     high leg structurally absent — and nothing to log as dropped."""
     # Params come from the config layer, never from literals here: the rep's own
     # schema forbids extras and requires every field, so a hardcoded dict silently

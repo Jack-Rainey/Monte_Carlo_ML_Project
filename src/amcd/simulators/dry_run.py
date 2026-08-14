@@ -26,9 +26,7 @@ class DryRunSimulator:
       - A BROADBAND direct impulse scaled by 1/distance, against a reverberant tail
         scaled from the room constant → the rendered direct-to-reverberant ratio
         equals the closed form `placement_report.json` publishes, so
-        placement_shift (near_corner) genuinely moves C50/DRR. It did not before
-        (AC-28): the direct component was an envelope with a 7.96 Hz corner, and
-        C50 was flat to 0.02 dB across a 16x distance range.
+        placement_shift (near_corner) genuinely moves C50/DRR.
       - A diffuse reverberant tail carries the Monte-Carlo noise that converges with
         ray budget (σ ∝ 1/√N) — this is the low→high signal to be denoised. The direct
         component is shared (early reflections resolve even at low ray count).
@@ -41,7 +39,7 @@ class DryRunSimulator:
 
         #: Propagation speed this backend uses, and declares into canonical render
         #: provenance. Unlike gsound — whose 344 m/s lives in C++ and can only be
-        #: DECLARED (RD-19) — the scaffold genuinely obeys this value, so it is
+        #: DECLARED — the scaffold genuinely obeys this value, so it is
         #: config-governed rather than a Python literal.
         speed_of_sound_m_s: float
 
@@ -49,7 +47,7 @@ class DryRunSimulator:
         #: the 1/d direct term diverges and a real backend's source and listener
         #: spheres overlap, so the scene is geometrically degenerate rather than
         #: merely extreme. Declared, not hardcoded: the real backend's floor is
-        #: source_radius + listener_radius, a different number (AC-13).
+        #: source_radius + listener_radius, a different number.
         min_source_receiver_distance_m: float
 
     def __init__(
@@ -90,14 +88,14 @@ class DryRunSimulator:
         record it is given regardless of the decay — the answer is `window_s`, and
         `t60_s` does not enter. That is a real property of this backend, not a
         stand-in: it is precisely why the record-length problem was invisible until
-        `gsound_sir` first ran (AC-184).
+        `gsound_sir` first ran.
         """
         return float(window_s)
 
     @classmethod
     def models_early_reflections(cls, params: dict) -> bool:
         """Required pre-render declaration (`Simulator`) — FALSE, and stated rather
-        than left to be discovered (AC-43).
+        than left to be discovered.
 
         This scaffold synthesizes a diffuse tail beginning AT the direct arrival, so
         the first 10 dB carries no reflection structure and EDT is nearly inert on
@@ -106,7 +104,7 @@ class DryRunSimulator:
         C50's monotone 9.90 dB swing over the same range.
 
         An acceptable simplification — modelling early reflections is the real
-        simulator's job (AC-28) — but not an invisible one, which is why it is
+        simulator's job — but not an invisible one, which is why it is
         declared here and rendered beside every EDT this backend produces.
         """
         return False
@@ -117,7 +115,7 @@ class DryRunSimulator:
 
         The scaffold synthesizes its decay from Sabine at the declared alpha, using
         the same `amcd.acoustics` formula the scene report characterizes the room
-        with (AC-24), so the room it renders IS the room declared. `params` does not
+        with, so the room it renders IS the room declared. `params` does not
         enter — this backend has no absorption convention to choose.
         """
         return float(alpha_nominal)
@@ -135,7 +133,7 @@ class DryRunSimulator:
         surface = 2.0 * (lx * ly + ly * lz + lx * lz)
         # One declared Sabine constant, shared with the scene report's own
         # characterization, so the T60 described and the T60 rendered cannot drift
-        # apart (AC-24). The clamps below stay — they are numerical guards for the
+        # apart. The clamps below stay — they are numerical guards for the
         # scaffold — but they are now RECORDED in provenance rather than silent.
         alpha, alpha_clipped = clip_absorption(scene.material_absorption)
         rt60_native = sabine_rt60(volume, surface, alpha)
@@ -151,7 +149,7 @@ class DryRunSimulator:
             # the onset of a 0.3 m path for any closer pair — contradicting the
             # speed of sound it now declares into canonical provenance — and it
             # masked the fact that a real backend's source and listener spheres
-            # would be overlapping at such a separation (F-43 / AC-13).
+            # would be overlapping at such a separation.
             raise ValueError(
                 f"scene {scene.scene_id!r}: source-receiver separation "
                 f"{distance:.4f} m is below {self._min_separation_m} m. At that range the "
@@ -161,7 +159,7 @@ class DryRunSimulator:
             )
         direct_gain = 1.0 / distance
 
-        # --- Propagation delay: nothing arrives before the direct sound (AC-11) ---
+        # --- Propagation delay: nothing arrives before the direct sound ---
         # The whole response — direct AND reverberant tail — starts at d/c. Without
         # this the scaffold declared a speed of sound it did not obey (effective c
         # infinite, onset at sample 0 for every scene), so onset alignment, the
@@ -176,43 +174,36 @@ class DryRunSimulator:
 
         decay = np.exp(-6.908 * t_active / rt60).astype(np.float32)
 
-        # --- Direct arrival: a BROADBAND impulse, not an envelope (AC-28) ---
+        # --- Direct arrival: a BROADBAND impulse, not an envelope ---
         #
         # A physical direct arrival is a broadband impulse scaled by 1/d. As a unit
         # sample it has flat energy in every band, so C50/DRR move with distance in
         # every band rather than in none. It is also the first and largest sample by
-        # construction, which is what `_find_onset`'s AC-07 assumption requires.
+        # construction, which is what `find_onset` assumes.
         #
         # NOT MODELLED: a distinct early-reflection cluster between the direct
         # arrival and the diffuse onset. The tail begins at the direct arrival, so
         # this scaffold has no early-reflection structure — one more reason its D0b
-        # verdicts are plumbing evidence, not acoustic results (RD-07).
+        # verdicts are plumbing evidence, not acoustic results.
         #
-        # AC-43 measures the consequence, and it is a SPLIT verdict on the placement
-        # axis: AC-28 made C50 live there and left EDT essentially dead. RE-MEASURED
-        # on the current tree (10x8x3.5 m, alpha 0.2, r_c 1.193 m, seed 7,
-        # high_ray_budget), band-averaged over iso_eval_freqs:
+        # The consequence is a SPLIT verdict on the placement axis: C50 is live
+        # there and EDT is essentially dead. Measured band-averaged over
+        # iso_eval_freqs, C50 swings ~9.9 dB monotonically over a 16x distance
+        # range while EDT is non-monotone and flat to ~1.5 % across the top four
+        # distances. In a real room EDT moves systematically with distance, because
+        # the first 10 dB is shaped by the early-reflection pattern this scaffold
+        # does not have — so `test_placement_shift`'s EDT column is a PLUMBING
+        # result, not an acoustic one, and the D0a/D0b artifacts and the E1 report
+        # must read it as such.
         #
-        #     d        0.5      1.0      2.0      4.0      8.0  m
-        #     C50   +11.602  +6.721  +3.495  +2.114  +1.708  dB   <- monotone, 9.9 dB
-        #     EDT    0.5514  0.7882  0.7989  0.7843  0.7849  s    <- NON-monotone
-        #
-        # EDT rises then falls and varies by ~1.5 % across the top four distances,
-        # while C50 swings 9.9 dB over the same 16x range. In a real room EDT moves
-        # systematically with distance, because the first 10 dB is shaped by the
-        # early-reflection pattern this scaffold does not have. So
-        # `test_placement_shift`'s EDT column is a PLUMBING result, not an acoustic
-        # one, and must be read as such in the D0a/D0b artifacts and the E1 report.
-        #
-        # DO NOT add an early-reflection model here — that is the real simulator's
-        # job, and AC-43 says so explicitly. The artifact-side disclosure is not in
-        # this lane's files (`diagnostics/probe.py`, `reporting/tables.py`) and is
-        # recorded as RD-190 in docs/ledger_inbox/M.md.
+        # DO NOT add an early-reflection model here: that is the real simulator's
+        # job, and adding it would make the scaffold's verdicts look like
+        # acoustics.
         direct = np.zeros(n_active, dtype=np.float32)
         if n_active > 0:
             direct[0] = direct_gain
 
-        # --- Reverberant level from the room constant (AC-28/RD-75) ---
+        # --- Reverberant level from the room constant ---
         #
         # The tail is scaled so the RENDERED direct-to-reverberant ratio equals the
         # closed-form DRR that `scenes/placement_report.json` publishes for this
@@ -222,9 +213,9 @@ class DryRunSimulator:
         # leaves the whole distance dependence in the direct term (6 dB per
         # doubling) and puts the 0 dB crossing at d = r_c, since r_c = sqrt(R/16pi).
         #
-        # Both quantities come from `amcd.acoustics`, for the reason AC-24 gave for
-        # the T60: the room the report DESCRIBES and the room the scaffold RENDERS
-        # must not be able to drift apart.
+        # Both quantities come from `amcd.acoustics`, for the reason the T60 does:
+        # the room the report DESCRIBES and the room the scaffold RENDERS must not
+        # be able to drift apart.
         surface_alpha, _ = clip_absorption(scene.material_absorption)
         r_constant = room_constant(surface, surface_alpha)
         decay_energy = float(np.sum(decay.astype(np.float64) ** 2))
@@ -238,7 +229,7 @@ class DryRunSimulator:
         # --- Diffuse tail: a CONVERGED response plus Monte-Carlo estimation noise ---
         #
         # The tail models what ray tracing converges TO, and must not BE the noise
-        # (AC-18): a fixed realization of the room's diffuse response (rng_scene,
+        #: a fixed realization of the room's diffuse response (rng_scene,
         # identical in both legs — the signal), plus estimation noise shrinking as
         # 1/sqrt(N) (rng_noise, budget-dependent — what the model must remove).
         # E[energy] is then (1 + 1/N)·decay², budget-independent to within 0.02 %,
@@ -261,7 +252,7 @@ class DryRunSimulator:
         return IRResult(
             ir=ir,
             meta={
-                # Required provenance (REQUIRED_PROVENANCE_KEYS, RD-31).
+                # Required provenance — see REQUIRED_PROVENANCE_KEYS.
                 "simulator": "dry_run",
                 "ray_budget": ray_budget,
                 "speed_of_sound_m_s": self.speed_of_sound_m_s,
@@ -274,16 +265,16 @@ class DryRunSimulator:
                 "rt60_s": rt60,
                 # Both recorded: the scene report characterizes the room with the
                 # UNCLIPPED Sabine T60, so without these a clipped scene would be
-                # described as one room and rendered as another (AC-24).
+                # described as one room and rendered as another.
                 "rt60_native_s": rt60_native,
                 "rt60_clipped": bool(rt60_clipped),
-                # Stamped beside it (AC-41): a clipped alpha means the room this
+                # Stamped beside it: a clipped alpha means the room this
                 # rendered is not the room the scene declared, and the reader of an
                 # IR is owed that as much as the reader of the report.
                 "alpha_clipped": bool(alpha_clipped),
                 "distance_m": distance,
                 "noise_scale": noise_scale,
-                # ── What `noise_scale` is, and what it is NOT (AC-35) ──────────
+                # ── What `noise_scale` is, and what it is NOT ──────────
                 # It is the relative error of a mean formed from N independent
                 # samples, 1/sqrt(N), applied PER PRESSURE SAMPLE of the diffuse
                 # tail. The scaffold does not model what estimator that would be:
@@ -298,14 +289,13 @@ class DryRunSimulator:
                 ),
                 # The realized broadband converged-to-noise ratio of THIS leg,
                 # exactly 10*log10(N) under the model above: 37.0 dB at 5,000 and
-                # 53.0 dB at 200,000. Recorded so the Step-6 probe (RD-17) can put
-                # a real gsound number beside it — under this scaffold the
-                # denoising problem is nearly absent, which is what RD-07's caveat
-                # says qualitatively and this says in dB.
+                # 53.0 dB at 200,000. Recorded so a real gsound number can be put
+                # beside it — under this scaffold the denoising problem is nearly
+                # absent, and this says by how much, in dB.
                 "realized_snr_db": float(-20.0 * np.log10(noise_scale)),
                 # The reverberant level is set from the room constant so the
                 # rendered DRR matches the closed form the scene report publishes
-                # (AC-28). Recorded so the two can be compared without re-deriving.
+                # Recorded so the two can be compared without re-deriving.
                 "room_constant_m2": float(r_constant),
                 "diffuse_gain": diffuse_gain,
                 "expected_drr_db": float(

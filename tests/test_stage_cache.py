@@ -32,6 +32,7 @@ from amcd.pipeline import (
     _diff_fingerprints,
     _gen_scenes_fingerprint,
     _preprocess_fingerprint,
+    _render_artifact_fingerprint,
     _render_fingerprint,
     _sentinel,
 )
@@ -40,7 +41,7 @@ from tests.conftest import QUIET, tiny_config
 
 
 class TestNestedFingerprintDiff:
-    """F-49: RD-35's promise was 'the error says WHAT changed'. Top-level only broke it."""
+    """Promise was 'the error says WHAT changed'. Top-level only broke it."""
 
     def test_nested_change_reports_a_dotted_leaf_path(self) -> None:
         old = {"splits": {"train": {"frac": 0.6, "role": "train"}}}
@@ -75,7 +76,7 @@ class TestNestedFingerprintDiff:
 
 
 class TestGenScenesFingerprintScope:
-    """F-50: fail safe, but not at the cost of a re-render that cannot be needed."""
+    """Fail safe, but not at the cost of a re-render that cannot be needed."""
 
     def test_frac_does_not_invalidate_gen_scenes_or_render(self) -> None:
         before = tiny_config()
@@ -106,7 +107,7 @@ class TestGenScenesFingerprintScope:
 
 
 class TestEvalAndStatsFingerprints:
-    """RD-54 promoted these out of DEFERRED; RD-59 says config keys alone are not enough."""
+    """Config keys alone are not enough: the metric path changes in code too."""
 
     def test_eval_and_stats_are_wired(self) -> None:
         assert STAGE_FINGERPRINT["eval"] is not None
@@ -118,7 +119,7 @@ class TestEvalAndStatsFingerprints:
         assert set(STAGE_FINGERPRINT) == set(STAGES)
 
     def test_eval_carries_a_code_version(self) -> None:
-        """The AC-17 trigger case was a CODE change no config key could see (RD-59)."""
+        """The trigger case was a CODE change no config key could see."""
         fp = STAGE_FINGERPRINT["eval"](tiny_config())
         assert "code_version" in fp
         assert isinstance(fp["code_version"], str) and fp["code_version"]
@@ -131,7 +132,7 @@ class TestEvalAndStatsFingerprints:
     def test_stats_declares_eval_as_its_upstream_rather_than_recomputing_it(
         self,
     ) -> None:
-        """F-54: `_stats_fingerprint` hand-rolled
+        """`_stats_fingerprint` hand-rolled
         `"upstream_eval": _fingerprint_sha(_eval_fingerprint(config))` — a chain
         RECOMPUTED from the current config, which is what the STAGE_UPSTREAM
         docstring forbids. Recomputing made `--force` a laundering step: stats
@@ -149,7 +150,7 @@ class TestEvalAndStatsFingerprints:
 
 
 class TestTheChainReachesTheReportedResult:
-    """F-53: the cache did not protect the reported result.
+    """The cache did not protect the reported result.
 
     REPRODUCED before the fix: on a complete run_dir, changing five model
     hyperparameters and re-running `amcd all` printed `[skip]` for ALL NINE stages
@@ -168,7 +169,7 @@ class TestTheChainReachesTheReportedResult:
 
     def test_every_chained_stage_can_anchor_a_chain(self) -> None:
         """An upstream with no fingerprint records `null`, which is
-        indistinguishable from 'never ran' (F-41)."""
+        indistinguishable from 'never ran'."""
         for stage, upstream in STAGE_UPSTREAM.items():
             if upstream is not None:
                 assert STAGE_FINGERPRINT[upstream] is not None, (
@@ -210,9 +211,10 @@ class TestTheChainReachesTheReportedResult:
 
 
 class TestCodeVersionSeesTheWorkingTree:
-    """F-55 / RD-66: `git rev-parse HEAD` is blind to uncommitted edits — the exact
+    """`git rev-parse HEAD` is blind to uncommitted edits — the exact
     state the guard exists for, since this project's loop is edit → run → review →
-    commit and AC-17 was a code-only change to `room_acoustic.py`."""
+    commit, and the shared Schroeder window was a code-only change to
+    `room_acoustic.py`."""
 
     def test_editing_metric_code_changes_evals_version(self, tmp_path) -> None:
         """The reproduction in the row: edit `evaluation/room_acoustic.py`, re-run
@@ -292,7 +294,7 @@ class TestCodeVersionSeesTheWorkingTree:
             prov.code_version(("no_such_subpackage",))
 
     def test_the_two_provenance_channels_share_one_helper(self) -> None:
-        """F-56: `versions.json` and the eval sentinel must not be able to
+        """`versions.json` and the eval sentinel must not be able to
         describe different code."""
         import amcd.provenance as prov
         from amcd.pipeline import _code_version
@@ -300,7 +302,7 @@ class TestCodeVersionSeesTheWorkingTree:
         assert _code_version("eval") == prov.code_version(STAGE_CODE_SCOPE["eval"])
 
     def test_git_is_resolved_from_the_package_not_the_run_dir(self) -> None:
-        """F-56: `cwd=run_dir.parent` stamped "unavailable" into versions.json for
+        """`cwd=run_dir.parent` stamped "unavailable" into versions.json for
         any run_dir outside the checkout — the normal case for a data volume.
 
         Asserts the CONTRACT, not this machine: a 40-hex sha or the literal
@@ -308,8 +310,7 @@ class TestCodeVersionSeesTheWorkingTree:
         reason "this checkout is a git repo" — a property of one host, not of the
         code, contradicting both `provenance.git_sha`'s stated contract and the
         sibling test below. The project must run the same code from a wheel and
-        from a source export on a second host, neither of which has a `.git`
-        (F-168).
+        from a source export on a second host, neither of which has a `.git`.
         """
         import re
 
@@ -318,12 +319,12 @@ class TestCodeVersionSeesTheWorkingTree:
         sha = prov.git_sha()
         assert sha == "unavailable" or re.fullmatch(r"[0-9a-f]{40}", sha), sha
         # Resolved from the PACKAGE: asking about a run_dir on a data volume is
-        # what stamped "unavailable" beside a real sha in the same run (F-56).
+        # what stamped "unavailable" beside a real sha in the same run.
         assert prov._PACKAGE_ROOT == Path(prov.__file__).resolve().parent
 
 
 class TestTheRecordLengthGateIsNotBypassableThroughTheCache:
-    """F-57: `ir_duration` is what AC-22's record-length gate compares against, but
+    """`ir_duration` is what record-length gate compares against, but
     it was not in the gen-scenes fingerprint — so the gate could be skipped.
 
     Reachable in practice, not a contrivance: render's fingerprint DOES move with
@@ -338,7 +339,7 @@ class TestTheRecordLengthGateIsNotBypassableThroughTheCache:
 
     def test_the_simulator_invalidates_gen_scenes(self) -> None:
         """The backend declares the minimum source-receiver separation that
-        gen-scenes pre-flight-checks (AC-13), so it governs admission too."""
+        gen-scenes pre-flight-checks, so it governs admission too."""
         before = tiny_config()
         after = tiny_config(
             simulator={"params": {"min_source_receiver_distance_m": 0.75}}
@@ -357,7 +358,7 @@ class TestTheRecordLengthGateIsNotBypassableThroughTheCache:
 
 
 class TestAPartialStageIsNeverServedAsCached:
-    """F-58: a stage killed part-way through writing left the PREVIOUS run's
+    """A stage killed part-way through writing left the PREVIOUS run's
     success sentinel standing over half-new artifacts."""
 
     def test_a_stage_that_fails_mid_write_does_not_leave_a_valid_sentinel(
@@ -421,7 +422,7 @@ class TestAPartialStageIsNeverServedAsCached:
 
 
 class TestZeroCountIsRejected:
-    """F-46: a value the schema admits must not be a value the pipeline mishandles."""
+    """A value the schema admits must not be a value the pipeline mishandles."""
 
     def test_zero_count_on_a_shift_split_fails_at_config_load(self) -> None:
         with pytest.raises(ValueError, match="test_material_shift"):
@@ -443,7 +444,7 @@ class TestZeroCountIsRejected:
 
 
 class TestTheTableProducingStagesAreCacheProtected:
-    """F-63 / F-64: cycle 3's "the cache protects the reported result" held for
+    """Cycle 3's "the cache protects the reported result" held for
     train/infer/eval and failed for `preprocess`, `stats` and `report` — the stages
     that produce the table. Each was reproduced end to end at exit 0 before the fix.
     """
@@ -493,7 +494,7 @@ class TestTheTableProducingStagesAreCacheProtected:
         )
 
     def test_an_encoder_edit_refuses_preprocess_and_not_only_train(self, tmp_path) -> None:
-        """F-64's sharp edge: the refusal must name the stage whose artifacts are
+        """Sharp edge: the refusal must name the stage whose artifacts are
         actually stale. A message naming `train` sends the operator to `--force`
         train, which rebuilds the wrong thing and exits 0."""
         before, after = _code_versions_after_editing(
@@ -503,7 +504,7 @@ class TestTheTableProducingStagesAreCacheProtected:
 
 
 class TestTheExpensiveArtifactIsCacheProtected:
-    """F-75/RD-107/AC-44: `render` is the costliest artifact and was the least
+    """`render` is the costliest artifact and was the least
     protected.
 
     Neither `gen-scenes` nor `render` carried a `code_version`, so an edit to the
@@ -530,6 +531,79 @@ class TestTheExpensiveArtifactIsCacheProtected:
             "one over it costs hours under emulation"
         )
 
+    def test_editing_the_worker_invalidates_the_render(self, tmp_path) -> None:
+        """`_gsound_worker.py` is invisible to every automatic check.
+
+        It is read as TEXT and exec'd in the x86 subprocess, so it appears in no
+        import closure and `TestDeclaredScopeCoversWhatTheStageImports` cannot see
+        it — while being the code that actually calls pygsound and synthesizes the
+        IR. Unscoped, an edit to it leaves 720 emulated renders looking current.
+        """
+        assert self._moves(tmp_path, "amcd/simulators/_gsound_worker.py")
+
+    def test_editing_what_writes_the_artifacts_invalidates_the_render(
+        self, tmp_path
+    ) -> None:
+        """`render.py` decides what is written and what is reused, so it belongs
+        in the per-scene key alongside the backend."""
+        assert self._moves(tmp_path, "amcd/simulators/render.py")
+
+    @pytest.mark.parametrize(
+        "rel", ["amcd/simulators/qc.py", "amcd/evaluation/room_acoustic.py"]
+    )
+    def test_editing_admission_code_re_scores_but_does_not_re_render(
+        self, tmp_path, rel: str
+    ) -> None:
+        """The split that makes a QC fix affordable at 720 scenes.
+
+        `qc.py` and the `find_onset` it borrows decide which renders are
+        ADMITTED; neither can change one IR sample. So a change must invalidate
+        the STAGE — an admission rule change is a different dataset, and
+        everything downstream is over that dataset — while leaving the per-scene
+        key alone, so the persisted renders are re-scored rather than re-rendered.
+        Without the split, a QC failure at scene 700 of 720 fixed in `qc.py`
+        discards all 700 correct renders.
+        """
+        stage, artifact = self._moves_both(tmp_path, rel)
+        assert stage, f"an edit to {rel} must invalidate the render STAGE"
+        assert not artifact, (
+            f"an edit to {rel} reached the PER-SCENE key, so changing an "
+            f"admission rule costs a full emulated re-render"
+        )
+
+    @staticmethod
+    def _moves_both(tmp_path, rel: str) -> tuple[bool, bool]:
+        """(stage fingerprint moved, per-scene artifact fingerprint moved)."""
+        import shutil, subprocess, sys
+
+        root = tmp_path / "pkg"
+        ignore = shutil.ignore_patterns("__pycache__", "._*", "*.pyc")
+        shutil.copytree(Path("src"), root / "src", ignore=ignore)
+        shutil.copytree(Path("configs"), root / "configs", ignore=ignore)
+        (root / "probe.py").write_text(
+            f"import sys; sys.path.insert(0, {str(root / 'src')!r})\n"
+            "from pathlib import Path\n"
+            "from amcd.config import Config\n"
+            "from amcd.pipeline import (_render_artifact_fingerprint,\n"
+            "                           _render_fingerprint, _fingerprint_sha)\n"
+            "c = Config.load(Path('configs/base.yaml'))\n"
+            "print(_fingerprint_sha(_render_fingerprint(c)),\n"
+            "      _fingerprint_sha(_render_artifact_fingerprint(c)))\n"
+        )
+
+        def shas() -> tuple[str, str]:
+            out = subprocess.run([sys.executable, "probe.py"], cwd=root,
+                                 capture_output=True, text=True)
+            assert out.stdout.strip(), out.stderr[-400:]
+            a, b = out.stdout.split()
+            return a, b
+
+        before = shas()
+        target = root / "src" / rel
+        target.write_text(target.read_text() + "\n_MUTATION_PROBE = 1\n")
+        after = shas()
+        return after[0] != before[0], after[1] != before[1]
+
     def test_editing_device_selection_does_not(self, tmp_path) -> None:
         """`amcd/device.py` exists as its own module for exactly this: it was in
         `_CORE_SOURCES`, which every scope unions in, so the MPS -> CUDA -> CPU
@@ -541,7 +615,7 @@ class TestTheExpensiveArtifactIsCacheProtected:
     def _moves(tmp_path, rel: str) -> bool:
         """Render `code_version` before vs after appending a statement to `rel`,
         computed in a SEPARATE interpreter against a COPY of the package so the
-        probe never writes to tracked source (F-217)."""
+        probe never writes to tracked source."""
         import shutil, subprocess, sys
 
         root = tmp_path / "pkg"
@@ -570,7 +644,7 @@ class TestTheExpensiveArtifactIsCacheProtected:
 
 
 class TestTheDatasetFingerprintsAreHostIndependent:
-    """F-81/F-100/F-82: a cache key must describe the DATASET, not the machine.
+    """A cache key must describe the DATASET, not the machine.
 
     `_render_fingerprint` and `_gen_scenes_fingerprint` hashed
     `config.simulator.params` whole, so `render_python` — the x86 interpreter the
@@ -634,8 +708,7 @@ def _code_versions_after_editing_with(
     the installed source and restore it in a `finally`. These two tests did, and
     that writes to TRACKED FILES: an interrupt, a crash, or a failing assertion
     inside the block leaves the working tree dirty with a probe comment in
-    `src/amcd/` — and the next run's `code_version` then measures the leftover
-    (F-217). A test must not be able to change the thing it measures.
+    `src/amcd/` — and the next run's `code_version` then measures the leftover. A test must not be able to change the thing it measures.
 
     So the package is copied, edited in the copy, and hashed by a subprocess that
     imports from there. Nothing under `src/` is ever opened for writing.
@@ -672,7 +745,7 @@ def _code_versions_after_editing_with(
 
 
 class TestDeclaredScopeCoversWhatTheStageImports:
-    """F-66: the scope declaration is only as good as its weakest entry, and a
+    """The scope declaration is only as good as its weakest entry, and a
     scope that omits a real dependency fails SILENTLY.
 
     `eval` and `infer` both called `data.normalization.denormalize` on every
@@ -691,7 +764,7 @@ class TestDeclaredScopeCoversWhatTheStageImports:
 
     It also cannot check a dependency this walker fails to RESOLVE — so the walker
     now asserts rather than dropping, because a silently shrinking closure makes
-    the test pass for the wrong reason (F-77). That is the same failure this class
+    the test pass for the wrong reason. That is the same failure this class
     exists to prevent, one level up: the guard claiming more than it checks.
     """
 
@@ -716,8 +789,8 @@ class TestDeclaredScopeCoversWhatTheStageImports:
         x` inside `amcd/data/__init__.py` against `amcd` instead of `amcd.data`
         yields a module that does not exist, which then vanished through the
         resolvability filter below and took the whole subtree out of the closure
-        (F-77 — `amcd.representations`'s four imports, including the encoder that
-        is F-64's own reproduction, were invisible).
+        (`amcd.representations`'s four imports, including the encoder that
+        is reproduction, were invisible).
         """
         path = cls._module_file(module)
         if path is None:
@@ -742,7 +815,7 @@ class TestDeclaredScopeCoversWhatTheStageImports:
                 stem = ".".join(prefix)
                 if cls._module_file(stem) is None:
                     # The module an import statement names MUST resolve. Dropping
-                    # it silently is how F-77 hid 60 edges.
+                    # it silently is how a scope can hide dozens of edges.
                     unresolved.append(f"{module} -> {stem}")
                     continue
                 found.add(stem)
@@ -789,7 +862,7 @@ class TestDeclaredScopeCoversWhatTheStageImports:
             )
 
     def test_eval_and_infer_declare_the_module_they_denormalize_with(self) -> None:
-        """The specific omission F-66 names, pinned so it cannot silently return."""
+        """The specific omission names, pinned so it cannot silently return."""
         for stage in ("eval", "infer"):
             assert "data" in STAGE_CODE_SCOPE[stage]
 
@@ -813,9 +886,9 @@ class TestDeclaredScopeCoversWhatTheStageImports:
 
 
 class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
-    """F-65's real deliverable: the guard the CLASS needs.
+    """Real deliverable: the guard the CLASS needs.
 
-    `metric_edt_variance_limited_s` was added in cycle 3 to fix RD-78 and reached
+    `metric_edt_variance_limited_s` was added later and reached
     no fingerprint, so a REPORTED disclosure column was served under the wrong
     threshold's stamp. Adding the key fixes one instance; this test is what stops
     the next one.
@@ -834,7 +907,7 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
     `Seeds` is the exception, and it is swept separately below. NO fingerprint
     dumps it wholesale — every stage names individual leaves (`config.seed(...)`)
     — so perturbing `seeds.master` moves everything downstream and would let a new
-    per-aspect seed pass unguarded (F-78). That is the worst place to have a blind
+    per-aspect seed pass unguarded. That is the worst place to have a blind
     spot: per-aspect seeds are invariant #5, and `split_assignment` is the
     leakage-critical one.
     """
@@ -862,33 +935,40 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         "early_stopping_patience": 9,
         "report_format": "markdown",
         "iso_eval_freqs": [500, 1000, 2000],
+        # Decides where t=0 is, and t=0 sets the C50 split, the EDT anchor and the
+        # Schroeder start together — and, through render QC, which scenes are
+        # admitted at all.
         "metric_onset_rel_db": -25.0,
-        # AC-181: decides where t=0 is, and t=0 sets the C50 split, the EDT anchor
-        # and the Schroeder start together. Probed, not exempted.
         "metric_onset_tolerance_ms": 4.0,
         "metric_band_resolvability_margin": 0.07,
-        # AC-176: governs whether T30/EDT is scored at all, so a change to it
-        # must invalidate eval. Probed, not exempted.
+        # Governs whether T30/EDT is scored at all, so a change must invalidate eval.
         "metric_min_decay_range_db": {"T30": 41.0, "EDT": 19.0},
-        # F-143: the filter order sets both the out-of-band rejection and the
-        # ringing floor every reported ISO metric is measured against, so a change
-        # to it changes the numbers eval produces. Probed, not exempted.
+        # The filter order sets both the out-of-band rejection and the ringing floor
+        # every reported ISO metric is measured against.
         "metric_octave_filter": {"order": 6, "stopband_rejection_db": {1: -50.0}},
+        # The four render QC criteria decide which renders are ADMITTED to the
+        # dataset, so a change to any of them is a different dataset and must
+        # invalidate `render` and everything downstream of it.
+        "onset_mismatch_tolerance_ms": 5.0,
+        "min_energy_db": -33.0,
+        "min_energy_reference": 2.0,
+        "max_path_file_mb": 64.0,
+        "require_non_empty_path_file": False,
         "metric_edt_variance_limited_s": 0.3,
         # The D0a/D0b thresholds ARE the verdict `diagnostics` publishes — "signal
         # to learn at this ray budget", "carrier ceiling clears" — so a change to
         # any of them must invalidate it. They were exempt only while that stage
-        # carried no fingerprint at all (AC-45).
+        # carried no fingerprint at all.
         "d0a_gap_large_db": 9.0,
         "d0a_gap_small_db": 0.4,
         "d0b_t30_jnd_frac": 0.07,
         "d0b_edt_jnd_frac": 0.07,
         "d0b_c50_jnd_db": 1.5,
         "d0b_min_scored_frac": 0.5,
-        # AC-37: the sweep IS part of what d0b_oracle.json publishes, so a change
+        # the sweep IS part of what d0b_oracle.json publishes, so a change
         # to the ladder changes the diagnostics artifact.
         "d0b_level_sweep_db": [0.0, -15.0],
-        # AC-187: the convergence verdict is RENDERED in the report (per-row caveat,
+        # the convergence verdict is RENDERED in the report (per-row caveat,
         # footer, CSV column), so a cached report must not serve a stale one. It was
         # exempt only while nothing read it.
         "convergence": {
@@ -936,7 +1016,7 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         assert moved, (
             f"changing {field!r} moved no stage fingerprint, so a run_dir would be "
             f"re-used under the new value and the artifacts would be the old "
-            f"value's — the F-65 failure mode. Either add it to a fingerprint or "
+            f"value's — the failure mode. Either add it to a fingerprint or "
             f"declare it in FINGERPRINT_EXEMPT_FIELDS with a reason."
         )
 
@@ -944,7 +1024,7 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
     def test_perturbing_each_named_seed_invalidates_at_least_one_stage(
         self, seed_name: str
     ) -> None:
-        """Every per-aspect seed individually, not just `master` (F-78).
+        """Every per-aspect seed individually, not just `master`.
 
         `Seeds` is dumped by no fingerprint, so this is the only thing standing
         between a newly appended `SEED_NAMES` entry and a stochastic aspect whose
@@ -960,7 +1040,7 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
         )
 
     def test_the_edt_disclosure_threshold_invalidates_eval(self) -> None:
-        """The specific key F-65 was raised about."""
+        """The specific key that reached no fingerprint when it was added."""
         assert STAGE_FINGERPRINT["eval"](tiny_config()) != STAGE_FINGERPRINT["eval"](
             tiny_config(metric_edt_variance_limited_s=0.3)
         )
@@ -974,7 +1054,7 @@ class TestEveryConfigFieldIsCoveredOrDeclaredExempt:
 
 
 class TestAnUnprotectedStaleStageIsDisclosedNotVouchedFor:
-    """F-75: `gen-scenes` and `render` carry no `code_version` (RD-107, a deliberate
+    """`gen-scenes` and `render` carry no `code_version` (a deliberate
     policy call — scoping `render` to `simulators/` forces a re-render, the
     multi-hour artifact under emulation). The staleness that buys is accepted.
 
@@ -983,7 +1063,7 @@ class TestAnUnprotectedStaleStageIsDisclosedNotVouchedFor:
     the render backend carried a provenance stamp positively asserting the new code
     produced them — a false witness, worse than the staleness itself.
 
-    These tests pin the disclosure, not a refusal. The refusal is RD-107's to decide.
+    These tests pin the disclosure, not a refusal. The refusal is to decide.
     """
 
     def test_the_sentinel_records_which_code_wrote_the_artifacts(
@@ -1032,12 +1112,12 @@ class TestAnUnprotectedStaleStageIsDisclosedNotVouchedFor:
 
 
 class TestALegacySentinelIsRefusedActionablyNotWithATraceback:
-    """F-76: giving `report` a fingerprint made `{"fingerprint": null}` sentinels
+    """Giving `report` a fingerprint made `{"fingerprint": null}` sentinels
     reachable, and they crashed with a bare `TypeError` from `set(None)` instead of
     the actionable "predates fingerprinted caching" message.
 
     Generic, not a one-off migration wrinkle: it recurs for every stage that gains
-    a fingerprint later, `diagnostics` being the next candidate (RD-108/AC-45).
+    a fingerprint later, `diagnostics` being the next candidate.
     """
 
     def _run_dir_with_a_legacy_report_sentinel(
@@ -1080,14 +1160,15 @@ class TestALegacySentinelIsRefusedActionablyNotWithATraceback:
     def test_the_UPSTREAM_leg_says_the_same_thing_about_the_same_run_dir(
         self, tmp_path: Path
     ) -> None:
-        """F-167: F-75's guard was applied to one of the two legs.
+        """Guard was applied to one of the two legs.
 
         `_is_done` and `_effective_fingerprint` both ask whether a sentinel's
         fingerprint can be established, and they answered differently: the upstream
         leg reported that `stats` "has not completed ... running would record a
         provenance chain for artifacts that do not exist" for a run_dir whose
         `stats/` was fully populated and whose stage HAD completed. Both claims were
-        false. Any run_dir predating F-63 is in exactly this state, so the operator
+        false. A run_dir predating the chained fingerprint is in exactly this
+        state, so the operator
         it misdirects is the one most likely to hit it.
         """
         pipe = self._run_dir_with_a_legacy_report_sentinel(
@@ -1112,7 +1193,7 @@ class TestALegacySentinelIsRefusedActionablyNotWithATraceback:
     def test_a_genuinely_absent_upstream_sentinel_still_says_so(
         self, tmp_path: Path
     ) -> None:
-        """The other half of F-167: distinguishing the two states must not lose
+        """The other half: distinguishing the two states must not lose
         the one that was already right."""
         pipe = self._run_dir_with_a_legacy_report_sentinel(
             tmp_path, {"completed_at": 1.0, "fingerprint": None}
@@ -1123,7 +1204,7 @@ class TestALegacySentinelIsRefusedActionablyNotWithATraceback:
 
 
 class TestTheCacheKeyDescribesTheSourceNotTheHost:
-    """F-69: `rglob("*.py")` hashed macOS AppleDouble `._*.py` sidecars.
+    """`rglob("*.py")` hashed macOS AppleDouble `._*.py` sidecars.
 
     They are real files on an exFAT volume and absent on APFS or the project's
     declared second host, so the same source hashed differently there and a run_dir
@@ -1178,7 +1259,7 @@ class TestTheCacheKeyDescribesTheSourceNotTheHost:
 
 
 class TestArtifactResidue:
-    """F-47: renders/ and carrier/ are pruned against the CURRENT scene set."""
+    """Renders/ and carrier/ are pruned against the CURRENT scene set."""
 
     def _run(self, cfg: Config, run_dir: Path) -> None:
         from amcd.data.preprocess import run_preprocess
@@ -1216,8 +1297,198 @@ class TestArtifactResidue:
         assert np.array_equal(np.load(carrier), kept)
 
 
+class TestPerSceneRenderReuse:
+    """A failed batch must cost only the scenes that failed, and `--force` must
+    still mean re-render.
+
+    Stage caching is all-or-nothing and its sentinel is unlinked before the stage
+    runs, so a batch that raises leaves no sentinel and the next run re-enters the
+    stage. Without per-scene reuse that re-run repeats every scene — on 720
+    emulated renders, the whole cost a second time, which is precisely the cost
+    the batch-safe raise exists to avoid.
+
+    The two halves pull against each other, which is why both are pinned here: an
+    unconditional reuse would make `--force` inert, and honouring `--force` by
+    dropping the recorded fingerprint would break the resume it enables.
+    """
+
+    def _render(self, cfg: Config, run_dir: Path, *, force: bool = False) -> None:
+        # Through `Pipeline`, not the stage function, because the reuse path is
+        # driven by the context the pipeline builds.
+        Pipeline(cfg, run_dir, QUIET).run_stage("gen-scenes")
+        Pipeline(cfg, run_dir, QUIET, force=force).run_stage("render")
+
+    @staticmethod
+    def _mtimes(run_dir: Path) -> dict[str, float]:
+        return {p.parent.name: p.stat().st_mtime_ns
+                for p in run_dir.glob("renders/*/low.npy")}
+
+    def test_a_rerun_after_a_failed_batch_reuses_every_intact_scene(
+        self, tmp_path: Path
+    ) -> None:
+        cfg = tiny_config(scenes={"n_id": 6})
+        self._render(cfg, tmp_path)
+        before = self._mtimes(tmp_path)
+        assert before, "fixture rendered nothing"
+
+        # The state a raised batch leaves behind: artifacts on disk, no sentinel.
+        _sentinel(tmp_path, "render").unlink()
+        self._render(cfg, tmp_path)
+        assert self._mtimes(tmp_path) == before, (
+            "a re-run after a failed batch re-rendered scenes that were already on "
+            "disk and verified — the batch-safe raise then saves nothing"
+        )
+
+    def test_force_still_re_renders_every_scene(self, tmp_path: Path) -> None:
+        cfg = tiny_config(scenes={"n_id": 6})
+        self._render(cfg, tmp_path)
+        before = self._mtimes(tmp_path)
+
+        self._render(cfg, tmp_path, force=True)
+        after = self._mtimes(tmp_path)
+        assert set(after) == set(before)
+        assert all(after[s] != before[s] for s in before), (
+            "`--force` reused scenes instead of rebuilding them, so a run started "
+            "to escape a suspect artifact returns that same artifact"
+        )
+
+    def test_a_forced_run_still_records_the_fingerprint_it_rendered_under(
+        self, tmp_path: Path
+    ) -> None:
+        """Otherwise the NEXT run could not resume from what the forced one made."""
+        cfg = tiny_config(scenes={"n_id": 4})
+        self._render(cfg, tmp_path, force=True)
+        recorded = {
+            json.loads(p.read_text())["artifact_fingerprint"]
+            for p in tmp_path.glob("renders/*/meta.json")
+        }
+        assert len(recorded) == 1 and None not in recorded, recorded
+
+        before = self._mtimes(tmp_path)
+        _sentinel(tmp_path, "render").unlink()
+        self._render(cfg, tmp_path)
+        assert self._mtimes(tmp_path) == before
+
+    def test_regenerated_scenes_are_never_served_from_the_old_renders(
+        self, tmp_path: Path
+    ) -> None:
+        """Scene ids are POSITIONAL, so `scene_0000` names a different room after a
+        regeneration — and nothing in the ARTIFACT fingerprint mentions the scene.
+
+        This is reachable on the documented remedy path: a backend refusal tells
+        the operator to widen `distance_range` and regenerate, the raise leaves no
+        sentinel, and the re-run then finds every scene dir "reusable". Downstream
+        never re-checks — `preprocess` loads `renders/<id>/low.npy` without reading
+        its meta.json, and `assign_split` hashes the NEW spec — so an IR rendered
+        for one room is filed under another room's split.
+        """
+        cfg = tiny_config(scenes={"n_id": 6})
+        self._render(cfg, tmp_path)
+        before = self._mtimes(tmp_path)
+        specs_before = {
+            p.stem: p.read_text() for p in tmp_path.glob("scenes/scene_*.json")
+        }
+
+        regenerated = tiny_config(scenes={"n_id": 6},
+                                  seeds={"scene_generation": 987654})
+        Pipeline(regenerated, tmp_path, QUIET, force=True).run_stage("gen-scenes")
+        specs_after = {
+            p.stem: p.read_text() for p in tmp_path.glob("scenes/scene_*.json")
+        }
+        assert specs_after != specs_before, "fixture did not actually move the scenes"
+
+        _sentinel(tmp_path, "render").unlink(missing_ok=True)
+        Pipeline(regenerated, tmp_path, QUIET).run_stage("render")
+        after = self._mtimes(tmp_path)
+        changed = [s for s in before if after.get(s) != before[s]]
+        moved = [s for s in specs_before if specs_after.get(s) != specs_before[s]]
+        assert set(changed) >= set(moved), (
+            f"{sorted(set(moved) - set(changed))} were served from the previous "
+            f"scene set's renders — the run_dir now holds IRs of rooms its own "
+            f"scene specs do not describe"
+        )
+
+    def test_a_tampered_artifact_is_re_rendered_not_reused(self, tmp_path: Path) -> None:
+        """The recorded fingerprint alone would reuse a half-written directory."""
+        cfg = tiny_config(scenes={"n_id": 6})
+        self._render(cfg, tmp_path)
+        before = self._mtimes(tmp_path)
+
+        victim = tmp_path / "renders" / "scene_0002" / "low.npy"
+        np.save(victim, np.zeros_like(np.load(victim)))
+
+        _sentinel(tmp_path, "render").unlink()
+        self._render(cfg, tmp_path)
+        after = self._mtimes(tmp_path)
+        assert after["scene_0002"] != before["scene_0002"], (
+            "a scene whose bytes no longer match its recorded digest was reused"
+        )
+        assert all(after[s] == before[s] for s in before if s != "scene_0002"), (
+            "one corrupt scene forced its intact neighbours to re-render"
+        )
+
+    def test_a_threshold_change_on_a_complete_batch_is_refused_not_rescored(
+        self, tmp_path: Path
+    ) -> None:
+        """The other half, asserted so the spec and the code cannot drift.
+
+        With a success sentinel on disk the fingerprint mismatch RAISES — the
+        decision belongs to a human — and the only route past it is `--force`,
+        which overrides per-scene reuse. Under a backend declaring
+        `rng_seeded: false` that produces a different dataset, not a re-score, so
+        the cheap path must not be reachable by accident here.
+        """
+        cfg = tiny_config(scenes={"n_id": 4})
+        self._render(cfg, tmp_path)
+        tightened = tiny_config(scenes={"n_id": 4},
+                                min_energy_db=cfg.min_energy_db + 1.0)
+        with pytest.raises(RuntimeError, match="cached under a DIFFERENT config"):
+            self._render(tightened, tmp_path)
+
+    def test_a_qc_threshold_is_in_the_stage_key_but_not_the_per_scene_one(self) -> None:
+        """QC decides ADMISSION, not content.
+
+        In the stage fingerprint, because a different admission rule is a
+        different dataset and everything downstream is over that dataset. NOT in
+        the per-scene one, because the renders themselves did not change — see
+        the re-score test below for what that buys.
+        """
+        cfg = tiny_config(scenes={"n_id": 4})
+        tightened = tiny_config(scenes={"n_id": 4},
+                                min_energy_db=cfg.min_energy_db + 1.0)
+        assert _render_fingerprint(tightened) != _render_fingerprint(cfg), (
+            "an admission-threshold change must invalidate the render stage"
+        )
+        assert (_render_artifact_fingerprint(tightened)
+                == _render_artifact_fingerprint(cfg)), (
+            "an admission threshold reached the per-scene fingerprint, so changing "
+            "one would cost a full re-render of a dataset that did not change"
+        )
+
+    def test_re_scoring_a_failed_batch_reuses_its_renders(self, tmp_path: Path) -> None:
+        """The case this design exists for: a batch raises on QC, the operator
+        adjusts the threshold, and the re-run re-scores rather than re-rendering.
+
+        A batch that RAISES leaves no sentinel, so the re-run enters the stage
+        without `--force` and per-scene reuse applies. The complete-batch case is
+        `test_a_threshold_change_on_a_complete_batch_is_refused_not_rescored`.
+        """
+        cfg = tiny_config(scenes={"n_id": 6})
+        self._render(cfg, tmp_path)
+        before = self._mtimes(tmp_path)
+        _sentinel(tmp_path, "render").unlink()
+
+        tightened = tiny_config(scenes={"n_id": 6},
+                                min_energy_db=cfg.min_energy_db + 1.0)
+        self._render(tightened, tmp_path)
+        assert self._mtimes(tmp_path) == before, (
+            "re-scoring against a changed QC threshold re-rendered the batch"
+        )
+        assert (tmp_path / "renders" / "qc_failures.csv").exists()
+
+
 class TestCodeVersionHashesSemanticsNotBytes:
-    """F-161: a comment must not cost a multi-hour emulated re-render.
+    """A comment must not cost a multi-hour emulated re-render.
 
     `code_version` hashed raw bytes, so a comment was indistinguishable from a
     rewrite. Measured before the fix: trimming one comment in `config.py` moved

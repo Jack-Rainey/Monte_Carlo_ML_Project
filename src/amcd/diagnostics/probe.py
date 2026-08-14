@@ -17,7 +17,7 @@ D0b — oracle upper bound / carrier ceiling (design_spec §4.2):
 Run on ALL splits (train, valid, and every test split), reported separately.
 Never pool splits — per-split headroom genuinely differs (Invariant 9).
 
-PER-SPLIT RECORD SCHEMA (RR-64). Both probes write one entry per split into their
+PER-SPLIT RECORD SCHEMA. Both probes write one entry per split into their
 artifact's `per_split` map, and both artifacts are read outside this module (see
 `tests/test_dataset_integrity.py`), so the shape is declared here once rather than
 inferred from the six sites that construct it:
@@ -25,11 +25,11 @@ inferred from the six sites that construct it:
     n_scenes        int  — scenes SCORED. The same quantity `stats/aggregate.py`
                            and `reporting/tables.py` publish as `n_scored`; the
                            probes keep `n_scenes` because existing consumers index
-                           it, and adding a second name here is how AC-24's pair
-                           drifted apart.
+                           it, and a second name for one quantity is how the two
+                           would drift apart.
     n_attempted     int  — scenes the split contained, i.e. the denominator.
     dropped         list — [{"scene": str, "reason": str}], one per unscored
-                           scene, mirroring the eval stage's drops.csv (F-21).
+                           scene, mirroring the eval stage's drops.csv.
     unscored_reason str  — present IF AND ONLY IF `n_scenes == 0`.
 
 The emit-iff invariant is what both consumers rely on, so both index
@@ -62,7 +62,6 @@ from ..runtime import RunContext, Verbosity, emit
 
 
 def run_diagnostics(config: Config, run_dir: Path, ctx: RunContext) -> None:
-    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
     verbosity = ctx.verbosity
     preprocessed_dir = run_dir / "preprocessed"
     renders_dir = run_dir / "renders"
@@ -77,7 +76,7 @@ def run_diagnostics(config: Config, run_dir: Path, ctx: RunContext) -> None:
     norm_stats = meta["norm_stats"]
 
     # Enumerate the CONFIG-DECLARED splits, in declaration order, not the splits
-    # that happen to have received a scene (F-45) — a declared split with no scenes
+    # that happen to have received a scene — a declared split with no scenes
     # is a fact about this run and must be reported as 0, not omitted. Any split
     # present in the data but not declared would be a routing bug, so it is appended
     # rather than silently ignored.
@@ -92,7 +91,7 @@ def run_diagnostics(config: Config, run_dir: Path, ctx: RunContext) -> None:
         split_dir = preprocessed_dir / split_name
         scene_ids = [sid for sid, sp in splits.items() if sp == split_name]
         if not scene_ids:
-            # Live branch now that enumeration is config-declared (F-45): record the
+            # Live branch now that enumeration is config-declared: record the
             # empty split rather than skipping it, so the probe's split list matches
             # the config's declared set.
             per_split[split_name] = {
@@ -103,15 +102,14 @@ def run_diagnostics(config: Config, run_dir: Path, ctx: RunContext) -> None:
             }
             emit(verbosity, "warning",
                  f"  WARNING: declared split {split_name!r} has no scenes — "
-                 f"recorded as 0, not omitted (F-45).")
+                 f"recorded as 0, not omitted.")
             continue
 
         scene_gaps: list[float] = []
         per_band_gaps: list[list[float]] = []
         # (scene, reason) for every scene this probe could not score, mirroring the
-        # eval stage's drops.csv (F-21). F-45 fixed the SPLIT enumeration; these
-        # per-scene skips stayed silent, so a split where 5 of 20 scenes lacked
-        # tensors reported headroom over the survivors and read as complete (F-72).
+        # eval stage's drops.csv. Without it a split where 5 of 20 scenes lack
+        # tensors reports headroom over the survivors and reads as complete.
         dropped: list[dict[str, str]] = []
 
         for sid in scene_ids:
@@ -143,13 +141,13 @@ def run_diagnostics(config: Config, run_dir: Path, ctx: RunContext) -> None:
             emit(verbosity, "warning",
                  f"  WARNING: D0a scored {len(scene_gaps)} of {len(scene_ids)} scenes "
                  f"in split {split_name!r} — {len(dropped)} dropped, per-scene reasons "
-                 f"in d0a_gap.json (F-72).")
+                 f"in d0a_gap.json.")
 
         if not scene_gaps:
             # Every scene failed. Skipping here made the split vanish from the
-            # artifact — indistinguishable from a split that was never declared, the
-            # state F-45 closed on the other axis. Recorded with its reason instead,
-            # and the print branch below renders it as unscored, never as a number.
+            # artifact — indistinguishable from a split that was never declared.
+            # Recorded with its reason instead, and the print branch below renders
+            # it as unscored, never as a number.
             per_split[split_name] = {
                 "n_scenes": 0,
                 "n_attempted": len(scene_ids),
@@ -196,7 +194,7 @@ def run_diagnostics(config: Config, run_dir: Path, ctx: RunContext) -> None:
     emit(verbosity, "metrics", "  " + "-" * 80)
     for sp, info in per_split.items():
         if info["n_scenes"] == 0:
-            # Declared but empty (F-45): named with its reason, never rendered as a
+            # Declared but empty: named with its reason, never rendered as a
             # number — a 0.00 dB gap would read as a measured result.
             counts = f"0/{info['n_attempted']}"
             emit(
@@ -227,13 +225,13 @@ def run_diagnostics(config: Config, run_dir: Path, ctx: RunContext) -> None:
 # D0b — carrier ceiling test
 # ---------------------------------------------------------------------------
 
-#: The backend-limitation note both D0 artifacts carry (AC-43).
+#: The backend-limitation note both D0 artifacts carry.
 #:
 #: EDT fits the FIRST 10 dB, which in a real room IS the early-reflection span — the
 #: reason EDT moves systematically with source-receiver distance. A backend whose
 #: diffuse tail begins at the direct arrival has no structure there, so its EDT is
-#: nearly inert on the placement axis while C50 stays live (AC-28 gave the scaffold a
-#: real 1/d direct term against a room-constant tail, which is what C50 integrates).
+#: nearly inert on the placement axis while C50 stays live, since C50 integrates
+#: the 1/d direct term against the room-constant tail.
 #:
 #: In BOTH artifacts because both publish per-split EDT: D0a's headroom gap and D0b's
 #: oracle residual are each read as "how much EDT signal is there", and under such a
@@ -247,7 +245,7 @@ _NO_EARLY_REFLECTIONS_NOTE = (
     "from 1 m out, against C50's monotone 9.90 dB swing over the same 16x range. Any "
     "EDT figure here for a placement split is a plumbing result, not an acoustic one. "
     "T30, C50 and the material/geometry axes are unaffected. Adding the cluster is "
-    "the real simulator's job, not a scaffold fix (AC-28/AC-43)."
+    "the real simulator's job, not a scaffold fix."
 )
 
 
@@ -275,7 +273,7 @@ def _band_intersected_pair(
     is right for a standalone IR and wrong for a comparison: two legs of the same
     scene can then be averaged over different band sets, and the difference between
     those sets shows up as a residual with no acoustic cause. The eval stage
-    already intersects (AC-08); this is the same rule for D0b (F-101).
+    already intersects; this is the same rule for D0b.
 
     A band excluded here is recorded with the leg and the reason, so a residual
     computed over fewer bands is visible rather than silent.
@@ -329,7 +327,7 @@ def _band_intersected_pair(
 def _d0b_level_sweep(
     *, rep, high_db, carrier, high_ref_ir, config, iso_eval_freqs, gains_db,
 ) -> dict[str, dict]:
-    """AC-37 (c): the oracle's T30 error as a function of the scene's ABSOLUTE LEVEL.
+    """The oracle's T30 error as a function of the scene's ABSOLUTE LEVEL.
 
     `min_db` is an absolute floor on the encoded band energy, not a level below the
     scene's own peak, and `decode` rescales the carrier's band-frame power to
@@ -339,10 +337,10 @@ def _d0b_level_sweep(
     scenes are the ones at risk, and how quiet is a property of the render's level
     convention rather than of the model.
 
-    `encode`'s headroom guard refuses a scene that would breach the JND (AC-37 (a)),
-    and the known-answer test pins where that boundary is. This is the third half the
-    user asked for: the SHIPPED artifact says how much margin the real dataset has,
-    per split, rather than the margin existing only in a test.
+    `encode`'s headroom guard refuses a scene that would breach the JND, and the
+    known-answer test pins where that boundary is. This says how much margin the
+    real dataset has, per split, in the SHIPPED artifact rather than only in a
+    test.
 
     NO RE-RENDER, AND THE ARITHMETIC IS EXACT. Scaling a waveform by `g` scales band
     ENERGY by `g**2`, so the encoded dB envelope shifts by exactly the gain in dB —
@@ -367,8 +365,8 @@ def _d0b_level_sweep(
     for gain_db in gains_db:
         shifted = torch.clamp(high_db + float(gain_db), min=rep.min_db)
         # The guard's own operand, so the number reported here is the number
-        # `encode` would have judged (AC-69: the wrong reduction next to the right
-        # one is how the definition drifts).
+        # `encode` would have judged — a different reduction would measure a
+        # different statistic than the one that gates the run.
         peak = torch.amax(shifted, dim=2) - rep.min_db
         headroom = float(peak[:, rep.headroom_band_indices].min())
         oracle_ir = rep.decode(shifted, carrier)
@@ -419,7 +417,7 @@ def _run_d0b(
     Per-split reporting (Invariant 9 — never pool splits).
     """
     # Config-declared enumeration, in declaration order — the same rule as D0a ~130
-    # lines above (F-45). Enumerating the splits that RECEIVED a scene instead let a
+    # lines above. Enumerating the splits that RECEIVED a scene instead let a
     # declared-but-empty split vanish from d0b_oracle.json entirely.
     declared_splits = list(config.splits)
     all_splits = declared_splits + sorted(set(splits.values()) - set(declared_splits))
@@ -449,7 +447,7 @@ def _run_d0b(
             continue
 
         scene_results: list[dict[str, float]] = []
-        # Same (scene, reason) accounting as D0a (F-72).
+        # Same (scene, reason) accounting as D0a.
         dropped: list[dict[str, str]] = []
 
         for sid in scene_ids:
@@ -482,16 +480,16 @@ def _run_d0b(
             high_ref_ir = np.load(ref_waveform_path)  # (C, T)
 
             # ISO-3382 metrics for oracle and reference (W-channel, onset-aligned, all
-            # eval bands) — same shared path as the eval stage (AC-02/AC-04).
+            # eval bands) — same shared path as the eval stage.
             #
             # D0b is a PAIRED comparison (`residual = |oracle - ref|`), so it carries
-            # the AC-17 defect exactly as the eval stage did: truncating each leg at
+            # the same window defect the eval stage does: truncating each leg at
             # its own noise-dependent Lundeby index integrates them over different
             # limits and manufactures a residual with no acoustic cause. Both legs
             # therefore share one window per band. The reference set is the two
             # PHYSICAL legs available here — the raw high-ray reference and the
             # carrier-decoded oracle, whose floor tracks the low-ray carrier it was
-            # decoded onto. No model output is involved in D0b at all (RD-43).
+            # decoded onto. No model output is involved in D0b at all.
             shared_trunc = _shared_truncation_per_band(
                 {"reference": high_ref_ir[0], "oracle": oracle_ir[0]},
                 sample_rate=config.sample_rate,
@@ -499,7 +497,7 @@ def _run_d0b(
                 onset_rel_db=config.metric_onset_rel_db,
                 octave_filter_order=config.metric_octave_filter.order,
             )
-            # BAND-INTERSECTED ACROSS LEGS, as eval does (AC-08 / F-101).
+            # BAND-INTERSECTED ACROSS LEGS, as eval does.
             #
             # Averaging each leg over ITS OWN surviving bands lets the residual be
             # decided by band COMPOSITION rather than by acoustics: measured at an
@@ -525,7 +523,7 @@ def _run_d0b(
                 "oracle": oracle_metrics,
                 "reference": ref_metrics,
                 "residual": residuals,
-                # AC-37 (c): how much absolute-level margin this scene has before
+                # How much absolute-level margin this scene has before
                 # `min_db` starts injecting an energy floor into the decode. The
                 # residual above is measured at the scene's NATIVE level, where the
                 # defect is inert; this is what says how far from inert it is.
@@ -536,7 +534,7 @@ def _run_d0b(
                     gains_db=config.d0b_level_sweep_db,
                 ),
                 # The window both legs were integrated over, and which leg set it
-                # (AC-17/RD-44) — a residual is only interpretable alongside it.
+                # — a residual is only interpretable alongside it.
                 "iso_integration_window": {
                     f"{fc:g}": {
                         "trunc_idx_samples": idx,
@@ -548,7 +546,7 @@ def _run_d0b(
                     for fc, (idx, src) in zip(iso_eval_freqs, shared_trunc)
                 },
             }
-            # No silent exclusion (F-21): a NaN residual (leg dropped by the shared
+            # No silent exclusion: a NaN residual (leg dropped by the shared
             # metric unit) carries its reasons into the probe record.
             if oracle_nan_reasons or ref_nan_reasons:
                 per_scene_residuals[sid]["nan_reasons"] = {
@@ -560,11 +558,11 @@ def _run_d0b(
             emit(verbosity, "warning",
                  f"  WARNING: D0b scored {len(scene_results)} of {len(scene_ids)} "
                  f"scenes in split {split_name!r} — {len(dropped)} dropped, per-scene "
-                 f"reasons in d0b_oracle.json (F-72).")
+                 f"reasons in d0b_oracle.json.")
 
         if not scene_results:
             # Carries no per-metric residuals, which is the condition the verdict
-            # loop below reads as INDETERMINATE (F-72).
+            # loop below reads as INDETERMINATE.
             per_split_residuals[split_name] = {
                 "n_scenes": 0,
                 "n_attempted": len(scene_ids),
@@ -609,7 +607,7 @@ def _run_d0b(
 
     for split_name, summary in per_split_residuals.items():
         # THE `all_clear` RULE, stated once, here, at the loop that consumes it
-        # (F-45/F-72): a verdict may never clear a split it did not measure. A split
+        #: a verdict may never clear a split it did not measure. A split
         # with no scenes, or whose scenes all failed to load, carries only its
         # unscored reason — so it is INDETERMINATE, never a pass. Omitting such a
         # split (the pre-fix behaviour) left `all_clear` True over it silently.
@@ -635,7 +633,7 @@ def _run_d0b(
 
         # JND thresholds scale from the independent reference metric (not self-referential)
         # The threshold's reference must be averaged over the SAME scenes the
-        # residual is (S-F1). `nanmean` here silently spanned every scene in the
+        # residual is. `nanmean` here silently spanned every scene in the
         # split while the residual spans only the scored ones, so a split with
         # attrition compared a residual from one population against a JND scaled by
         # another — and the two populations differ by exactly the scenes whose
@@ -656,7 +654,7 @@ def _run_d0b(
         edt_thresh = config.d0b_edt_jnd_frac * ref_edt if not np.isnan(ref_edt) else float("nan")
         c50_thresh = config.d0b_c50_jnd_db
 
-        # COVERAGE IS PART OF THE VERDICT (S-F1). This degraded to N/A only at
+        # COVERAGE IS PART OF THE VERDICT. This degraded to N/A only at
         # n == 0, so a split that lost most of its scenes to unresolvable bands or
         # failed loads could still print PASS on whatever survived. The survivors
         # are not a random subset: a scene drops when the estimator cannot resolve
@@ -688,7 +686,7 @@ def _run_d0b(
         c50_s = f"{c50_r:.4f}dB" if not np.isnan(c50_r) else "   N/A"
 
         # A residual averaged over a subset of the split is only interpretable
-        # alongside how much of the split it covers (F-72). TWO axes of attrition,
+        # alongside how much of the split it covers. TWO axes of attrition,
         # both annotated: scenes dropped before scoring, and scored scenes whose
         # residual came back NaN for one metric — the latter thins a per-metric mean
         # without touching `n_scenes`, so keying the annotation on drops alone

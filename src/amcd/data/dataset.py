@@ -21,7 +21,7 @@ class EnergyDataset(Dataset):
             raise FileNotFoundError(f"Split directory not found: {split_dir}")
 
         # Membership comes from the MANIFEST, never from whatever files happen to
-        # be on disk (F-25). Globbing made the loader trust directory contents over
+        # be on disk. Globbing made the loader trust directory contents over
         # `splits.json`, so a scene that changed splits between preprocess runs was
         # left behind in its old directory and silently trained on while being
         # scored as held-out — with splits.json still reporting it correctly, so no
@@ -55,7 +55,7 @@ class EnergyDataset(Dataset):
         # exFAT volumes are not residue.)
         # Both suffixes, not just `_low` — the check claims "any tensor not in the
         # manifest", and an orphan `_high` with no `_low` partner would otherwise
-        # be invisible to the backstop guarding the F-25 blocker (F-39).
+        # be invisible to the backstop.
         on_disk = {p.stem.rsplit("_", 1)[0] for p in split_dir.glob("*.pt")
                    if not p.name.startswith("._")}
         orphans = sorted(on_disk - set(scene_ids))

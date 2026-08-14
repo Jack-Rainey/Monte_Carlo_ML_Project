@@ -5,7 +5,7 @@
 #
 # SIZING ONLY. The backend switch lives in overlays/simulator_dry_run.yaml and is
 # composed alongside this file, so "which backend" is declared in exactly one
-# place (ledger RD-51). Canonical invocation:
+# place. Canonical invocation:
 #
 #   amcd all -c configs/base.yaml \
 #            -c configs/overlays/simulator_dry_run.yaml \
@@ -19,7 +19,7 @@ scenes:
   # 0.25 s against base.yaml's full geometry ranges: every scene's Sabine T60
   # exceeds it. Declared at 1.0 (no constraint) rather than fixed — this overlay
   # exists to exercise PLUMBING at speed and claims no acoustic fidelity, so the
-  # record-length rule does not apply to it (AC-22). base.yaml declares 0.0.
+  # record-length rule does not apply to it. base.yaml declares 0.0.
   max_frac_below_iso_t30_decay_range: 1.0
 
 splits:
@@ -39,7 +39,7 @@ model:
     hidden_channels: 8
     n_layers: 2
 
-# SCAFFOLD VALUES, and the reason they are not the standard's (AC-176).
+# SCAFFOLD VALUES, and the reason they are not the standard's.
 # The dry run's records are n_samples 12000 = 0.25 s. Measured over all 29
 # canonical legs, the available decay range is 19.1-29.7 dB -- so base.yaml's
 # ISO-conformant 45 dB would refuse EVERY scaffold scene, T30 and EDT alike.

@@ -13,7 +13,7 @@ annotations, no walrus in a comprehension target — because a syntax error here
 surfaces as a subprocess exit code rather than as an import error the suite
 catches.
 
-THE SHA CHECK RUNS FIRST, BEFORE ANY SIMULATION (RD-67): the point of verifying
+THE SHA CHECK RUNS FIRST, BEFORE ANY SIMULATION: the point of verifying
 the installed upstream commit is to refuse a render that would produce an artifact
 of unknown provenance, and under emulation that render can cost hours.
 """
@@ -28,7 +28,7 @@ import numpy as np
 def _installed_sha(receipt_name, sha_key):
     """The upstream commit this env was built from, per its install receipt.
 
-    The receipt's filename and key are PASSED IN rather than repeated here (F-123).
+    The receipt's filename and key are PASSED IN rather than repeated here.
     This file cannot import `amcd`, so a literal would be a third copy of a name
     already defined in `gsound_sir.py` and in `scripts/setup_gsound_sir.py` — and
     the parent already sends a JSON request, so it can send these too.
@@ -58,7 +58,7 @@ def _retain(paths, energy_percentage, max_rays):
     propagation run just to obtain the unfiltered set the IR must be synthesized
     from - doubling the cost of every render to get one array twice.
 
-    THE SAME SELECTION RULE, not a bit-exact port (AC-82/F-114). Two deliberate
+    THE SAME SELECTION RULE, not a bit-exact port. Two deliberate
     divergences, both confined to the `top_percent` branch and both in the direction
     of determinism: upstream sorts with `std::sort`, which is UNSTABLE, so its kept
     set is unspecified under tied energies while this one is fixed; and upstream

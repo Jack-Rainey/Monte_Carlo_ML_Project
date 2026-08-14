@@ -13,6 +13,6 @@ def compute_spatial_metrics(
     Inter-channel directional energy ratio and HOA-decoded spatial metrics.
     Stubbed — returns no metrics (known gap in v1). Producer contract: (triples
     with a declared improvement `kind` each, nan_reasons keyed (metric, leg)) —
-    see metric_row (F-20/F-21).
+    see metric_row.
     """
     return {}, {}

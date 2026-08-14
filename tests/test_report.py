@@ -1,12 +1,11 @@
-"""Report rendering guards (ledger RR-14, F-21, AC-48).
+"""Report rendering guards.
 
 The results table must never present an unscored quantity as a result: an
 n_scored == 0 row renders as `unscored` with NO descriptive mean in any results
 column, and every row shows scored/attempted so drops are visible, not inferred.
 
 It must also never present a physical quantity without its unit: every reported
-improvement column carries one, declared per metric and REFUSED when undeclared
-(AC-48).
+improvement column carries one, declared per metric and REFUSED when undeclared.
 """
 from __future__ import annotations
 
@@ -23,7 +22,7 @@ from tests.conftest import QUIET, tiny_config
 
 #: What each metric's PRODUCER declares on its `MetricTriple` and carries through
 #: `metrics.parquet` — mirrored here only so a fixture row looks like a real one.
-#: The reporting layer no longer holds a map of its own (RD-201/AC-127).
+#: The reporting layer no longer holds a map of its own.
 _PRODUCER_UNITS = {
     "T30": "s", "EDT": "s", "C50": "dB", "energy_snr_db": "dB",
     "energy_mse": "operand_domain_squared",
@@ -32,7 +31,7 @@ _PRODUCER_UNITS = {
 
 def _summary_row(metric: str, **overrides) -> dict:
     row = {
-        # F-70's attempted-population bound. Defaults match the scored columns with
+        # attempted-population bound. Defaults match the scored columns with
         # nothing imputed, which is what a fully-scored split produces.
         "n_attempted_scorable": 3, "n_pred_unscored_imputed": 0,
         "improvement_mean_attempted": 0.1234,
@@ -59,7 +58,7 @@ def _render(rows: list[dict], value_domain: str = "db", config=None) -> str:
         (run_dir / "stats").mkdir()
         (run_dir / "stats" / "summary.json").write_text(json.dumps(rows))
         # The operand domain is read from preprocess's own stamp, never inferred
-        # from a rep class (F-19), so the report needs it on disk (AC-48).
+        # from a rep class, so the report needs it on disk.
         (run_dir / "preprocessed").mkdir()
         (run_dir / "preprocessed" / "meta.json").write_text(
             json.dumps({"value_domain": value_domain})
@@ -69,7 +68,7 @@ def _render(rows: list[dict], value_domain: str = "db", config=None) -> str:
 
 
 def test_unscored_row_renders_unscored_with_no_numbers() -> None:
-    """RR-14: an n_scored == 0 row must say `unscored` and must NOT show its
+    """An n_scored == 0 row must say `unscored` and must NOT show its
     descriptive pred_mean (pre-fix, energy_snr_db printed −1.6…−2.7 dB "Pred
     mean" beside all-N/A inferential cells — an unscored quantity reading as a
     result)."""
@@ -91,7 +90,7 @@ def test_unscored_row_renders_unscored_with_no_numbers() -> None:
 
 
 def test_rows_show_scored_over_attempted() -> None:
-    """F-21: the N column is scored/attempted, so a dropped scene is a visible
+    """The N column is scored/attempted, so a dropped scene is a visible
     gap (2/3), never a silently smaller population."""
     txt = _render([_summary_row("C50", n_scored=2, n_attempted=3, n_improved=1,
                                 pct_improved=50.0)])
@@ -100,11 +99,11 @@ def test_rows_show_scored_over_attempted() -> None:
 
 
 class TestReportedImprovementsCarryTheirUnit:
-    """AC-48: `Imp mean`, the CI and MDES are `paired_improvement`'s output in the
+    """`Imp mean`, the CI and MDES are `paired_improvement`'s output in the
     METRIC's own units, and one table mixes seconds (T30, EDT) with decibels
     (C50) — so a bare number is not interpretable.
 
-    The unit CANNOT be derived from `kind` (RD-201): `kind` is
+    The unit CANNOT be derived from `kind`: `kind` is
     match_reference|maximize|minimize, and T30 and C50 share `match_reference`
     while differing in unit. It is declared by the PRODUCER on its own
     `MetricTriple` and carried through `metrics.parquet`, so the reported column
@@ -127,7 +126,7 @@ class TestReportedImprovementsCarryTheirUnit:
 
         End-to-end through the DECLARED domain only. The amplitude case is asserted
         against `_unit_for` below rather than by stamping a domain the configured
-        representation does not declare: since F-162 the report cross-checks the
+        representation does not declare: the report cross-checks the
         stamp against that declaration and refuses when they disagree, which is
         the point — a run_dir stamped `amplitude` under a `db` representation is
         exactly the mislabelling that check exists to catch.
@@ -137,7 +136,7 @@ class TestReportedImprovementsCarryTheirUnit:
 
     def test_each_operand_domain_has_its_own_rendered_unit(self) -> None:
         """`a.u.²`, not `amp²` — the amplitude domain is raw samples in arbitrary
-        units, and `amp` reads as the ampere (AC-125)."""
+        units, and `amp` reads as the ampere."""
         from amcd.reporting.tables import _unit_for
 
         token = _PRODUCER_UNITS["energy_mse"]
@@ -147,7 +146,7 @@ class TestReportedImprovementsCarryTheirUnit:
     def test_a_stamp_that_contradicts_the_configured_representation_is_refused(
         self, tmp_path: Path
     ) -> None:
-        """F-162: the stamp decides the unit, and it is an artifact of a stage that
+        """The stamp decides the unit, and it is an artifact of a stage that
         may have run under a different config. Trusting it alone lets the table
         label numbers produced in one domain with the unit of another."""
         with pytest.raises(ValueError, match="value_domain"):
@@ -160,7 +159,7 @@ class TestReportedImprovementsCarryTheirUnit:
             _render([_summary_row("c80_undeclared", unit="")])
 
     def test_an_undeclared_metric_is_refused_even_when_it_is_UNSCORED(self) -> None:
-        """F-163/AC-130: the refusal must be over the metric SET, not the scored
+        """The refusal must be over the metric SET, not the scored
         subset.
 
         `_metric_row` returns the `unscored` line before it needs a unit, so a
@@ -178,7 +177,7 @@ class TestReportedImprovementsCarryTheirUnit:
 
 
 class TestTheUnconvergedReferenceReachesTheReader:
-    """AC-187: the ray-budget probe measured that the high leg is NOT a converged
+    """The ray-budget probe measured that the high leg is NOT a converged
     reference for C50 — worst deviation 3.24 dB against the 1.0 dB ISO JND.
 
     Every paired improvement in this table is computed against that leg, so this is
@@ -189,14 +188,14 @@ class TestTheUnconvergedReferenceReachesTheReader:
     """
 
     def test_every_row_of_an_unconverged_metric_carries_the_caveat(self) -> None:
-        txt = _render([_summary_row("C50"), _summary_row("T30")])
-        c50 = next(l for l in txt.splitlines() if l.startswith("C50"))
-        t30 = next(l for l in txt.splitlines() if l.startswith("T30"))
-        assert "reference unconverged" in c50, c50
-        assert "reference unconverged" not in t30, (
-            "T30 is measured CONVERGED (16/18 cells within 5 %) — labelling it too "
-            "would make the caveat meaningless"
-        )
+        """C50 and T30 are both declared unconverged; EDT is not, and the caveat
+        must discriminate — a label on every row would carry no information."""
+        txt = _render([_summary_row("C50"), _summary_row("T30"), _summary_row("EDT")])
+        rows = {m: next(l for l in txt.splitlines() if l.startswith(m))
+                for m in ("C50", "T30", "EDT")}
+        assert "reference unconverged" in rows["C50"], rows["C50"]
+        assert "reference unconverged" in rows["T30"], rows["T30"]
+        assert "reference unconverged" not in rows["EDT"], rows["EDT"]
 
     def test_a_fully_scored_row_still_carries_it(self) -> None:
         """The point of the row: nothing about the scored population reveals this."""
@@ -214,7 +213,7 @@ class TestTheUnconvergedReferenceReachesTheReader:
         assert "declared 1 dB" in txt, txt
 
     def test_the_csv_carries_it_too(self) -> None:
-        """AC-129's rule: the machine-readable artifact is the one a downstream
+        """Rule: the machine-readable artifact is the one a downstream
         analysis opens, so it must not ship the improvement without the caveat."""
         import csv
         import tempfile
@@ -224,7 +223,7 @@ class TestTheUnconvergedReferenceReachesTheReader:
             run_dir = Path(d)
             (run_dir / "stats").mkdir()
             (run_dir / "stats" / "summary.json").write_text(
-                json.dumps([_summary_row("C50"), _summary_row("T30")])
+                json.dumps([_summary_row("C50"), _summary_row("EDT")])
             )
             (run_dir / "preprocessed").mkdir()
             (run_dir / "preprocessed" / "meta.json").write_text(
@@ -236,7 +235,7 @@ class TestTheUnconvergedReferenceReachesTheReader:
             ))
         by_metric = {r["metric"]: r["reference_converged"] for r in rows}
         assert by_metric["C50"] == "False", by_metric
-        assert by_metric["T30"] == "True", by_metric
+        assert by_metric["EDT"] == "True", by_metric
 
     def test_a_declaration_this_run_cannot_apply_is_LOGGED_not_silent(self) -> None:
         """A caveat that matches no reported metric is a SKIP, and this project logs
@@ -261,11 +260,7 @@ class TestTheUnconvergedReferenceReachesTheReader:
             "a declaration for C80 must not caveat C50's rows"
         )
 
-    def test_nothing_is_said_when_the_reference_is_converged(self) -> None:
-        """The footer must not carry a permanent paragraph about a resolved
-        concern: if a later probe clears C50, emptying the map clears the text."""
-        cfg = tiny_config()
-        cfg.convergence.reference_unconverged = {}
+    def _render_to_file(self, cfg) -> str:
         with tempfile.TemporaryDirectory() as d:
             run_dir = Path(d)
             (run_dir / "stats").mkdir()
@@ -277,18 +272,61 @@ class TestTheUnconvergedReferenceReachesTheReader:
                 json.dumps({"value_domain": "db"})
             )
             run_report(cfg, run_dir, QUIET)
-            txt = (run_dir / "report" / "summary.txt").read_text()
+            return (run_dir / "report" / "summary.txt").read_text()
+
+    def test_nothing_is_said_when_the_reference_is_converged(self) -> None:
+        """The footer must not carry a permanent paragraph about a resolved
+        concern: if a later probe clears C50, emptying the maps clears the text."""
+        cfg = tiny_config()
+        cfg.convergence.reference_unconverged = {}
+        cfg.convergence.reference_unmeasured = {}
+        txt = self._render_to_file(cfg)
         assert "REFERENCE CONVERGENCE" not in txt
         assert "reference unconverged" not in txt
 
+    def test_a_quantity_nobody_measured_is_named_in_the_footer(self) -> None:
+        """The third state has to REACH the reader, or it is the two-state contract
+        again: an unmeasured quantity that renders nothing is indistinguishable from
+        a converged one, which is exactly what the map exists to prevent."""
+        cfg = tiny_config()
+        cfg.convergence.reference_unconverged = {}
+        txt = self._render_to_file(cfg)
+        assert "NEVER MEASURED" in txt
+        assert "band_energy" in txt
+        assert "E4 ray-count scoping" in txt
+
+    def test_an_unmeasured_quantity_is_not_reported_as_a_measurement(self) -> None:
+        """It carries no deviation and no cell counts by construction, so it must
+        not render in the measured-and-failed section."""
+        cfg = tiny_config()
+        cfg.convergence.reference_unconverged = {}
+        txt = self._render_to_file(cfg)
+        measured = txt.split("NEVER MEASURED")[0]
+        assert "band_energy" not in measured
+        assert "MEASURED AND FAILED" not in measured
+
+    def test_a_quantity_cannot_be_both_unconverged_and_unmeasured(self) -> None:
+        from amcd.config import ConvergenceTolerance
+
+        with pytest.raises(Exception, match="BOTH"):
+            ConvergenceTolerance(
+                t30_frac=0.05, c50_db=1.0, band_energy_frac=0.05,
+                reference_unconverged={"C50": {
+                    "worst_deviation": 3.24, "tolerance": 1.0, "unit": "dB",
+                    "n_within_tolerance": 12, "n_cells": 20,
+                }},
+                reference_unmeasured={"C50": {"reason": "r", "gate": "g"}},
+            )
+
 
 class TestTheModelsOwnFailuresAreBoundedNotDropped:
-    """F-70 — a scene where the model produced nothing measurable leaves the scored
+    """A scene where the model produced nothing measurable leaves the scored
     population, so the CI beside it is conditioned on the model having WORKED.
 
     That is optimistic, and the loss is not uniform: the censoring probability
     correlates with room absorption, which is `test_material_shift`'s own declared
-    axis. AC-25 traded a ground-truth contamination for this selection and only the
+    axis. Deriving the band set from the physical legs trades a ground-truth
+    contamination for this selection, and only the
     first was discussed. The bound is the same bootstrap with those scenes imputed
     at ZERO improvement — the honest floor for a failure, since the model did not
     make the metric worse than the baseline, it produced nothing.
@@ -333,7 +371,8 @@ class TestTheModelsOwnFailuresAreBoundedNotDropped:
 
 
 class TestTheAttemptedBoundIsComputedOverTheRightScenes:
-    """The aggregation half of F-70, asserted through `run_stats` rather than
+    """The aggregation half of the pred-side selection bound, asserted through
+    `run_stats` rather than
     through a fixture: which scenes are imputed is the load-bearing decision."""
 
     def _metrics_frame(self, rows: list[dict]):
@@ -411,7 +450,7 @@ class TestTheAttemptedBoundIsComputedOverTheRightScenes:
 
 
 class TestEachSplitSectionCarriesItsOwnRecordLengthCount:
-    """RD-65 — the record-length gate is the OVERALL over-limit fraction across
+    """The record-length gate is the OVERALL over-limit fraction across
     regimes, which is the one aggregation invariant #9 forbids for results.
 
     That is the right GATE: a per-split gate would let the smallest split set the
@@ -465,7 +504,7 @@ class TestEachSplitSectionCarriesItsOwnRecordLengthCount:
         assert "0/20" in id_note, id_note
 
     def test_the_pooled_id_regime_is_named_as_pooled(self, tmp_path: Path) -> None:
-        """S-F7: in frac mode `train`/`valid`/`test_id` share one `id` entry, so a
+        """In frac mode `train`/`valid`/`test_id` share one `id` entry, so a
         count printed beside `test_id` covers all three. Saying `split 'test_id'`
         there would invite the reader to size it against test_id alone."""
         cfg = tiny_config()
@@ -482,7 +521,7 @@ class TestEachSplitSectionCarriesItsOwnRecordLengthCount:
         assert "regime 'id'" in note and "pooling" in note, note
 
     def test_an_unscored_regime_is_not_reported_as_zero(self, tmp_path: Path) -> None:
-        """RD-64/F-71: a fraction whose denominator is zero is UNDEFINED, and 0.0
+        """A fraction whose denominator is zero is UNDEFINED, and 0.0
         would read as 'measured, and within the record'."""
         cfg = tiny_config()
         run_dir = self._run_dir(tmp_path, {

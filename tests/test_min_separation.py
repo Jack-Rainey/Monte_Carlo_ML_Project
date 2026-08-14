@@ -1,7 +1,5 @@
 """Minimum source-receiver separation: the pre-render half of the simulator contract.
 
-Ledger rows F-48 / AC-13 / RD-45 / RD-48 / RD-49 / RD-50 / RD-57 / RD-60.
-
 The defect these cover: `configs/base.yaml` declared `distance_range: null` on both
 placement regimes, so it generated pairs below every shipped backend's geometric
 floor (P(d < 0.3 m) = 0.186 %/scene → ~67 % chance a 600-scene run aborted), and the
@@ -42,7 +40,7 @@ def _regime(distance_range):
 
 
 class TestDistanceRangeSpellings:
-    """RD-48: a nullable ELEMENT is a new sub-convention, not a second spelling of null."""
+    """A nullable ELEMENT is a new sub-convention, not a second spelling of null."""
 
     @pytest.mark.parametrize(
         "spelling", [None, [1.0, None], [None, 10.0], [1.0, 10.0]],
@@ -73,7 +71,7 @@ class TestDistanceRangeSpellings:
 
 
 class TestBackendDeclaresItsFloor:
-    """RD-49/RD-60: required interface member, readable WITHOUT instantiating."""
+    """Required interface member, readable WITHOUT instantiating."""
 
     def test_shipped_backends_declare_a_floor(self) -> None:
         # gsound_sir DERIVES its floor from the sphere radii it already declares,
@@ -90,7 +88,7 @@ class TestBackendDeclaresItsFloor:
         )
 
     def test_reading_the_floor_never_constructs_the_backend(self) -> None:
-        """gen-scenes runs where the render env may not exist (RD-60)."""
+        """Gen-scenes runs where the render env may not exist."""
         constructed = []
 
         @simulator_registry.register("_probe_counts_init")
@@ -132,7 +130,7 @@ class TestBackendDeclaresItsFloor:
 
 
 class TestGenScenesRejectsUnrenderableRegimes:
-    """RD-45: EVERY declared regime, not only the one the id baseline names."""
+    """EVERY declared regime, not only the one the id baseline names."""
 
     def test_shipped_configs_clear_their_backend_floor(self) -> None:
         for cfg in (Config.load(_BASE), tiny_config()):
@@ -146,7 +144,7 @@ class TestGenScenesRejectsUnrenderableRegimes:
             _check_regimes_clear_backend_floor(cfg)
 
     def test_near_corner_is_checked_too(self) -> None:
-        """The regime behind test_placement_shift — the half RD-45 caught missing."""
+        """The regime behind test_placement_shift, which the id baseline does not name."""
         cfg = Config.load(_BASE)
         object.__setattr__(cfg.scenes.placement_regimes["near_corner"],
                            "distance_range", [0.05, None])
@@ -161,7 +159,7 @@ class TestGenScenesRejectsUnrenderableRegimes:
             _check_regimes_clear_backend_floor(cfg)
 
     def test_error_points_at_the_config_value_not_the_backend_floor(self) -> None:
-        """RD-57: the backend floor is a lower limit on a research choice, not its source."""
+        """The backend floor is a lower limit on a research choice, not its source."""
         cfg = Config.load(_BASE)
         object.__setattr__(cfg.scenes.placement_regimes["interior_random"],
                            "distance_range", None)
@@ -206,7 +204,7 @@ class TestRenderPreflight:
 
 
 class TestBaseConfigCannotEmitBelowItsFloor:
-    """F-48's own pass condition, on the shipped config."""
+    """Pass condition, on the shipped config."""
 
     def test_base_declares_a_minimum_on_every_regime(self) -> None:
         cfg = Config.load(_BASE)
@@ -237,12 +235,12 @@ class TestBaseConfigCannotEmitBelowItsFloor:
 
 
 class TestTheResearcherMinimumIsBackendIndependent:
-    """F-61: the whole AC-13/F-48 protection sat behind `if floor <= 0.0: return`.
+    """The whole protection sits behind `if floor <= 0.0: return`.
 
     A backend legitimately declaring a 0.0 floor — valid under the `Simulator`
     contract, unexercised by any shipped backend — made both the gen-scenes check
     and render's pre-flight early-return. `distance_range: null` was then legal
-    again and the pre-F-48 near-field population returned silently: `_room_acoustics`
+    again and the earlier near-field population returned silently: `_room_acoustics`
     rejects only d == 0 exactly, so d = 0.001 m would publish a ~+60 dB DRR into
     placement_report.json as if measured. Valid input under the declared contract,
     silently mishandled by an unexercised path.
@@ -267,8 +265,7 @@ class TestTheResearcherMinimumIsBackendIndependent:
         assert _check_regimes_clear_backend_floor(cfg) == 0.0
 
     def test_the_two_checks_are_reported_separately(self) -> None:
-        """The researcher's minimum and the backend's floor are different claims
-        (RD-57), so a config that declares a minimum BELOW the backend floor gets
+        """The researcher's minimum and the backend's floor are different claims, so a config that declares a minimum BELOW the backend floor gets
         the floor message, not the missing-declaration one."""
         from amcd.scenes.generator import _check_regimes_clear_backend_floor
 

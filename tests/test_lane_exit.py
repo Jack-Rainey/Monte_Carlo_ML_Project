@@ -147,7 +147,7 @@ def test_a_partition_without_the_gate_says_so_explicitly(path: Path, spec: dict)
     """`exit_gate` is a declaration, not an absence.
 
     Skipping silently when the key is missing is how a check quietly stops
-    running — RD-148's shape, where a stale `_CURRENT_CYCLE` suspended every
+    running — shape, where a stale `_CURRENT_CYCLE` suspended every
     ledger-coupled test with a green suite. A partition that predates the gate
     must SAY `exit_gate: not_required` with a reason, so "no block" is a recorded
     decision rather than an oversight.

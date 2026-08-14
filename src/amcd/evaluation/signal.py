@@ -18,11 +18,11 @@ def compute_signal_metrics(
     All tensors: (C, n_bands, n_frames) in the rep's declared `value_domain` —
     "db" (log band-energy; the banded-rep contract) or "amplitude" (raw samples;
     the waveform identity rep). The caller passes the preprocess-stamped domain,
-    never infers it from a rep class (F-19).
+    never infers it from a rep class.
 
     Returns (triples, nan_reasons). Each metric declares its improvement `kind`
-    on its triple (F-20); nan_reasons maps (metric, leg) → why that leg is NaN,
-    for every NaN consumed leg, so the evaluator can log the drop (F-21).
+    on its triple; nan_reasons maps (metric, leg) → why that leg is NaN,
+    for every NaN consumed leg, so the evaluator can log the drop.
 
     `energy_mse` is an operand-domain MSE vs the high reference, defined in
     either domain; kind = match_reference (high vs itself is genuinely 0, a
@@ -30,7 +30,7 @@ def compute_signal_metrics(
     (10**(x/10)); kind = maximize — its low leg is the SNR of the LOW-RAY
     baseline against the high reference, so improvement = SNR(pred) − SNR(low)
     with no reference leg (SNR of the reference against itself is +∞, which is
-    why match-reference framing silently unscored it — F-20). On an
+    why match-reference framing would silently unscore it). On an
     amplitude-domain rep the dB undo is meaningless, so both SNR legs are NaN
     (undefined) with the reason logged instead of silently emitting garbage.
     """

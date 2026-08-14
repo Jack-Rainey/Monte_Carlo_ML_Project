@@ -3,8 +3,8 @@
 The inferential quantities (CI tested against 0, MDES) are computed on the
 per-scene PAIRED improvement — the baseline-vs-denoised difference design_spec
 §9 requires — never on the absolute per-scene metric value, whose dispersion is
-a different (up to ~2.4× divergent) σ (ledger F-18). The paired quantity is
-keyed on each metric's declared `kind` via `paired_improvement` (F-20): the
+a different (up to ~2.4× divergent) σ. The paired quantity is
+keyed on each metric's declared `kind` via `paired_improvement`: the
 spine never assumes match-reference. The absolute pred-value mean/CI are still
 reported, as descriptive columns.
 """
@@ -37,7 +37,7 @@ def bootstrap_ci(
     supplies config-declared values and a seeded RNG.
 
     BELOW `min_n_for_calibrated_ci` THE INTERVAL IS RETURNED AND FLAGGED, NOT
-    SUPPRESSED (F-M7/F-105). A percentile bootstrap cannot attain its nominal
+    SUPPRESSED. A percentile bootstrap cannot attain its nominal
     coverage at small n because the requested percentile falls inside the sample
     extremes: at n = 3, P(a bootstrap mean equals a sample extreme) = 3^-3 = 3.7 %
     against the 2.5 % the alpha/2 tail asks for, so the "95 % CI" is the sample
@@ -65,7 +65,7 @@ def bootstrap_ci(
         "ci_upper": float(np.percentile(boot_means, 100 * (1 - alpha / 2))),
         # Sample std (ddof=1): this feeds mdes() as the population-σ estimate, and the
         # unbiased estimator is required at this design's small per-split n — ddof=0
-        # biases σ down by √((n−1)/n) (≈ 0.82 at n=3), overstating detectability (F-09).
+        # biases σ down by √((n−1)/n) (≈ 0.82 at n=3), overstating detectability.
         "std": float(values.std(ddof=1)),
         "ci_calibrated": calibrated,
     }
@@ -79,7 +79,7 @@ def _two_sided_power(ncp: float, t_crit: float, df: int) -> float:
     Z~N(0,1) ⟂ V~χ²_df. scipy's `nct.cdf` returns ISOLATED NaN holes near the root
     at small df, and those holes are dense enough at df≤4 that a fixed nudge cannot
     reliably escape them — a NaN reaching the bisection reads as `nan < power == False`
-    and truncates the bracket below the true root, understating MDES (ledger F-14/F-16).
+    and truncates the bracket below the true root, understating MDES.
 
     So instead of `nct.cdf`, integrate the exact rejection probability over the
     chi-square scale mixture: conditional on V=v the statistic is normal, so
@@ -112,17 +112,17 @@ def mdes(std: float, n: int, power: float, alpha: float) -> float:
     `alpha` with n samples (ν = n−1 df). Solved EXACTLY via the noncentral-t: the
     t-statistic under an effect δ is noncentral-t with noncentrality λ = δ√n/σ, so
     we find the λ whose two-sided power equals `power` and return δ = λσ/√n. Power
-    is evaluated hole-free by `_two_sided_power` (see there re ledger F-14/F-16).
+    is evaluated hole-free by `_two_sided_power` — see its docstring.
 
     Why not the large-sample normal form `(z_{1-α/2}+z_power)·σ/√n`: at this design's
     per-split n (test splits are as small as 3) the normal critical value understates
     the small-sample one ~2.2× at n=3, making MDES ~2.2× too small — overstating
-    detectability (ledger F-13). The noncentral-t is correct at every n and converges
+    detectability. The noncentral-t is correct at every n and converges
     to the normal form as n grows.
 
     Returns NaN for n ≤ 2 (df ≤ 1): a one-sample t-test with a single degree of
     freedom is essentially unpowered (MDES ≈ 11σ), so MDES is reported N/A there
-    rather than as a misleadingly precise huge number (ledger F-14)."""
+    rather than as a misleadingly precise huge number."""
     if n <= 2 or std == 0:
         return float("nan")
     df = n - 1
@@ -149,7 +149,7 @@ def mdes(std: float, n: int, power: float, alpha: float) -> float:
 
 
 def _substream_rng(bootstrap_seed: int, *key_parts: str) -> np.random.Generator:
-    """Independent bootstrap substream per (split, metric, quantity) (ledger F-15).
+    """Independent bootstrap substream per (split, metric, quantity).
 
     A single RNG stream shared across groups makes each group's CI bounds depend
     on how much entropy preceding groups consumed — adding or removing a metric
@@ -179,7 +179,6 @@ def _count_true(mask) -> int:
 
 
 def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
-    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
     verbosity = ctx.verbosity
     metrics_path = run_dir / "metrics" / "metrics.parquet"
     if not metrics_path.exists():
@@ -192,24 +191,24 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
     if "kind" not in df.columns:
         raise KeyError(
             "metrics.parquet has no 'kind' column — produced by a pre-taxonomy "
-            "eval stage; re-run eval (F-20: every metric declares its improvement kind)."
+            "eval stage; re-run eval — every metric declares its improvement kind."
         )
     bootstrap_seed = config.seed("bootstrap")
 
     # Compute per-(split, metric) stats — never pool test splits (invariant #9).
     summary: list[dict] = []
     for (split_name, metric_name), group in df.groupby(["split", "metric"]):
-        # One metric, one declared kind (F-20): the paired improvement below is
+        # One metric, one declared kind: the paired improvement below is
         # only meaningful under a single kind, so mixed declarations fail loud.
         kinds = group["kind"].unique()
         if len(kinds) != 1:
             raise ValueError(
                 f"{split_name}/{metric_name}: inconsistent metric kinds {sorted(kinds)} "
-                f"across scenes — a metric declares exactly one improvement kind (F-20)."
+                f"across scenes — a metric declares exactly one improvement kind."
             )
         kind = str(kinds[0])
         # Descriptive: distribution of the metric's absolute per-scene pred value.
-        # Reported for context only — its σ is NOT the §9 detectability σ (F-18).
+        # Reported for context only — its σ is NOT the §9 detectability σ.
         pred_values = group["pred_val"].dropna().values.astype(float)
         pred_ci = bootstrap_ci(
             pred_values,
@@ -222,7 +221,7 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
         # Inferential (design_spec §9): the per-scene PAIRED improvement for
         # the group's declared kind — see `paired_improvement`. Recomputed from
         # the legs, never read from the `improved` column, so a hostile or
-        # inconsistent column cannot skew CI/MDES (F-18).
+        # inconsistent column cannot skew CI/MDES.
         paired_all = np.array([
             # `unit` is irrelevant to the improvement arithmetic, which is why it
             # is passed empty here rather than re-derived: the reported unit comes
@@ -241,7 +240,7 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
             min_n_for_calibrated_ci=config.bootstrap_min_n_for_calibrated_ci,
         )
 
-        # ── THE SAME IMPROVEMENT OVER THE ATTEMPTED POPULATION (F-70) ────────────
+        # ── THE SAME IMPROVEMENT OVER THE ATTEMPTED POPULATION ────────────
         #
         # `paired` above is the SCORED population, and a scene leaves it when the
         # model produced nothing measurable. So the CI beside it is conditioned on
@@ -287,7 +286,7 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
 
         # Improvement pct: numerator and denominator over the SAME population —
         # scenes where `improved` is defined (not None/NaN). Counting n_improved over
-        # rows dropped from the denominator produced pct > 100 (F-08). Under the
+        # rows dropped from the denominator produced pct > 100. Under the
         # metric_row contract (`improved` is None ⟺ a consumed leg is NaN) this is
         # the same population as `paired`; the paired stats above still recompute
         # their own finite-legs mask so a hostile/inconsistent `improved` column can
@@ -301,7 +300,7 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
             "split": split_name,
             "metric": metric_name,
             "kind": kind,
-            # Scored-vs-attempted (F-21): n_attempted = per-scene rows in this
+            # Scored-vs-attempted: n_attempted = per-scene rows in this
             # (split, metric) group (invariant #6 — rows are never collapsed
             # before stats); the report shows scored/attempted so a drop is
             # visible, never inferred. Per-leg reasons: eval's metrics/drops.csv.
@@ -314,17 +313,18 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
             "pred_std": pred_ci["std"],
             # Inferential paired-improvement columns (§9). Power/alpha behind the
             # MDES come from config and are stamped in the run's config.yaml — the
-            # column name must not hardcode them (RR-11); the improvement_ prefix
-            # says which σ it derives from without reading this code (RR-12).
+            # column name must not hardcode them; the improvement_ prefix
+            # says which σ it derives from without reading this code.
             "n_scored": n_scored,
             "improvement_mean": imp_ci["mean"],
             "improvement_ci_lower": imp_ci["ci_lower"],
             "improvement_ci_upper": imp_ci["ci_upper"],
             "improvement_std": imp_ci["std"],
             "improvement_mdes": mdes_val,
-            # F-70's bound. Identical to the scored columns whenever no scene was
-            # pred-unscored, which is the common case — the two diverging is the
-            # signal, and `n_pred_unscored_imputed` says by how many scenes.
+            # The bound over the ATTEMPTED population. Identical to the scored
+            # columns whenever no scene was pred-unscored, which is the common
+            # case — the two diverging is the signal, and
+            # `n_pred_unscored_imputed` says by how many scenes.
             "n_attempted_scorable": len(attempted_paired),
             "n_pred_unscored_imputed": n_imputed,
             "improvement_mean_attempted": attempted_ci["mean"],
@@ -332,7 +332,7 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
             "improvement_ci_upper_attempted": attempted_ci["ci_upper"],
             "n_improved": n_improved,
             "pct_improved": float(n_improved) / n_scored * 100 if n_scored > 0 else float("nan"),
-            # ── Composition of the scored population (F-62 / AC-25 / RD-78) ──
+            # ── Composition of the scored population ──
             # "N sc/att" cannot distinguish a fully-scored scene from a partially
             # scored one, and this split's CI pools per-scene improvements computed
             # over DIFFERENT band sets while `pred_mean` averages absolutes over
@@ -351,15 +351,14 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
             # pandas error, not a silently-picked winner.
             "unit": group["unit"].iloc[0] if "unit" in group else "",
             # Whether the reported interval can reach its nominal coverage at this
-            # n (F-M7). False is not a drop — the interval is still the best one
+            # n. False is not a drop — the interval is still the best one
             # available — it is a label the table must render.
             "ci_calibrated": bool(imp_ci["ci_calibrated"]),
             "n_estimator_variance_limited": _count_true(
                 group.get("estimator_variance_limited")
             ),
-            # F-M2: this reached metrics.parquet and stopped there. A caveat the
-            # reported table never renders is a code comment, not a disclosure —
-            # and this is the one that marks a value the PHYSICAL legs reported
+            # A caveat the reported table never renders is a code comment, not a
+            # disclosure — and this one marks a value the PHYSICAL legs reported
             # from a band their own octave filter cannot resolve, i.e. exactly the
             # scenes whose absolute is least trustworthy.
             "n_resolvability_limited": _count_true(
@@ -369,11 +368,10 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
         }
         summary.append(row)
 
-    # Declared-but-unscored test splits (F-45). Everything above is keyed on the
+    # Declared-but-unscored test splits. Everything above is keyed on the
     # splits PRESENT in metrics.parquet, so a declared test split that received no
     # scored scene would simply not appear — and an absent split is indistinguishable
-    # from one that was never declared. F-30 fixed this at preprocess only; the same
-    # discipline has to reach the artifacts a reader actually consults.
+    # from one that was never declared.
     scored_splits = {str(s) for s in df["split"].unique()}
     metric_names = sorted(str(m) for m in df["metric"].unique())
     for split_name in config.test_split_names:
@@ -385,7 +383,7 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
                 "metric": metric_name,
                 # No scene reached eval, so no metric declared a kind here. Empty
                 # rather than borrowed: inventing one would assert an improvement
-                # direction nothing measured (F-20).
+                # direction nothing measured.
                 "kind": "",
                 "n_attempted": 0,
                 "n_pred": 0,
@@ -421,7 +419,7 @@ def run_stats(config: Config, run_dir: Path, ctx: RunContext) -> None:
     )
 
     # Counts are stated against the DECLARED test-split set, so "3 of 4" is visible
-    # rather than being reported as a complete "3" (F-45).
+    # rather than being reported as a complete "3".
     n_declared = len(config.test_split_names)
     n_scored_splits = len(scored_splits & set(config.test_split_names))
     n_metrics = summary_df["metric"].nunique() if not summary_df.empty else 0

@@ -1,5 +1,5 @@
 """eval stage: compute per-scene metrics → metrics/metrics.parquet + drops.csv
-+ iso_integration_windows.json (the shared Schroeder window per scene/band, AC-17)."""
++ iso_integration_windows.json (the shared Schroeder window per scene/band)."""
 from __future__ import annotations
 
 import json
@@ -27,11 +27,11 @@ def _expected_onset_samples(meta_path: Path, sample_rate: int) -> int | None:
     the renderer actually did rather than recomputing from the scene spec under this
     study's own speed of sound — gsound compiles 344.0 m/s and `amcd.acoustics`
     declares 343.0, a difference that is small (0.09 ms over 10 m) but is exactly the
-    kind of "described vs rendered" divergence AC-24 exists about.
+    kind of "described vs rendered" divergence to keep out of a reported number.
 
-    Returns None when the record does not carry them, which leaves `_find_onset` on
-    its pre-AC-181 detector-only path rather than fabricating a position: a run whose
-    renders predate these keys gets the old behaviour, not a wrong t=0.
+    Returns None when the record does not carry them, which leaves `find_onset`
+    on its detector-only path rather than fabricating a position: a run whose
+    renders predate these keys gets the unadjudicated behaviour, not a wrong t=0.
     """
     if not meta_path.exists():
         return None
@@ -47,7 +47,6 @@ def _expected_onset_samples(meta_path: Path, sample_rate: int) -> int | None:
 
 
 def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
-    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
     verbosity = ctx.verbosity
     preprocessed_dir = run_dir / "preprocessed"
     predictions_dir = run_dir / "predictions"
@@ -63,7 +62,7 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
 
     norm_stats = meta["norm_stats"]
     # Preprocess-stamped domain of the saved tensors ("db" | "amplitude"); keyed
-    # from the stamp, not the rep class, so eval stays rep-agnostic (F-19). A
+    # from the stamp, not the rep class, so eval stays rep-agnostic. A
     # missing key means a pre-stamp preprocess run — fail loud, re-run preprocess.
     value_domain = meta["value_domain"]
 
@@ -72,11 +71,11 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
         raise RuntimeError(f"No predictions found in {predictions_dir}. Run infer first.")
 
     rows: list[dict] = []
-    # Drop log (F-21): one row per (scene, split, metric, leg) that is NaN in a
+    # Drop log: one row per (scene, split, metric, leg) that is NaN in a
     # leg its kind consumes (unscored) or was only partially computed — written
     # to metrics/drops.csv so nothing leaves a result silently.
     drop_rows: list[dict] = []
-    # Shared ISO-3382 Schroeder integration window per (scene, band) (AC-17/RD-44).
+    # Shared ISO-3382 Schroeder integration window per (scene, band).
     # Recorded for every scene the room-acoustic path scores, so a reported absolute
     # T30/EDT/C50 can always be traced to the window — and the leg — that set it.
     iso_windows: dict[str, dict[str, dict[str, object]]] = {}
@@ -94,7 +93,7 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
         # infer only ever writes predictions for TEST splits, so a prediction whose
         # scene now sits in train/valid is residue from an earlier run under a
         # different split assignment — a different model's output, which would
-        # otherwise be scored and reported as if it belonged here (F-37).
+        # otherwise be scored and reported as if it belonged here.
         if split not in config.test_split_names:
             raise RuntimeError(
                 f"scene {scene_id!r} has a prediction but splits.json assigns it to "
@@ -116,11 +115,11 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
 
         all_metrics: dict[str, MetricTriple] = {}
         # Producer-supplied NaN reasons, keyed (metric, leg) — merged across
-        # producers, consumed by the drop sweep below (F-21).
+        # producers, consumed by the drop sweep below.
         nan_reasons: dict[tuple[str, str], str] = {}
 
         # Signal metrics — operand domain, with dB-only SNR keyed on the
-        # stamped value_domain (F-19)
+        # stamped value_domain
         signal_triples, signal_reasons = compute_signal_metrics(
             pred_db, high_db, low_db, value_domain=value_domain
         )
@@ -132,7 +131,7 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
         high_ir_path = renders_dir / scene_id / "high.npy"
         low_ir_path = carrier_dir / f"{scene_id}.npy"
 
-        # WHERE GEOMETRY SAYS THE DIRECT ARRIVAL IS (AC-181). Read from the RENDER's
+        # WHERE GEOMETRY SAYS THE DIRECT ARRIVAL IS. Read from the RENDER's
         # own meta rather than recomputed from the scene spec: `distance_m` and
         # `speed_of_sound_m_s` are both required provenance keys, and the speed is
         # the one the BACKEND used (gsound compiles 344.0 while this study's closed
@@ -164,10 +163,10 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
             all_metrics.update(room_triples)
             nan_reasons.update(room_reasons)
             # The shared Schroeder window is recorded for EVERY scored scene, not
-            # only for dropped ones (RD-44): reported ISO absolutes are windowed by
+            # only for dropped ones: reported ISO absolutes are windowed by
             # the noisier physical leg, so a reader must be able to see the window
             # that produced them.
-            # Units declared IN the artifact (AC-132): the index is in SAMPLES and
+            # Units declared IN the artifact: the index is in SAMPLES and
             # the band key in Hz, and neither was stated — nor the sample_rate a
             # reader needs to convert one to seconds.
             iso_windows[scene_id] = {
@@ -208,21 +207,21 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
 
         # One row per (scene, metric). `improved`/`baseline_rel_ratio` are derived
         # per-metric from that metric's own triple and declared kind — no metric
-        # borrows another's flag (F-07), no implicit match-reference assumption
-        # (F-20). improved is None where undefined (F-08).
+        # borrows another's flag, no implicit match-reference assumption.
+        # Improved is None where undefined.
         for metric_name, triple in all_metrics.items():
             improved, baseline_rel_ratio = metric_improvement(triple)
-            # Band accounting travels WITH the row (F-62). "N sc/att" could not tell
+            # Band accounting travels WITH the row. "N sc/att" could not tell
             # a fully-scored scene from a partially-scored one: on the RI smoke run
             # EDT/test_id read 4/4 while one scene's EDT was a ONE-BAND average and
             # the other three were two-band averages, visible only in drops.csv. The
             # split's CI then pools per-scene improvements computed over different
             # band sets under a headline count that reads as complete.
             acct = band_accounting.get(metric_name)
-            # EDT below this bound is variance-limited, not filter-limited (AC-27):
+            # EDT below this bound is variance-limited, not filter-limited:
             # measured sd 24-31 % of T60 against 6-10 % for T30. No threshold can
             # remove that, so it is disclosed per scene and counted per split
-            # (RD-78) rather than suppressed.
+            # rather than suppressed.
             edt_uncertain = (
                 metric_name == "EDT"
                 and not math.isnan(triple.high)
@@ -246,29 +245,26 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
                 "n_bands_pred_unresolved": (
                     None if acct is None else len(acct["pred_unresolved_hz"])
                 ),
-                # AC-38: bands whose value is REPORTED despite sitting below what
-                # the band can resolve. Suppressing them censored the estimator on
-                # its own magnitude and biased the split mean up (+7.5 % at true
-                # T60 = 0.04 s), so the number is disclosed with a caveat instead —
-                # the shape `metric_edt_variance_limited_s` already uses (RD-78).
+                # Bands whose value is REPORTED despite sitting below what the
+                # band can resolve. Suppressing them would censor the estimator on
+                # its own magnitude and bias the split mean up, so the number is
+                # disclosed with a caveat instead.
                 "n_bands_resolvability_limited": (
                     None if acct is None else len(acct["resolvability_limited_hz"])
                 ),
-                # RD-93: the OVERLAP that makes AC-38 cost something. A band that is
-                # floor-limited AND unresolved in pred is a band that, before AC-38,
-                # left every leg's average — leaving the scene IN the paired
-                # comparison. It now stays, pred is NaN in it, and the scene leaves
-                # `paired_improvement` instead. That is F-70's selection on the
-                # dependent variable, enlarged and optimistic. F-70's bound lives in
-                # stats/aggregate.py (integrator queue), so this column is what makes
-                # the enlargement measurable rather than invisible.
+                # The OVERLAP that makes disclosure cost something. A band that
+                # is floor-limited AND unresolved in pred keeps the band in every
+                # leg's average, so pred is NaN there and the SCENE leaves
+                # `paired_improvement` — selection on the dependent variable, in
+                # the optimistic direction. `stats/aggregate.py` bounds it; this
+                # column is what makes it measurable rather than invisible.
                 "n_bands_pred_unresolved_in_floor_limited": (
                     None if acct is None
                     else len(acct["pred_unresolved_in_floor_limited_hz"])
                 ),
                 "estimator_variance_limited": edt_uncertain,
             })
-            # Drop sweep (F-21): every consumed-leg NaN must carry a reason; a
+            # Drop sweep: every consumed-leg NaN must carry a reason; a
             # missing one is still logged, visibly attributed to the producer.
             # A reason on a FINITE leg is a partial intra-leg drop (e.g. some
             # eval bands NaN) — logged too, so the count change is visible.
@@ -291,14 +287,14 @@ def run_eval(config: Config, run_dir: Path, ctx: RunContext) -> None:
     df.to_parquet(metrics_dir / "metrics.parquet", index=False)
 
     # Always written, even when empty (header only): "no drops" is then an
-    # explicit statement, distinguishable from "log never produced" (F-21).
+    # explicit statement, distinguishable from "log never produced".
     drops_df = pd.DataFrame(
         drop_rows, columns=["scene_id", "split", "metric", "leg", "reason"]
     )
     drops_df.to_csv(metrics_dir / "drops.csv", index=False)
 
     # Canonical, not verbosity-gated: without it a reported ISO absolute cannot be
-    # interpreted, because the window is set by the noisier physical leg (RD-44).
+    # interpreted, because the window is set by the noisier physical leg.
     (metrics_dir / "iso_integration_windows.json").write_text(
         json.dumps(iso_windows, indent=2, sort_keys=True)
     )

@@ -5,7 +5,7 @@
 #
 # SIZING ONLY, like the other overlays: `tests/conftest.py` composes
 # base + overlays/simulator_dry_run.yaml + this file, so the suite runs on the
-# same single backend declaration every other dry-run invocation uses (RD-51)
+# same single backend declaration every other dry-run invocation uses
 # rather than on a second copy that could silently drift from it.
 
 seeds:
@@ -38,8 +38,8 @@ scenes:
   # A 0.1 s record against base.yaml's full geometry ranges: every scene's Sabine
   # T60 exceeds it. Declared at 1.0 (no constraint) rather than fixed, because
   # this overlay exists to exercise PLUMBING at speed and claims no acoustic
-  # fidelity — the record-length rule belongs to configs that report physics
-  # (AC-22). base.yaml declares 0.0 and means it.
+  # fidelity — the record-length rule belongs to configs that report physics.
+  # Base.yaml declares 0.0 and means it.
   max_frac_below_iso_t30_decay_range: 1.0
 
 splits:

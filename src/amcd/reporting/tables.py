@@ -12,10 +12,6 @@ from ..runtime import RunContext, emit
 from ..simulators.base import simulator_models_early_reflections
 
 
-#: Metric → the unit `paired_improvement` returns it in (evaluation/metric_row.py).
-#: A unit cannot come from `kind`: `T30` and `C50` are both `match_reference` and
-#: differ in unit. Unlisted → `_unit_for` raises. The durable form declares `unit`
-#: beside `kind` on the metric itself and carries it into `ci_table.csv` (RD-201).
 #: The one unit a producer CANNOT state, because it depends on what preprocess
 #: encoded in. A metric declares this token and the reporting layer resolves it
 #: from the stamped `value_domain`.
@@ -28,7 +24,7 @@ _OPERAND_DOMAIN_SQUARED_TOKEN = "operand_domain_squared"
 #:
 #: The amplitude domain is raw ambisonic samples in arbitrary units — the package
 #: declares no unit for them — so it renders as `a.u.²` rather than an invented
-#: one. (`amp²` was rejected: it reads as ampere-squared, AC-125.)
+#: one — `amp²` would read as ampere-squared.
 _DOMAIN_UNITS = {"db": "dB²", "amplitude": "a.u.²"}
 
 
@@ -36,15 +32,11 @@ def _unit_for(metric: str, declared: str, value_domain: str) -> str:
     """Render `metric`'s declared unit, or raise naming the metric.
 
     `declared` is what the PRODUCER stated on its own `MetricTriple` and carried
-    through `metrics.parquet`. This layer used to hold a `_METRIC_UNITS` map of its
-    own — a second declaration asserting what another module's numbers mean, with
-    nothing binding the two, so a metric could change domain and the Unit column
-    would keep printing the old one (RD-201/AC-127). The only thing resolved here
-    is the operand-domain case, because the domain is a PREPROCESS stamp that the
-    producer of the metric cannot see.
+    through `metrics.parquet`. The only thing resolved here is the operand-domain
+    case, because the domain is a PREPROCESS stamp the producer cannot see.
 
     `value_domain` is that stamp, never inferred from a representation class — the
-    same rule `evaluation/signal.py` states for the metrics themselves (F-19).
+    same rule `evaluation/signal.py` states for the metrics themselves.
     """
     if not declared:
         raise ValueError(
@@ -69,7 +61,7 @@ def _stamped_value_domain(run_dir: Path, config=None) -> str:
     """The domain preprocess encoded in, from its own stamp.
 
     Cross-checked against the CONFIGURED representation's own declaration when a
-    config is supplied (F-162). The stamp decides whether an operand-domain metric
+    config is supplied. The stamp decides whether an operand-domain metric
     prints as dB^2 or a.u.^2, and it is an artifact of a stage that may have run
     under a different config — so the two are compared rather than either being
     trusted alone. `_report_fingerprint` carries the config side, which is what
@@ -88,7 +80,7 @@ def _stamped_value_domain(run_dir: Path, config=None) -> str:
     except KeyError:
         # A pre-stamp preprocess run — a real population, and the sibling consumer
         # in evaluation/ already fails loud on it. Say the same thing here rather
-        # than raising a bare KeyError with a traceback (F-164).
+        # than raising a bare KeyError with a traceback.
         raise KeyError(
             f"{meta_path} has no 'value_domain'. It predates the domain stamp, so "
             f"the unit the reported metrics are measured in cannot be established. "
@@ -112,15 +104,15 @@ def _stamped_value_domain(run_dir: Path, config=None) -> str:
 
 
 def _early_reflection_footer(config: Config) -> list[str]:
-    """AC-43: EDT is nearly inert on the placement axis when the backend models no
+    """EDT is nearly inert on the placement axis when the backend models no
     early-reflection cluster.
 
     EDT fits the FIRST 10 dB, and in a real room that span IS early reflections —
     which is why EDT moves systematically with source-receiver distance. A backend
     whose diffuse tail begins at the direct arrival has no structure there, so its
     `test_placement_shift` EDT column is a plumbing result rather than an acoustic
-    one. C50 is unaffected: AC-28 made it live on the axis by giving the scaffold a
-    real 1/d direct term against a room-constant tail.
+    one. C50 is unaffected, because a real 1/d direct term against a
+    room-constant tail keeps it live on that axis.
 
     Empty for a backend that does render the cluster, so the shipped E1 table under
     `gsound_sir` carries nothing about a scaffold limitation.
@@ -137,19 +129,20 @@ def _early_reflection_footer(config: Config) -> list[str]:
         "  9.90 dB swing over the same 16x range. Read any EDT row of a placement",
         "  split as plumbing, not acoustics. T30, C50 and the material/geometry axes",
         "  are unaffected. Modelling the cluster is the real simulator's job, not a",
-        "  fix to be applied here (AC-28/AC-43).",
+        "  fix to be applied here.",
     ]
 
 
 def _record_length_line(config: Config, run_dir: Path, split_name: str) -> str | None:
     """This split's own record-length over-limit count, for its report section.
 
-    RD-65: the gate `scenes/generator.py` applies is the OVERALL over-limit fraction
-    across every regime — the one aggregation invariant #9 forbids for results. That
-    is the right GATE (a per-split gate lets the smallest split set the tolerance for
-    train), but it means research_i's 0.01 over 720 scenes permits 7 over-limit
-    scenes that could all sit in the 30-scene `test_geometry_shift`, 23 % of it, and
-    still pass. The per-shift breakdown IS the research result, and it reached only
+    The gate `scenes/generator.py` applies is the OVERALL over-limit fraction
+    across every regime — the one aggregation invariant #9 forbids for results.
+    That is the right GATE (a per-split gate lets the smallest split set the
+    tolerance for train), but it means research_i's 0.01 over 720 scenes permits 7
+    over-limit scenes that could all sit in the 30-scene `test_geometry_shift`,
+    23 % of it, and still pass. The per-shift breakdown IS the research result,
+    and it reached only
     `placement_report.json` — surfacing in the operator's console solely when the
     gate tripped.
 
@@ -176,7 +169,7 @@ def _record_length_line(config: Config, run_dir: Path, split_name: str) -> str |
     over = block.get("decay_range_below_iso_t30", {}).get("count", 0)
     # In frac mode the id-pool splits share one regime entry, so the count covers
     # train+valid+test_id and naming it after this split alone would overstate what
-    # was measured here (S-F7).
+    # was measured here.
     scope = (
         f"regime {regime!r}, pooling {'/'.join(covered)}"
         if covered != (split_name,) else f"split {split_name!r}"
@@ -184,20 +177,64 @@ def _record_length_line(config: Config, run_dir: Path, split_name: str) -> str |
     if not scored:
         return (
             f"Record length: UNSCORED for {scope} — no scene was characterized, so "
-            f"the over-limit fraction is undefined, not 0 (RD-64/F-71)."
+            f"the over-limit fraction is undefined, not 0."
         )
     limit = config.scenes.max_frac_below_iso_t30_decay_range
     verdict = "" if over / scored <= limit else "  ** ABOVE this config's own limit **"
     return (
         f"Record length: {over}/{scored} scenes ({over / scored:.1%}) in {scope} carry "
-        f"a decay the record cannot hold, against a declared {limit:.0%} (RD-65). "
+        f"a decay the record cannot hold, against a declared {limit:.0%}. "
         f"The GATE is the OVERALL fraction across regimes, so this split may be far "
         f"over on its own and the run still pass.{verdict}"
     )
 
 
-def _unconverged_reference_footer(config: Config, unapplied: list[str]) -> list[str]:
-    """Footer lines for every metric whose REFERENCE LEG is not converged (AC-187).
+def _admission_line(run_dir: Path, split_name: str) -> str | None:
+    """This split's admitted/generated count, for its report section.
+
+    THE DENOMINATOR IS THE DISCLOSURE. Every other count in this section is over
+    the scenes that reached eval, so a split that lost scenes at RENDER reports a
+    clean `n scored / attempted` over a population already selected — and the
+    selection is not random: the energy floor excludes at high absorption, which is
+    what `test_material_shift` varies, and a shift measured on the survivors is
+    then partly an admission effect.
+
+    Rendered per split rather than once for the run because attrition can be
+    negligible overall and severe in one split, and it is the per-split comparison
+    that is the result.
+
+    Returns None when nothing was excluded — the line is a caveat, and a clean
+    batch has none to make — and when there is no preprocess stamp to read, as in a
+    run_dir assembled from stats alone.
+    """
+    meta_path = run_dir / "preprocessed" / "meta.json"
+    if not meta_path.exists():
+        return None
+    with open(meta_path) as f:
+        row = json.load(f).get("split_attrition", {}).get(split_name)
+    if not isinstance(row, dict) or not row.get("excluded"):
+        return None
+    lost = []
+    if row.get("qc_failed"):
+        lost.append(f"{row['qc_failed']} failed render QC")
+    if row.get("refused"):
+        lost.append(f"{row['refused']} refused by the backend")
+    return (
+        f"Admission: {row['admitted']}/{row['generated']} scenes generated for this "
+        f"split entered the dataset ({', '.join(lost)}; renders/manifest.json). "
+        f"Exclusion is not random — the energy floor excludes at high absorption — "
+        f"so the numbers above describe the admitted subset, not the declared split."
+    )
+
+
+def _reference_convergence_footer(config: Config, unapplied: list[str]) -> list[str]:
+    """Footer lines for every quantity whose REFERENCE LEG is not a converged one.
+
+    Two sections, because there are two ways the premise fails and they are not
+    interchangeable. A metric the probe MEASURED and found unconverged carries a
+    number a reader can weigh. A quantity nobody measured carries none, and reads
+    as converged unless something says otherwise — which is what this section is
+    for. Rendering only the first would let the silent case stay silent.
 
     The other caveats in this table describe the scored population — how many bands
     survived, how noisy the estimator is at this decay. This one describes the
@@ -215,20 +252,23 @@ def _unconverged_reference_footer(config: Config, unapplied: list[str]) -> list[
     and not the ISO ones), but a misspelt metric name would otherwise vanish, and
     this project logs every skip with its reason.
 
-    Returns nothing at all when the map is empty, so clearing it after a future
+    Returns nothing at all when both maps are empty, so clearing them after a future
     probe clears the text — the footer never carries a paragraph about a resolved
     concern.
     """
     unconverged = config.convergence.reference_unconverged
-    if not unconverged:
+    unmeasured = config.convergence.reference_unmeasured
+    if not unconverged and not unmeasured:
         return []
 
     applied = sorted(set(unconverged) - set(unapplied))
     lines = [
         "REFERENCE CONVERGENCE — a caveat on the GROUND TRUTH, not on the scored",
         "  population. Every paired improvement here is measured against the high-ray",
-        "  leg, and the ray-budget probe measured that it is not a converged one:",
+        "  leg, and that leg is not established to be a converged one.",
     ]
+    if unconverged:
+        lines.append("  MEASURED AND FAILED — the ray-budget probe scored these:")
     for metric in applied:
         m = unconverged[metric]
         lines.append(
@@ -247,13 +287,22 @@ def _unconverged_reference_footer(config: Config, unapplied: list[str]) -> list[
             "  than disclose it. But no absolute or improvement for these metrics may",
             "  be compared against Research I or the literature on this run's strength.",
             "  Raising high_ray_budget is not a fix — 800k costs 35x for 4x the rays",
-            "  and is itself unverified (AC-187).",
+            "  and is itself unverified.",
         ]
+    if unmeasured:
+        lines.append(
+            "  NEVER MEASURED — no probe has scored these, so their convergence is"
+        )
+        lines.append(
+            "  UNKNOWN rather than established. Do not read the silence as a pass:"
+        )
+        for quantity in sorted(unmeasured):
+            u = unmeasured[quantity]
+            lines.append(f"  {quantity}: {u.reason} (gate: {u.gate}).")
     return lines
 
 
 def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
-    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
     verbosity = ctx.verbosity
     stats_dir = run_dir / "stats"
     report_dir = run_dir / "report"
@@ -277,7 +326,7 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
     value_domain = _stamped_value_domain(run_dir, config)
 
     # Resolve the unit for EVERY metric present, up front — not lazily per
-    # rendered row (F-163/AC-130). `_metric_row` returns early for an unscored
+    # rendered row. `_metric_row` returns early for an unscored
     # row, so a lazy lookup made the "an undeclared metric is refused" contract
     # depend on the DATA: a new metric passed on the run where it happened to be
     # unscored and crashed the report on a later run that scored it, moving the
@@ -290,14 +339,14 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
 
     # A declared unconverged-reference caveat that matches no reported metric is a
     # SKIP, and this project logs every skip as (unit, reason) rather than letting
-    # it pass unremarked (AC-187). It is not fatal: a run may legitimately report a
+    # it pass unremarked. It is not fatal: a run may legitimately report a
     # subset — the energy metrics without the ISO ones — and refusing there would
     # make a correct config fail on a correct run. But it is also how a typo hides,
     # so the footer names it either way.
     unapplied = sorted(set(config.convergence.reference_unconverged) - set(units))
 
     def _caveats(row: dict) -> str:
-        """Composition caveats on the scored population (F-62 / AC-25 / RD-78).
+        """Composition caveats on the scored population.
 
         `4/4` reads as fully scored, and on the RI smoke run it was not: one
         scene's EDT was a ONE-BAND average while the other three were two-band
@@ -311,7 +360,7 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
         if row.get("n_pred_band_unresolved"):
             parts.append(f"{row['n_pred_band_unresolved']} pred-unresolved")
         if row.get("n_pred_unscored_imputed"):
-            # F-70: those scenes are OUT of the CI beside this, so the interval is
+            # Those scenes are OUT of the CI beside this, so the interval is
             # conditioned on the model having produced something measurable. The
             # bound over the attempted population is rendered below the row.
             parts.append(f"{row['n_pred_unscored_imputed']} model-failed")
@@ -322,11 +371,11 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
         if row.get("ci_calibrated") is False:
             # The interval is reported, not suppressed — but a percentile bootstrap
             # below the declared n cannot reach its nominal coverage, so calling it
-            # a "95 % CI" is the overclaim (F-M7/F-105).
+            # a "95 % CI" is the overclaim.
             parts.append("CI uncalibrated at this n")
         if row["metric"] in config.convergence.reference_unconverged:
             # NOT a property of this split's data — a property of the REFERENCE
-            # every row of this metric is measured against (AC-187). It therefore
+            # every row of this metric is measured against. It therefore
             # appears on every C50 row in every split, including fully scored ones,
             # which is the point: `12/12` otherwise reads as a clean result for a
             # comparison whose ground truth is measured not to be ground truth.
@@ -344,7 +393,7 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
         # for the metric's declared kind; "Pred mean" is the descriptive absolute
         # value. n_scored == 0 → NOTHING here is a result: render the row as
         # `unscored`, never a number a reader could mistake for an outcome — a
-        # descriptive mean included (RR-14).
+        # descriptive mean included.
         n_str = f"{row['n_scored']}/{row['n_attempted']}"
         if row["n_scored"] == 0:
             return (
@@ -364,9 +413,9 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
             f"{imp_mean_str:>{col_w['imp']}} "
             f"{ci_str:<{col_w['ci']}} "
             f"{mdes_str:>{col_w['mdes']}} "
-            # AC-48 — the footer line states which columns this labels.
+            # The footer line states which columns this labels.
             f"{units[row['metric']]:<{col_w['unit']}} "
-            # F-166: the unit says dB, the KIND says what the dB is measured
+            # The unit says dB; the KIND says what the dB is measured
             # FROM. `Imp mean` is pred-low for `maximize` and
             # &#124;low-high&#124; - &#124;pred-high&#124; for `match_reference`,
             # and the two share a unit — so without this a reader cannot tell
@@ -377,7 +426,7 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
         ).rstrip()
         if not row.get("n_pred_unscored_imputed"):
             return line
-        # ── The same improvement over the ATTEMPTED population (F-70) ───────────
+        # ── The same improvement over the ATTEMPTED population ───────────
         #
         # A second line rather than a column, because it is a second ESTIMATE of the
         # same quantity over a different population — putting it beside the first
@@ -401,11 +450,11 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
             f"{row['n_pred_unscored_imputed']} imputed at 0"
         ).rstrip()
 
-    # CI level from config, not hardcoded in the label (RR-17, same rule as RR-11).
+    # CI level from config, never hardcoded in the label.
     ci_label = f"Imp {100 * (1 - config.bootstrap_alpha):g}% CI"
     hdr = (
         f"{'Metric':<{col_w['metric']}} "
-        # The scored count IS the paired-improvement population (F-21).
+        # The scored count IS the paired-improvement population.
         f"{'N sc/att':>{col_w['n']}} "
         f"{'Pred mean':>{col_w['pred']}} "
         f"{'Imp mean':>{col_w['imp']}} "
@@ -420,7 +469,7 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
     # One section per split — never pool test splits (invariant #9).
     #
     # Sections are enumerated from the CONFIG-DECLARED test splits in declaration
-    # order, not from the splits present in the data (F-45). A declared split that
+    # order, not from the splits present in the data. A declared split that
     # received no scored scene previously vanished from this file entirely, and an
     # absent split is indistinguishable from one that was never declared — the same
     # silent-exclusion class the drop log exists to prevent. Ordering is therefore
@@ -442,7 +491,7 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
         ]
         if not scored_rows:
             # Mirrors _metric_row's n_scored == 0 rule at the split level: nothing
-            # here is a result, so render no numbers at all (RR-14).
+            # here is a result, so render no numbers at all.
             lines.append(
                 "0 scenes — unscored: this split is declared in config but no scene "
                 "reached eval (see preprocessed/meta.json split_counts)."
@@ -451,13 +500,18 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
         lines += [hdr, "-" * len(hdr)]
         for row in scored_rows:
             lines.append(_metric_row(row))
-        # RD-65: this split's own record-length over-limit count, beside the numbers
+        # This split's own record-length over-limit count, beside the numbers
         # it is a caveat on rather than only in scenes/placement_report.json.
         record_note = _record_length_line(config, run_dir, split_name) if (
             split_name in config.splits
         ) else None
         if record_note:
             lines += ["", record_note]
+        # What this split LOST before eval, beside what eval scored — the counts
+        # above are over admitted scenes only.
+        admission_note = _admission_line(run_dir, split_name)
+        if admission_note:
+            lines += ["", admission_note]
 
     lines += [
         "",
@@ -465,9 +519,9 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
         "Unit applies to Pred mean, Imp mean, CI and MDES. Rows mix seconds, decibels",
         "  and dB², so these columns are NOT comparable across rows. dB² is a mean",
         "  SQUARED level difference, not decibels — take its square root for an RMS",
-        "  level error (AC-126).",
+        "  level error.",
         "Pred mean is an ABSOLUTE, and absolutes carry a RAY-BUDGET dependence that no",
-        "  integration window removes (F-89/RD-55). `pred` is decoded onto the low-ray",
+        "  integration window removes. `pred` is decoded onto the low-ray",
         "  carrier, and a low-ray render does not hold a shorter version of the same",
         "  decay — it holds a DIFFERENT one: fitting both legs over an IDENTICAL span,",
         "  so record length cannot enter, their late slopes still differ by 29.6 % on",
@@ -475,37 +529,36 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
         "  ISO 3382-1's modelled-tail compensation was implemented and measured against",
         "  this and makes it WORSE (20.2 % -> 23.0 % mean), so it is not shipped. Quote",
         "  an absolute from the HIGH leg only, subject to the convergence note above;",
-        "  the Imp columns are unaffected, since every leg shares one window (AC-17).",
+        "  the Imp columns are unaffected, since every leg shares one window.",
         "Imp mean is a REDUCTION IN |ERROR| against the high-ray reference for the",
         "  match-reference metrics (T30, EDT, C50, energy_mse) and pred − low for the",
         "  maximize ones (energy_snr_db); Pred mean is the absolute value. Same unit,",
-        "  different reference point — a negative Imp mean means the error GREW (AC-128).",
+        "  different reference point — a negative Imp mean means the error GREW.",
         "Caveats — partial-band: the band average is over fewer bands than declared, so",
-        "  this split's CI pools improvements computed over DIFFERENT band sets (F-62).",
+        "  this split's CI pools improvements computed over DIFFERENT band sets.",
         "  pred-unresolved: the model produced no measurable value in a band the physical",
-        "  legs resolve; the physical legs keep their own values (AC-25).",
+        "  legs resolve; the physical legs keep their own values.",
         "  model-failed: the model produced nothing measurable at all, so the scene left",
         "  the CI above — which therefore conditions on the model having WORKED, an",
         "  optimistic direction, and one whose probability correlates with absorption and",
-        "  so with test_material_shift's own axis (F-70). The `attempted-population",
+        "  so with test_material_shift's own axis. The `attempted-population",
         "  bound` line under such a row re-runs the same bootstrap with those scenes",
         "  imputed at ZERO improvement: a lower bound, not a correction. Scenes whose",
         "  PHYSICAL legs failed are in neither population — there is no ground truth",
         "  there to have improved on, so a zero would invent a datum rather than bound one.",
-        # The VALUE, not just the key name (AC-48). A reader seeing "3 high-variance"
-        # cannot judge it without the bound, and F-65's own evidence is that this
-        # key was served at 0.15 while config.yaml stamped 5.0. The CI label above
-        # already renders its config value numerically; this now matches it.
+        # The VALUE, not just the key name. A reader seeing "3 high-variance"
+        # cannot judge it without the bound, and a stale hardcoded bound here
+        # would contradict the config that was actually stamped.
         f"  high-variance: EDT below metric_edt_variance_limited_s = "
         f"{config.metric_edt_variance_limited_s:g} s, where the ESTIMATOR's",
-        "  sd is 24-31 % of T60 — a scored value, not a precise one (AC-27/RD-78).",
+        "  sd is 24-31 % of T60 — a scored value, not a precise one.",
         f"  band-unresolvable: the PHYSICAL legs reported a value from a band whose",
         f"  decay is below what that octave filter can resolve "
         f"({config.metric_band_resolvability_margin:g} x the filter's own decay).",
         "  Scored and disclosed, never censored — censoring an estimator on its own",
-        "  value biases the survivors (AC-38) — but the absolute is the least",
-        "  trustworthy in the table (F-M2).",
-        *_unconverged_reference_footer(config, unapplied),
+        "  value biases the survivors — but the absolute is the least",
+        "  trustworthy in the table.",
+        *_reference_convergence_footer(config, unapplied),
         *_early_reflection_footer(config),
         "=" * 70,
     ]
@@ -513,17 +566,18 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
 
     (report_dir / "summary.txt").write_text(summary_txt)
 
-    # THE CSV CARRIES THE SAME DISCLOSURE AS THE TEXT TABLE (AC-129). summary.txt
+    # THE CSV CARRIES THE SAME DISCLOSURE AS THE TEXT TABLE. summary.txt
     # gained a Unit column and this file, written five lines later from the same
     # rows, shipped 21 unitless columns — so the machine-readable artifact, which is
     # the one a downstream analysis actually opens, was the one that could not say
     # whether a number was seconds or decibels. `kind` travels with it for the same
-    # reason (F-166): unit and reference point are different questions and a
+    # reason: unit and reference point are different questions and a
     # dB-valued improvement answers only the first.
     df = df.copy()
     df["unit"] = df["metric"].map(units)
-    # AC-187, carried into the machine-readable artifact for the AC-129 reason the
-    # unit is: a downstream analysis opens this file, not summary.txt, and a C50
+    # The convergence verdict, carried into the machine-readable artifact for the
+    # reason the unit is: a downstream analysis opens this file, not summary.txt,
+    # and a C50
     # improvement whose reference is unconverged must not arrive there bare.
     df["reference_converged"] = ~df["metric"].isin(
         config.convergence.reference_unconverged
@@ -532,7 +586,7 @@ def run_report(config: Config, run_dir: Path, ctx: RunContext) -> None:
 
     # Supplementary bundle: copy config stamp + versions. Provenance, same gate
     # as its source (`Config.stamp` runs at save ≥ 1), so a save=0 run — the
-    # sanctioned provenance-free level (RD-09) — is self-consistent rather than
+    # sanctioned provenance-free level — is self-consistent rather than
     # silently missing a copy.
     if verbosity.saves("provenance"):
         for fname in ["config.yaml", "versions.json"]:

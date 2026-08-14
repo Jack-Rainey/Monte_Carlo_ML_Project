@@ -1,7 +1,7 @@
 """The simulator seam, end to end: config block, `build_simulator`, provenance,
 the retained-path artifact, and the GSound-SIR render worker.
 
-CONTENTS (RR-72)
+CONTENTS
   1. Config seam       TestSimulatorBlock … TestRayBudgetsStayTopLevel
                        the `{name, params}` grammar, sweeps, per-backend schemas
   2. Stage cache       TestStageFingerprint
@@ -16,14 +16,6 @@ CONTENTS (RR-72)
   7. Render worker     stub pygsound / spherical_harmonics_rt, then
                        TestRenderWorkerContract — compiles the worker, checks its
                        imports, and RUNS it under a venv against those stubs
-
-PRINCIPAL rows covered (not exhaustive — individual tests cite their own):
-RD-13, RD-16, RD-30, RD-35, RD-31, RD-40 (config seam and cache); RD-08, RD-24,
-RD-117 (PathData is self-describing and self-identifying); RD-21 (truncation
-disclosure); RD-67, RD-19, AC-57, F-93, F-115 (provenance fill, the ambisonic
-stamp, the band-identity anchor); RD-114, F-86 (host-scoped params); RD-116,
-RD-123, F-85, F-91, F-96, F-119, F-120 (the worker contract); F-84, F-88, F-90,
-F-92, F-95, F-98, F-111, F-125 (guards added for those defects).
 
 No section needs a GSound-SIR install: section 7 runs the real worker source
 against stubs, so the whole file is runnable off the render host. Two tests do
@@ -98,7 +90,7 @@ class TestSimulatorBlock:
         assert cfg.simulator.params["commit_sha"]  # untouched keys still present
 
     def test_name_change_drops_prior_params(self) -> None:
-        """F-11: gsound_sir's params must not bleed onto dry_run, whose schema
+        """Gsound_sir's params must not bleed onto dry_run, whose schema
         would reject every one of them."""
         cfg = Config.load(*CANONICAL_DRY_RUN)
         assert cfg.simulator.name == "dry_run"
@@ -118,7 +110,7 @@ class TestSimulatorBlock:
 
 
 class TestSimulatorSweep:
-    """RD-13: simulator params must reach the role grammar.
+    """Simulator params must reach the role grammar.
 
     `_PLUGIN_BLOCKS` membership only scopes params across a name change; without
     the `_from_merged` attach, a `sweep:` inside simulator params never reaches
@@ -186,7 +178,7 @@ class TestBuildSimulator:
 
 
 class TestProvenanceContract:
-    """RD-31: every simulator must declare a fixed provenance key set."""
+    """Every simulator must declare a fixed provenance key set."""
 
     def test_dry_run_declares_every_required_key(self, dry_run_config: Config,
                                                  sample_scene) -> None:
@@ -205,7 +197,7 @@ class TestProvenanceContract:
             validate_provenance(partial, simulator_name="toy", scene_id="s0", leg="low")
 
     def test_render_stage_writes_canonical_meta_at_save_zero(self, tmp_path: Path) -> None:
-        """RD-16: provenance is no longer verbosity-gated."""
+        """Provenance is no longer verbosity-gated."""
         import json
         from amcd.scenes.generator import run_gen_scenes
         from amcd.simulators.render import run_render
@@ -226,7 +218,7 @@ class TestProvenanceContract:
 
 
 class TestRayBudgetsStayTopLevel:
-    """RD-40: the swept research axis must survive a simulator name change."""
+    """The swept research axis must survive a simulator name change."""
 
     def test_budgets_survive_simulator_switch(self) -> None:
         cfg = Config.load(*CANONICAL_DRY_RUN)
@@ -241,7 +233,7 @@ class TestRayBudgetsStayTopLevel:
 
 
 class TestStageFingerprint:
-    """RD-16/RD-30/RD-35: a cached stage must belong to the CURRENT config."""
+    """A cached stage must belong to the CURRENT config."""
 
     def _pipeline(self, cfg: Config, run_dir: Path, force: bool = False) -> Pipeline:
         return Pipeline(cfg, run_dir, QUIET, force=force)
@@ -263,7 +255,7 @@ class TestStageFingerprint:
             self._pipeline(changed, tmp_path).run_stage("render")
 
     def test_mismatch_error_names_the_changed_field(self, tmp_path: Path) -> None:
-        """RD-35: a bare sha cannot tell the operator whether an expensive
+        """A bare sha cannot tell the operator whether an expensive
         renders/ dir is salvageable."""
         cfg = tiny_config(scenes={"n_id": 4})
         self._pipeline(cfg, tmp_path).run_stage("gen-scenes")
@@ -276,7 +268,7 @@ class TestStageFingerprint:
         assert "50" in str(exc.value) and "77" in str(exc.value)
 
     def test_render_chains_upstream_gen_scenes(self, tmp_path: Path) -> None:
-        """RD-30: renders are per-scene, so changing the SCENES makes them stale
+        """Renders are per-scene, so changing the SCENES makes them stale
         even when every simulator parameter is untouched."""
         cfg = tiny_config(scenes={"n_id": 4})
         self._pipeline(cfg, tmp_path).run_stage("gen-scenes")
@@ -324,7 +316,7 @@ class TestStageFingerprint:
 
 
 class TestDryRunTailIsUnbiased:
-    """AC-18: the scaffold's diffuse tail must not BE the noise.
+    """The scaffold's diffuse tail must not BE the noise.
 
     It previously read `diffuse = decay * noise * noise_scale` with
     `noise_scale = 1/sqrt(N)`, so E[tail energy] scaled as 1/N. Measured, the low
@@ -332,7 +324,7 @@ class TestDryRunTailIsUnbiased:
     200000/5000 — which makes low→high a deterministic level shift (trivially
     learnable) whose converged limit is an IR with no reverberant tail at all.
     That is the mechanism behind the dry_run D0b "CARRIER BOTTLENECK" verdict
-    being a plumbing artifact rather than a result (RD-07).
+    being a plumbing artifact rather than a result.
 
     A ray budget controls VARIANCE, not level: the late-window energy must agree
     between legs while the per-sample variance still falls as 1/N.
@@ -362,7 +354,7 @@ class TestDryRunTailIsUnbiased:
         assert 0.9 < energy_ratio < 1.1, (
             f"late-window energy ratio low/high = {energy_ratio:.2f}; the tail LEVEL "
             f"still moves with the ray budget (pre-fix this was 39.7 = 200000/5000, "
-            f"a deterministic -16 dB shift the model can learn trivially) — AC-18."
+            f"a deterministic -16 dB shift the model can learn trivially)."
         )
 
         # The tail must remain a WAVEFORM, not an envelope. `decay*(1 + n·σ)` would
@@ -388,7 +380,7 @@ class TestDryRunTailIsUnbiased:
 
 
 class TestPlacementAxisIsAcousticallyLive:
-    """AC-28: the scaffold's "direct sound" was not a direct sound.
+    """The scaffold's "direct sound" was not a direct sound.
 
     `direct = direct_gain * exp(-t/0.02)` is a one-pole envelope with a 7.96 Hz
     corner, so only 6.06e-7 of its energy reached the 500 Hz octave band. MEASURED
@@ -398,14 +390,13 @@ class TestPlacementAxisIsAcousticallyLive:
     +7.55 to -16.53 dB. `test_placement_shift` therefore carried NO acoustic
     difference from the id baseline in any reported ISO-3382 metric.
 
-    SCOPE OF THESE TESTS (RD-79). The DRR agreement below is a SCAFFOLD
+    SCOPE OF THESE TESTS. The DRR agreement below is a SCAFFOLD
     SELF-CONSISTENCY check: the diffuse tail is scaled by
     sqrt(16*pi / (R * sum(decay^2))) precisely so the rendered DRR equals the
-    closed form, so it verifies that the two share one formula (RD-75) — it does
+    closed form, so it verifies that the two share one formula — it does
     NOT validate the ISO path against independent physics. The independent check is
-    the Step-6 probe against a real gsound render (RD-17). What IS non-circular
-    here is the C50 SHAPE: nothing in the construction forces C50, an ISO-3382
-    quantity computed through octave filtering and Schroeder integration, to track
+    the Step-6 probe against a real gsound render. What IS non-circular
+    here is the C50 SHAPE: nothing in the construction forces C50, an quantity computed through octave filtering and Schroeder integration, to track
     distance at all.
     """
 
@@ -448,18 +439,18 @@ class TestPlacementAxisIsAcousticallyLive:
         assert c50 == sorted(c50, reverse=True), f"C50 not monotone in distance: {c50}"
         assert c50[0] - c50[-1] > 6.0, (
             f"C50 spans only {c50[0] - c50[-1]:.3f} dB over a 16x distance range "
-            f"({c50}) — the placement axis is acoustically inert again (AC-28)"
+            f"({c50}) — the placement axis is acoustically inert again"
         )
 
     def test_the_direct_arrival_is_the_loudest_sample(self) -> None:
-        """`_find_onset` documents this as an assumption (AC-07). Pre-fix the global
+        """`find_onset` documents this as an assumption. Pre-fix the global
         peak sat 300-550 samples INTO the diffuse tail, violating it — inert only
         because the whole response starts at d/c."""
-        from amcd.evaluation.room_acoustic import _find_onset
+        from amcd.evaluation.room_acoustic import find_onset
 
         for d in (0.5, 2.0, 8.0):
             ir = self._render(d).ir[0]
-            assert int(np.argmax(np.abs(ir))) == _find_onset(ir, -20.0)[0]
+            assert int(np.argmax(np.abs(ir))) == find_onset(ir, -20.0)[0]
 
     def test_realized_drr_matches_the_published_closed_form(self) -> None:
         """SCAFFOLD SELF-CONSISTENCY, not metric validation — see the class
@@ -467,11 +458,11 @@ class TestPlacementAxisIsAcousticallyLive:
         the tail's first sample are superposed, which matters more as the direct
         term shrinks."""
         from amcd.acoustics import diffuse_field_drr_db
-        from amcd.evaluation.room_acoustic import _find_onset
+        from amcd.evaluation.room_acoustic import find_onset
 
         for d in (0.5, 1.0, 2.0, 4.0, 8.0):
             ir = self._render(d).ir[0]
-            onset, _ = _find_onset(ir, -20.0)
+            onset, _ = find_onset(ir, -20.0)
             direct = float(ir[onset]) ** 2
             reverberant = float(np.sum(ir[onset + 1:].astype(np.float64) ** 2))
             realized = 10.0 * np.log10(direct / reverberant)
@@ -479,11 +470,11 @@ class TestPlacementAxisIsAcousticallyLive:
             assert realized == pytest.approx(expected, abs=1.0), (
                 f"rendered DRR {realized:.2f} dB vs published {expected:.2f} dB at "
                 f"d={d} m — the scaffold and scenes/placement_report.json have "
-                f"stopped sharing one formula (RD-75)"
+                f"stopped sharing one formula"
             )
 
     def test_the_realized_snr_is_stamped(self) -> None:
-        """AC-35: RD-07's caveat needs a magnitude, and the Step-6 probe needs a
+        """Caveat needs a magnitude, and the Step-6 probe needs a
         number to put a real gsound render beside."""
         meta = self._render(2.0).meta
         assert meta["realized_snr_db"] == pytest.approx(10.0 * np.log10(200000), abs=0.01)
@@ -528,7 +519,7 @@ def _fake_paths(n: int = 6, n_bands: int = 8, **descriptor_overrides) -> PathDat
 
 
 class TestPathDataIsSelfDescribing:
-    """RD-24: a retained-path file must be interpretable WITHOUT its config.
+    """A retained-path file must be interpretable WITHOUT its config.
 
     `intensities` is (N, 8) and the band meaning of those 8 columns lives only in
     the simulator config that produced them. A path file from a second raytracer —
@@ -582,12 +573,12 @@ class TestPathDataIsSelfDescribing:
             validate_path_descriptor(paths, simulator_name="gsound_sir", scene_id="s0")
 
     def test_intensities_must_match_the_declared_band_count(self) -> None:
-        # `replace` re-runs __post_init__, which is the validation under test (RR-78).
+        # `replace` re-runs __post_init__, which is the validation under test.
         with pytest.raises(ValueError, match="describe bands it does not contain"):
             dataclasses.replace(_fake_paths(n_bands=8), num_bands=4)
 
     def test_the_descriptor_must_name_as_many_bands_as_there_are_columns(self) -> None:
-        """F-88: presence of the band keys is not interpretability.
+        """Presence of the band keys is not interpretability.
 
         `__post_init__` compares `num_bands` against `intensities` — two numbers
         from the SAME producer, self-consistent by construction. Nothing checked
@@ -605,7 +596,7 @@ class TestPathDataIsSelfDescribing:
             validate_path_descriptor(paths, simulator_name="gsound_sir", scene_id="s0")
 
     def test_a_wider_array_is_accepted_when_the_cast_is_exact(self, tmp_path: Path) -> None:
-        """F-95: the round trip cast on READ only, so float64 in gave float32 back
+        """The round trip cast on READ only, so float64 in gave float32 back
         with no error. The declared dtype is the contract, enforced at construction.
 
         A wider input whose values ARE representable is narrowed and round-trips
@@ -628,7 +619,7 @@ class TestPathDataIsSelfDescribing:
             np.testing.assert_array_equal(getattr(back, name), getattr(wide, name))
 
     def test_a_lossy_cast_raises_instead_of_narrowing_in_silence(self) -> None:
-        """F-110/F-122: `np.asarray(x, dtype=...)` quietly turns float64 into
+        """`np.asarray(x, dtype=...)` quietly turns float64 into
         float32, so a second raytracer's higher-precision distances would be
         truncated on the way in with nothing recorded — the silent exclusion the
         drop log exists to prevent, one layer down. 2.6 is not representable in
@@ -640,7 +631,7 @@ class TestPathDataIsSelfDescribing:
             )
 
     def test_an_undefined_kept_share_round_trips_as_none_not_zero(self, tmp_path: Path) -> None:
-        """F-85: 0.0 would read as 'we retained almost nothing' for a subset that in
+        """0.0 would read as 'we retained almost nothing' for a subset that in
         fact holds every path. An unscored quantity is not rendered as a number."""
         undefined = dataclasses.replace(
             _fake_paths(), total_energy=0.0, kept_energy_percentage=None
@@ -652,7 +643,7 @@ class TestPathDataIsSelfDescribing:
         assert back.total_energy == 0.0
 
     def test_the_file_identifies_its_render_without_the_filename(self, tmp_path: Path) -> None:
-        """RD-117/RD-23: `paths_{low,high}.parquet` encodes two legs and one
+        """`paths_{low,high}.parquet` encodes two legs and one
         realization. The artifact layout must not foreclose a realization index, so
         the identity lives in the file's own metadata, not in its name."""
         target = tmp_path / "renamed_by_someone.parquet"
@@ -664,7 +655,7 @@ class TestPathDataIsSelfDescribing:
 
 
 class TestIRResultCarriesPaths:
-    """RD-08: `IRResult.paths` is the producer half of the path-conditioned seam.
+    """`IRResult.paths` is the producer half of the path-conditioned seam.
 
     Design_spec §8 shows `IRResult` carrying `paths: PathData`; the field lands with
     its producer, never speculatively before it.
@@ -736,7 +727,7 @@ class TestIRResultCarriesPaths:
             assert high.descriptor["ray_budget"] == cfg.high_ray_budget
             assert set(REQUIRED_PATH_DESCRIPTOR_KEYS) <= set(low.descriptor)
 
-            # F-90: every artifact this scene produced is digested into meta.json,
+            # every artifact this scene produced is digested into meta.json,
             # including the path files.
             meta = json.loads((tmp_path / "renders/scene_0000/meta.json").read_text())
             assert set(meta["artifact_sha256"]) == {
@@ -747,7 +738,7 @@ class TestIRResultCarriesPaths:
 
 
 class TestWrittenArtifactsCarryAnIntegrityRecord:
-    """F-90: `rng_seeded: false` puts reproducibility on the cached artifacts.
+    """`rng_seeded: false` puts reproducibility on the cached artifacts.
 
     Those artifacts carried no digest, so two physically different datasets had
     byte-identical provenance and a truncated or half-written IR was undetectable.
@@ -778,7 +769,7 @@ class TestWrittenArtifactsCarryAnIntegrityRecord:
         Found by the dry run itself: on macOS over a non-native filesystem the OS
         writes AppleDouble `._low.npy` sidecars beside each artifact, which a scan
         picked up — putting a host fact into canonical provenance and making the same
-        render's meta.json differ between the two supported hosts (F-90/RD-114).
+        render's meta.json differ between the two supported hosts.
         """
         from amcd.scenes.generator import run_gen_scenes
         from amcd.simulators.render import run_render
@@ -815,15 +806,17 @@ class TestWrittenArtifactsCarryAnIntegrityRecord:
     def test_a_refused_scene_does_not_abort_the_scenes_after_it(
         self, tmp_path: Path
     ) -> None:
-        """F-125: a backend refusal at scene 500 of 720 used to abort mid-loop.
+        """A backend refusal at scene 500 of 720 used to abort mid-loop.
 
         `_preflight_separations` collects every offender for exactly this reason —
-        an emulated batch aborted hours in has to be redone from scratch. The
-        backend-side refusals F-84 and F-88 introduced reopened that pattern one
-        stage later. Every scene is now attempted, all refusals are reported
-        together, and the run still FAILS — an incomplete dataset is not a success.
+        an emulated batch aborted hours in has to be redone from scratch. Every
+        scene is now attempted, the refused one is EXCLUDED from the manifest
+        (RI §B.4), and the scenes after it are rendered and admitted.
         """
+        import json
+
         from amcd.scenes.generator import run_gen_scenes
+        from amcd.simulators.base import SceneRefused
         from amcd.simulators.render import run_render
 
         cfg = tiny_config(scenes={"n_id": 3})
@@ -832,7 +825,7 @@ class TestWrittenArtifactsCarryAnIntegrityRecord:
         class _RefusesOneScene(simulator_registry.get("dry_run")):
             def render(self, scene, ray_budget):
                 if scene.scene_id == "scene_0001":
-                    raise ValueError("zero total energy in the window (simulated)")
+                    raise SceneRefused("zero total energy in the window (simulated)")
                 return super().render(scene, ray_budget)
 
         simulator_registry.register("refuses_one")(_RefusesOneScene)
@@ -840,20 +833,65 @@ class TestWrittenArtifactsCarryAnIntegrityRecord:
             bad = tiny_config(
                 scenes={"n_id": 3},
                 simulator={"name": "refuses_one", "params": cfg.simulator.params},
+                # One refusal in three is 33 %; the bounds exist to stop a broken
+                # backend, and this test is about the per-scene path.
+                max_excluded_frac=1.0,
+                max_refused_frac=1.0,
             )
-            with pytest.raises(ValueError, match=r"refused 1 of \d+ scenes") as excinfo:
-                run_render(bad, tmp_path, QUIET)
+            run_render(bad, tmp_path, QUIET)
 
-            # The offender is named with its reason…
-            assert "scene_0001" in str(excinfo.value)
-            # …and the scenes after it were still rendered, so a re-run is cheap.
+            manifest = json.loads((tmp_path / "renders/manifest.json").read_text())
+            assert "scene_0001" not in manifest["admitted"]
+            assert len(manifest["admitted"]) == manifest["generated"] - 1
+            excluded = manifest["excluded"]
+            assert [e["scene_id"] for e in excluded] == ["scene_0001"]
+            assert excluded[0]["category"] == "refused"
+            assert "zero total energy" in excluded[0]["reason"]
+            # The scenes after the refusal were still rendered.
             assert (tmp_path / "renders/scene_0002/low.npy").exists()
             assert (tmp_path / "renders/scene_0000/low.npy").exists()
         finally:
             simulator_registry._entries.pop("refuses_one", None)
 
+    def test_a_backend_contract_failure_aborts_instead_of_excluding(
+        self, tmp_path: Path
+    ) -> None:
+        """The other half of the rule, and the one exclusion put at risk.
+
+        `SceneRefused` says THIS SCENE is bad. Every other error class says the
+        BACKEND is bad, which means every remaining scene fails identically — so
+        catching it per scene would "exclude" all 720 one at a time and hand back
+        an empty dataset instead of an error.
+        """
+        from amcd.scenes.generator import run_gen_scenes
+        from amcd.simulators.render import run_render
+
+        cfg = tiny_config(scenes={"n_id": 3})
+        run_gen_scenes(cfg, tmp_path, QUIET)
+
+        class _BrokenBackend(simulator_registry.get("dry_run")):
+            def render(self, scene, ray_budget):
+                raise ValueError("worker returned 4 channels, expected 16")
+
+        simulator_registry.register("broken_backend")(_BrokenBackend)
+        try:
+            bad = tiny_config(
+                scenes={"n_id": 3},
+                simulator={"name": "broken_backend", "params": cfg.simulator.params},
+                max_excluded_frac=1.0,
+                max_refused_frac=1.0,
+            )
+            with pytest.raises(ValueError, match="expected 16"):
+                run_render(bad, tmp_path, QUIET)
+            assert not (tmp_path / "renders/manifest.json").exists(), (
+                "a contract failure wrote a manifest, so the run produced a "
+                "'dataset' from a backend that rendered nothing"
+            )
+        finally:
+            simulator_registry._entries.pop("broken_backend", None)
+
     def test_both_legs_shapes_are_checked_and_it_raises(self, tmp_path: Path) -> None:
-        """F-98: the guard covered the LOW leg only and was a bare `assert`, which
+        """The guard covered the LOW leg only and was a bare `assert`, which
         `python -O` strips — leaving the canonical artifact's only shape check
         conditionally absent."""
         from amcd.scenes.generator import run_gen_scenes
@@ -896,7 +934,7 @@ def _gsound_sim(**param_overrides):
 
 
 class TestTruncationDisclosure:
-    """RD-21: trimming gsound's natural IR to `ir_duration` discards tail energy.
+    """Trimming gsound's natural IR to `ir_duration` discards tail energy.
 
     On the most reverberant scenes that trim can silently invalidate T30/EDT, so
     what was discarded is MEASURED per (scene, leg) rather than assumed negligible.
@@ -947,7 +985,7 @@ class TestTruncationDisclosure:
         assert strict["max_discarded_tail_db"] == -90.0
 
     def test_a_silent_leg_is_distinguishable_from_a_healthy_one(self) -> None:
-        """F-84: `total_energy == 0` used to be folded into 'nothing was discarded',
+        """`total_energy == 0` used to be folded into 'nothing was discarded',
         so a zero-energy render produced the SAME all-clear disclosure as a good one
         and first surfaced as a NaN in a metric, hours downstream."""
         sim = _gsound_sim()
@@ -960,11 +998,11 @@ class TestTruncationDisclosure:
         ] == 0.0
 
     def test_the_two_energies_name_the_arrays_they_describe(self) -> None:
-        """F-111/AC-80: the guard must read the array that SHIPS.
+        """The guard must read the array that SHIPS.
 
         A native IR whose energy lies entirely beyond the window is trimmed to
         silence: native energy is non-zero, the stored array is all zeros. Guarding
-        the native energy would pass exactly the leg F-84 exists to refuse.
+        the native energy would pass exactly the leg exists to refuse.
         """
         sim = _gsound_sim()
         native = np.zeros((16, sim.n_samples + 1000), dtype=np.float32)
@@ -978,7 +1016,7 @@ class TestTruncationDisclosure:
         assert disclosure["fitted_ir_samples"] == sim.n_samples
 
     def test_retention_values_are_range_checked_per_mode(self) -> None:
-        """F-92: untyped, an out-of-domain value was not rejected but silently
+        """Untyped, an out-of-domain value was not rejected but silently
         REINTERPRETED — `top_k: 0` and `top_k: -3` both meant 'keep everything',
         `top_k: 5000.7` truncated, `top_percent: 150` meant 'all'."""
         for bad in (0, -3, 5000.7):
@@ -995,15 +1033,15 @@ class TestTruncationDisclosure:
 
 
 class TestGsoundProvenanceFill:
-    """RD-67: what the gsound leg must be able to state about itself."""
+    """What the gsound leg must be able to state about itself."""
 
     def test_the_ambisonic_stamp_is_measured_against_upstream_not_asserted(self) -> None:
-        """KNOWN-ANSWER test of the encoding this project stamps (F-93/AC-57).
+        """KNOWN-ANSWER test of the encoding this project stamps.
 
         The stamp used to be checked as `_AMBISONIC_CONVENTION == "acn_n3d"` — the
         constant against itself, which cannot fail. It is the one upstream-compiled
         fact here taken from a source COMMENT, while its sibling `speed_of_sound_m_s`
-        is cross-checked against the paths (RD-19); this closes that asymmetry by
+        is cross-checked against the paths; this closes that asymmetry by
         pushing one synthetic path through the real synthesizer and reading the
         encoding off the output.
 
@@ -1026,7 +1064,7 @@ class TestGsoundProvenanceFill:
         # and l = 1 and the Condon-Shortley phase only at |m| = 1 — while a
         # per-degree normalization error at l = 2 or 3 would have been invisible.
         # Every number below is MEASURED against the real synthesizer, not
-        # predicted (AC-78).
+        # predicted.
         order, n_channels = 3, 16
         fs, n_bands = 48000.0, 8
         edges = np.asarray(
@@ -1102,9 +1140,9 @@ class TestGsoundProvenanceFill:
         # NO absolute-scale assertion here. The late field is
         # `result[c, t] = normalized_sh[c] * carrier[t]`, so W is Y_00 TIMES the
         # noise-carrier sample at the arrival bin — not Y_00 alone, and not a
-        # property of the encoding at all (AC-75). Every assertion above is a RATIO,
+        # property of the encoding at all. Every assertion above is a RATIO,
         # in which that per-bin scalar cancels exactly; that is what makes them
-        # known answers. Pinning |W| would pin the carrier, which AC-77 tracks.
+        # known answers. Pinning |W| would pin the synthesis carrier instead.
 
     def test_the_ambisonic_stamp_reaches_provenance(self) -> None:
         """The seam half of the row, which needs no render env: whatever the
@@ -1114,7 +1152,7 @@ class TestGsoundProvenanceFill:
         assert "ambisonic_convention" in REQUIRED_PROVENANCE_KEYS
 
     def _worker_speed_check(self):
-        """The live cross-check, which runs inside the worker (F-94/F-119).
+        """The live cross-check, which runs inside the worker.
 
         The parent used to keep a copy over the RETAINED subset; it could not fail
         once the worker's had passed, so it was removed rather than described as
@@ -1127,7 +1165,7 @@ class TestGsoundProvenanceFill:
         return namespace["_check_declared_speed"]
 
     def test_declared_speed_of_sound_is_falsified_by_the_paths(self) -> None:
-        """RD-19: gsound's 344 m/s is compiled into C++ and can only be DECLARED.
+        """Gsound's 344 m/s is compiled into C++ and can only be DECLARED.
         The paths' own `speeds_of_sound` is the free empirical check that keeps the
         declaration honest instead of letting it go stale as a comment."""
         check = self._worker_speed_check()
@@ -1142,7 +1180,7 @@ class TestGsoundProvenanceFill:
             check(np.zeros(0, dtype="float32"), 344.0)
 
     def test_the_declared_centres_are_upstreams_compiled_set(self) -> None:
-        """F-115: counting bands is not identifying them.
+        """Counting bands is not identifying them.
 
         `model_post_init` only requires the edges to be the geometric means of the
         centres, so a whole filterbank shifted an octave is SELF-CONSISTENT and
@@ -1151,9 +1189,9 @@ class TestGsoundProvenanceFill:
         a column. Nothing anchored the declaration to the compiled set, and pygsound
         exposes no accessor for it, so the anchor has to be the pinned source.
 
-        Skips when the upstream checkout is absent (the F-93 pattern).
+        Skips when the upstream checkout is absent (the pattern).
         """
-        # Derived from the repo root, never hardcoded (F-215): a `/Volumes/...`
+        # Derived from the repo root, never hardcoded: a `/Volumes/...`
         # literal skips on the project's declared second host and in every lane
         # worktree — i.e. exactly where band identity could silently differ, so the
         # test would be absent precisely where it is needed.
@@ -1188,7 +1226,7 @@ class TestGsoundProvenanceFill:
     def test_band_edges_and_centres_must_describe_one_filterbank(self) -> None:
         """`band_centres_hz` is a DECLARATION of a compiled-in fact, not a second
         tunable: each edge must be the geometric mean of its adjacent centres, as
-        `gs::FrequencyBands` derives them. This is the AC-12 failure mode (88.4 vs
+        `gs::FrequencyBands` derives them. This is the failure mode (88.4 vs
         88.7412) one level up — two band definitions that can silently disagree."""
         with pytest.raises(Exception, match="different .*filterbanks"):
             _gsound_sim(band_centres_hz=[62.5, 125.0, 250.0, 500.0,
@@ -1197,7 +1235,7 @@ class TestGsoundProvenanceFill:
     def test_the_retention_policy_maps_onto_the_workers_own_arguments(self) -> None:
         """`path_retention` maps onto the (energy_percentage, max_rays) pair the
         WORKER's `_retain` applies after synthesis — not onto `getPathData`, which is
-        always called unfiltered so the IR sees every path (RD-123/F-87)."""
+        always called unfiltered so the IR sees every path."""
         assert _gsound_sim(path_retention={"mode": "all", "value": None}
                            )._retention_args() == (100.0, 0)
         assert _gsound_sim(path_retention={"mode": "top_percent", "value": 90.0}
@@ -1214,7 +1252,7 @@ class TestGsoundProvenanceFill:
 
 
 class TestHostScopedParamsStayOutOfProvenance:
-    """RD-114: `render_python` is a HOST fact, not a dataset fact.
+    """`render_python` is a HOST fact, not a dataset fact.
 
     Stamped into canonical provenance it would make the same render carry different
     metadata on the Apple-Silicon and the native-x86_64 host this project must both
@@ -1240,7 +1278,12 @@ class TestHostScopedParamsStayOutOfProvenance:
             source_pos=(1.0, 1.0, 1.5), receiver_pos=(4.0, 3.0, 1.5),
         )
         leg = IRResult(ir=np.zeros((16, 8), dtype=np.float32), meta={})
-        recorded = _canonical_meta(cfg, scene, leg, leg, artifact_sha256={"low.npy": "0"*64})
+        recorded = _canonical_meta(
+            cfg, scene, leg, leg,
+            artifact_sha256={"low.npy": "0" * 64},
+            artifact_fingerprint="deadbeef",
+            wall_clock_s={"low": 1.0, "high": 2.0},
+        )
 
         params = recorded["simulator"]["params"]
         assert "render_python" not in params
@@ -1250,7 +1293,7 @@ class TestHostScopedParamsStayOutOfProvenance:
         assert params["speed_of_sound_m_s"] == 344.0
 
     def test_the_backend_declares_the_redaction_not_the_stage(self) -> None:
-        """The list is named by the BACKEND and asked for by the stage (F-86), so it
+        """The list is named by the BACKEND and asked for by the stage, so it
         is still a declaration rather than a filter that could quietly widen — and a
         backend that declares nothing gets the full echo, never a silent redaction."""
         from amcd.simulators.base import simulator_host_scoped_params
@@ -1269,7 +1312,7 @@ class TestHostScopedParamsStayOutOfProvenance:
 
 #: The stub backends' fixed sizes. Declared HERE and injected into both stub
 #: sources, so an assertion in a test and the value the stub produces cannot drift
-#: apart — they used to appear as bare 5 / 8 / 777 / 16 literals in both (RR-78).
+#: apart — they used to appear as bare 5 / 8 / 777 / 16 literals in both.
 _STUB_N_PATHS, _STUB_N_BANDS, _STUB_NATIVE_SAMPLES = 5, 8, 777
 
 #: Channels the worker returns for the ambisonics_order 3 the requests declare:
@@ -1278,7 +1321,7 @@ _ORDER3_CHANNELS = (3 + 1) ** 2
 #: A SOURCE FRAGMENT, not a container: prepended to each stub below so the sizes
 #: above become module-level names inside it. Because it is PREPENDED, each stub's
 #: own leading `"""..."""` is a plain string expression rather than a module
-#: docstring, though it still reads as one (RR-101).
+#: docstring, though it still reads as one.
 _STUB_CONSTANTS_SRC = (
     f"N_PATHS, N_BANDS = {_STUB_N_PATHS}, {_STUB_N_BANDS}\n"
     f"NATIVE_SAMPLES = {_STUB_NATIVE_SAMPLES}\n"
@@ -1374,9 +1417,9 @@ def generate_ambisonic_ir(order, listener_directions, intensities, distances, sp
         json.dump({"synthesis_paths": int(intensities.shape[0]),
                    "normalize": bool(normalize)}, f)
     # Two switches, both only reachable from the tests, for legs the stub could not
-    # otherwise produce: AMCD_STUB_SILENT returns a wholly zero-energy IR (F-84);
+    # otherwise produce: AMCD_STUB_SILENT returns a wholly zero-energy IR;
     # AMCD_STUB_TAIL_ONLY puts all the energy in the LAST sample, so a window
-    # shorter than NATIVE_SAMPLES trims the leg to silence (F-111).
+    # shorter than NATIVE_SAMPLES trims the leg to silence.
     n_channels = (order + 1) ** 2
     if os.environ.get("AMCD_STUB_SILENT"):
         return np.zeros((n_channels, NATIVE_SAMPLES), dtype=np.float32)
@@ -1389,7 +1432,7 @@ def generate_ambisonic_ir(order, listener_directions, intensities, distances, sp
 
 
 class TestRenderWorkerContract:
-    """RD-116: the worker needs a regression surface that is NOT a real render.
+    """The worker needs a regression surface that is NOT a real render.
 
     `_WORKER_SRC` runs under an interpreter where `amcd` does not exist, and its only
     other exercise is a render that costs a scene from a standing ≤4-scene grant. Left
@@ -1439,7 +1482,7 @@ class TestRenderWorkerContract:
                 "--without-pip", str(venv)], check=True, capture_output=True)
         # POSIX puts it in bin/, Windows in Scripts/ — and Windows is a declared
         # supported host (docs/gsound_sir_setup.md), so hardcoding bin/ would make
-        # the whole worker-contract suite unrunnable there (F-96).
+        # the whole worker-contract suite unrunnable there.
         python = venv / "bin" / "python"
         if not python.exists():
             python = venv / "Scripts" / "python.exe"
@@ -1477,7 +1520,7 @@ class TestRenderWorkerContract:
         request = {
             "commit_sha": self._SHA,
             # Matches _STUB_PYGSOUND's speeds_of_sound; the worker cross-checks it
-            # over the unfiltered path set before synthesis (F-94).
+            # over the unfiltered path set before synthesis.
             "speed_of_sound_m_s": 344.0,
             "out_dir": str(out_dir),
             "dims": [6.0, 5.0, 3.0],
@@ -1538,7 +1581,7 @@ class TestRenderWorkerContract:
         assert called["mesh"] == [6.0, 5.0, 3.0, 0.2, 0.5]
         assert called["source"] == {"coord": [1.0, 1.0, 1.5], "radius": 0.1, "power": 1.0}
         assert called["listener"] == {"coord": [4.0, 3.0, 1.5], "radius": 0.1}
-        # RD-12: the swept axis is the DIFFUSE count; specular is held fixed.
+        # the swept axis is the DIFFUSE count; specular is held fixed.
         assert called["diffuse_count"] == 5000
         assert called["specular_count"] == 2000
         assert called["diffuse_depth"] == 100 and called["specular_depth"] == 50
@@ -1550,7 +1593,7 @@ class TestRenderWorkerContract:
         assert (called["energy_percentage"], called["max_rays"]) == (100.0, 0)
 
     def test_a_sha_mismatch_stops_before_any_simulation(self, tmp_path: Path) -> None:
-        """RD-67. The check is FIRST: under emulation the render it refuses can cost
+        """The check is FIRST: under emulation the render it refuses can cost
         hours, and its artifact would have unknown provenance."""
         python, stubs = self._stub_env(tmp_path, sha="0" * 40)
         out_dir = tmp_path / "out"
@@ -1576,12 +1619,12 @@ class TestRenderWorkerContract:
         """The RuntimeError is the SOLE diagnostic for a failed emulated render, so
         its stderr interpolation is what a debugger reads after hours of compute.
 
-        Driven by a REAL interpreter that exits non-zero (F-91): pointing
+        Driven by a REAL interpreter that exits non-zero: pointing
         `render_python` at a nonexistent path raises FileNotFoundError out of
         `subprocess.run` instead, never reaching this branch.
 
         The interpreter is an ISOLATED stub env with a deliberately mismatched
-        install receipt, NOT `sys.executable` (F-120). On a native x86_64 host
+        install receipt, NOT `sys.executable`. On a native x86_64 host
         `render_python: null` is the documented-correct setting because the render
         env IS the pipeline env — so a test that relies on the pipeline interpreter
         lacking a receipt would, on that host, run a real 4.25 s render inside the
@@ -1643,30 +1686,30 @@ class TestRenderWorkerContract:
         assert result.ir.shape == (sim.n_channels, sim.n_samples)
         assert result.ir.dtype == np.float32
 
-        # Provenance: the required set, plus RD-67's gsound-specific fill.
+        # Provenance: the required set, plus gsound-specific fill.
         assert set(REQUIRED_PROVENANCE_KEYS) <= set(result.meta)
         assert result.meta["ambisonic_convention"] == "acn_n3d"
         assert result.meta["rng_seeded"] is False
         assert result.meta["installed_commit_sha"] == self._SHA
         assert result.meta["commit_sha"] == self._SHA
-        assert result.meta["diffuse_count"] == 5000        # the swept axis (RD-12)
+        assert result.meta["diffuse_count"] == 5000        # the swept axis
         assert result.meta["specular_count"] == 2000       # held fixed across legs
-        # RD-21: the native IR was 777 samples, far short of the window, so it was
+        # the native IR was 777 samples, far short of the window, so it was
         # padded and nothing was discarded.
         assert result.meta["native_ir_samples"] == _STUB_NATIVE_SAMPLES
         assert result.meta["truncated"] is False
         assert result.meta["discarded_tail_db"] is None
         assert result.meta["truncation_qc_flag"] is False
 
-        # F-84: the leg's total energy is stamped, so a silent leg is visible.
+        # the leg's total energy is stamped, so a silent leg is visible.
         assert result.meta["fitted_ir_total_energy"] > 0.0
         assert result.meta["native_ir_total_energy"] > 0.0
-        # F-94: the declared speed was falsified against the FULL simulated set,
+        # the declared speed was falsified against the FULL simulated set,
         # not the retained subset — the stub simulates 5 paths and retains 5.
         assert result.meta["speed_check_num_paths"] == _STUB_N_PATHS
-        # AC-59: the two RNGs are reported separately, not flattened into one bool.
+        # the two RNGs are reported separately, not flattened into one bool.
         assert result.meta["ray_rng_seeded"] is False
-        # AC-77: the VALUE is asserted against pinned upstream, not against itself
+        # the VALUE is asserted against pinned upstream, not against itself
         # — see test_the_stamped_carrier_seed_matches_pinned_upstream below. Here
         # only the stamp's presence and type are the stub's business.
         assert isinstance(result.meta["synthesis_carrier_seed"], int)
@@ -1674,7 +1717,7 @@ class TestRenderWorkerContract:
         # It must survive the canonical meta.json write — numpy scalars would not.
         json.dumps(result.meta)
 
-        # RD-08/RD-24: paths populated and self-describing.
+        # paths populated and self-describing.
         assert result.paths is not None
         validate_path_descriptor(result.paths, simulator_name="gsound_sir",
                                  scene_id=scene.scene_id)
@@ -1689,7 +1732,7 @@ class TestRenderWorkerContract:
     def test_a_silent_leg_is_refused_rather_than_shipped(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """F-84: a zero-energy render used to be indistinguishable from a healthy one
+        """A zero-energy render used to be indistinguishable from a healthy one
         — same all-clear disclosure — and first surfaced as a NaN in a metric."""
         python, stubs = self._stub_env(tmp_path, sha=self._SHA)
         monkeypatch.setenv("PYTHONPATH", str(stubs))
@@ -1709,7 +1752,7 @@ class TestRenderWorkerContract:
     def test_a_leg_trimmed_to_silence_is_refused_too(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """F-111: the trim branch is the case the native-energy guard let through.
+        """The trim branch is the case the native-energy guard let through.
 
         The stub's native IR is far SHORTER than the window, so it can only ever
         exercise the pad branch. Here `n_samples` is cut below the stub's native
@@ -1735,7 +1778,7 @@ class TestRenderWorkerContract:
     def test_the_declared_speed_is_falsified_before_retention_throws_paths_away(
         self, tmp_path: Path
     ) -> None:
-        """F-94: the check used to run in the PARENT, over the retained subset — 1%
+        """The check used to run in the PARENT, over the retained subset — 1%
         of the simulated set under `top_k`. The claim is stated over the paths, so it
         must be checked over the paths, which only the worker holds."""
         python, stubs = self._stub_env(tmp_path, sha=self._SHA)
@@ -1761,13 +1804,13 @@ class TestRenderWorkerContract:
         assert not (out_dir2 / "ir.npy").exists()
 
     def test_a_zero_energy_path_set_selects_the_way_upstream_does(self) -> None:
-        """F-85(b): the `total > 0.0` guard CHANGED THE SELECTION, it did not just
+        """The `total > 0.0` guard CHANGED THE SELECTION, it did not just
         protect a division. On an all-zero-energy set the cumulative sum is all
         zeros and the target is 0.0, so upstream's `accumulated >= target` is
         satisfied at the first path and it keeps ONE; the guard skipped the branch
         and kept every path. Exercised directly against the worker's own `_retain`,
         because the branch is unreachable through `render()` — a zero-energy path
-        set implies a zero IR, and F-84's guard raises first.
+        set implies a zero IR, and guard raises first.
         """
         from amcd.simulators.gsound_sir import _WORKER_SRC
 
@@ -1787,7 +1830,7 @@ class TestRenderWorkerContract:
             "upstream keeps exactly one path on an all-zero set; keeping all of them "
             "is what the removed `total > 0.0` guard did"
         )
-        # …and the share of a zero total is undefined, not 0.0 (F-85(a)).
+        # …and the share of a zero total is undefined, not 0.0.
         assert kept_pct is None
 
     def test_retention_trims_the_artifact_but_never_the_synthesis(
@@ -1795,7 +1838,7 @@ class TestRenderWorkerContract:
     ) -> None:
         """`path_retention` applies ONLY to the saved path file.
 
-        CAUGHT BY THE CYCLE-4 SMOKE RENDER: the first worker passed the retention
+        CAUGHT BY A SMOKE RENDER: the first worker passed the retention
         arguments straight to `getPathData` and then synthesized the IR from what
         came back, so `top_k: 5000` built the IR from 43.1% of the path energy on a
         real scene — deleting more than half the response and confounding the very
@@ -1850,7 +1893,7 @@ class TestRenderWorkerContract:
 
 
 def test_the_stamped_carrier_seed_matches_pinned_upstream() -> None:
-    """AC-77: the stamp must be falsifiable by something other than itself.
+    """The stamp must be falsifiable by something other than itself.
 
     `_SYNTHESIS_CARRIER_SEED` records the seed upstream uses for the noise carrier
     every path's energy is multiplied by. It was only ever asserted against a stub
@@ -1863,7 +1906,7 @@ def test_the_stamped_carrier_seed_matches_pinned_upstream() -> None:
     a value that lives in C++ can only be DECLARED here, so the declaration has to
     be falsified against the thing it describes.
 
-    Path derived from the repo root, never hardcoded (F-215): a `/Volumes/...`
+    Path derived from the repo root, never hardcoded: a `/Volumes/...`
     literal would skip on the project's declared second host and in every lane
     worktree, i.e. exactly where band identity could silently differ.
     """
@@ -1881,7 +1924,7 @@ def test_the_stamped_carrier_seed_matches_pinned_upstream() -> None:
     assert m, (
         f"could not find NoiseGenerator's default seed in {binding}. If upstream "
         "restructured it, re-derive the seed and update this test — do not delete "
-        "it, or the stamp goes back to asserting itself (AC-77)."
+        "it, or the stamp goes back to asserting itself."
     )
     assert int(m.group(1)) == _SYNTHESIS_CARRIER_SEED, (
         f"pinned upstream seeds its synthesis carrier with {m.group(1)}, but "
@@ -1892,7 +1935,7 @@ def test_the_stamped_carrier_seed_matches_pinned_upstream() -> None:
 
 
 class TestTheAbsorptionConventionIsDeclaredAndApplied:
-    """ITEM 0 / AC-54 / RD-144: the rendered room must be the declared room.
+    """The rendered room must be the declared room.
 
     This backend's per-bounce ENERGY factor is `sqrt(1-alpha)` where the declared
     physics wants `(1-alpha)`, re-derived from pinned upstream and confirmed by
@@ -1900,7 +1943,7 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
     1.45-1.98x on T60 across `base.yaml`'s declared support — so every closed form
     in `scenes/generator.py` described a room that was never rendered.
 
-    The convention is declared on the BACKEND, never in the generator (RD-144):
+    The convention is declared on the BACKEND, never in the generator:
     the generator defines the dataset's acoustics for every simulator, so
     re-deriving it from one raytracer's domain confusion would make a second
     raytracer render a different room from the same spec.
@@ -1920,7 +1963,7 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
     def test_as_is_still_reproduces_the_uncorrected_room(self) -> None:
         """`as_is` is not a fallback — it is what every prior measurement used.
 
-        AC-54's own render (5x4x3 m, alpha 0.30, T30 0.5441 s against 0.343 s
+        render (5x4x3 m, alpha 0.30, T30 0.5441 s against 0.343 s
         nominal) was taken under it, and those numbers must stay reproducible.
         """
         from amcd.simulators.gsound_sir import _createbox_absorption
@@ -1929,7 +1972,7 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
             realized = 1.0 - np.sqrt(1.0 - _createbox_absorption(nominal, "as_is"))
             assert nominal / realized == pytest.approx(expected_ratio, rel=1e-3), (
                 f"the uncorrected room at alpha {nominal} no longer realizes "
-                f"{expected_ratio}x on T60 — AC-54's evidence stops reproducing."
+                f"{expected_ratio}x on T60 — evidence stops reproducing."
             )
 
     def test_an_undeclared_convention_raises(self) -> None:
@@ -1940,7 +1983,7 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
             _createbox_absorption(0.3, "")
 
     def test_the_declared_realized_alpha_is_not_the_createbox_alpha(self) -> None:
-        """AC-50 — the two quantities are DIFFERENT numbers, and the scene report
+        """The two quantities are DIFFERENT numbers, and the scene report
         needs the second one.
 
         `_createbox_absorption` answers "what do I hand the renderer"; the backend's
@@ -1970,7 +2013,7 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
                     )
 
     def test_every_backend_declares_what_it_realizes(self) -> None:
-        """The scaffold answers too, and answers the identity (AC-50).
+        """The scaffold answers too, and answers the identity.
 
         Left optional, a backend would omit it and the scene report would silently
         describe the declared room as though it were the rendered one — the
@@ -2008,11 +2051,11 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
         assert params.get("absorption_convention") in ("pre_compensate", "as_is"), (
             "configs/simulators/gsound_sir.yaml must declare "
             "`absorption_convention` — it is experiment-governing and this is the "
-            "backend's own config, which is where RD-144 puts it."
+            "backend's own config, which is where it belongs."
         )
 
     def test_the_scene_generator_stays_in_nominal_alpha(self) -> None:
-        """RD-144's load-bearing half: the generator must NOT learn about alpha_eff.
+        """Load-bearing half: the generator must NOT learn about alpha_eff.
 
         If it does, the dataset's declared acoustics become one raytracer's, and a
         second backend renders a different room from the same scene spec with
@@ -2025,12 +2068,12 @@ class TestTheAbsorptionConventionIsDeclaredAndApplied:
             assert marker not in src, (
                 f"scenes/generator.py contains {marker!r}: the backend's absorption "
                 "convention has leaked into the backend-agnostic scene population "
-                "(RD-144). It belongs in configs/simulators/<name>.yaml."
+                ". It belongs in configs/simulators/<name>.yaml."
             )
 
 
 class TestRenderArtifactsHaveAVerifier:
-    """F-116/F-118: digests that nothing reads, and a stale file nothing reports.
+    """Digests that nothing reads, and a stale file nothing reports.
 
     `rng_seeded: false` puts reproducibility on the CACHED ARTIFACTS rather than on
     re-render bit-identity, so `artifact_sha256` is what stands between a truncated
@@ -2087,7 +2130,7 @@ class TestRenderArtifactsHaveAVerifier:
 
 
 class TestTruncationDisclosureReachabilityPerConfig:
-    """F-83: `truncation_qc_flag` cannot fire under `base.yaml`, and that is a
+    """`truncation_qc_flag` cannot fire under `base.yaml`, and that is a
     property of the CONFIG PAIR rather than dead code.
 
     The trim branch fires only when the native record exceeds the window. This
@@ -2134,12 +2177,12 @@ class TestTruncationDisclosureReachabilityPerConfig:
 
 
 class TestEveryBackendDeclaresWhetherItModelsEarlyReflections:
-    """AC-43 — EDT fits the FIRST 10 dB, and in a real room that span IS the
+    """EDT fits the FIRST 10 dB, and in a real room that span IS the
     early-reflection cluster, which is why EDT moves systematically with distance.
 
     A backend whose diffuse tail begins at the direct arrival has no structure
     there, so its EDT is nearly inert on the placement axis while C50 stays live
-    (AC-28 gave the scaffold a real 1/d direct term against a room-constant tail).
+    (gave the scaffold a real 1/d direct term against a room-constant tail).
     `test_placement_shift`'s EDT column is then a plumbing result, not an acoustic
     one — an acceptable simplification, but not an invisible one.
     """
@@ -2203,13 +2246,13 @@ class TestEveryBackendDeclaresWhetherItModelsEarlyReflections:
             c50.append(vals["C50"])
 
         assert c50 == sorted(c50, reverse=True), (
-            f"C50 is no longer monotone in distance ({c50}) — AC-28's placement "
-            f"liveness has regressed, and the AC-43 contrast rests on it"
+            f"C50 is no longer monotone in distance ({c50}) — placement "
+            f"liveness has regressed, and the contrast rests on it"
         )
         spread = (max(edt) - min(edt)) / float(np.mean(edt))
         assert spread < 0.05, (
             f"EDT now spreads {spread:.1%} over a 16x distance range ({edt}), i.e. it "
             f"HAS become live on the placement axis. If the scaffold gained an "
             f"early-reflection cluster, `models_early_reflections` must stop "
-            f"returning False (AC-43)."
+            f"returning False."
         )

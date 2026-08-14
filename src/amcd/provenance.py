@@ -2,7 +2,7 @@
 
 Two channels record it — `versions.json` (what a human reads) and the eval stage
 sentinel (what the cache compares) — and they must not be able to disagree, so
-both import from here rather than each shelling out to git (F-56).
+both import from here rather than each shelling out to git.
 
 The distinction the module exists to keep straight:
 
@@ -15,8 +15,7 @@ The distinction the module exists to keep straight:
 `host_platform()` sits on the human side too: the same config
 and the same `code_version` produce different weights on this Mac (MPS) and on the
 x86 box (CUDA/CPU), so the host and the device belong in `versions.json` — and
-deliberately in no cache key, since moving machines must not discard a checkpoint
-(F-74). Device SELECTION lives in `amcd.device`, outside `_CORE_SOURCES`, so a
+deliberately in no cache key, since moving machines must not discard a checkpoint. Device SELECTION lives in `amcd.device`, outside `_CORE_SOURCES`, so a
 fallback edit does not invalidate every fingerprinted stage.
 """
 from __future__ import annotations
@@ -30,7 +29,7 @@ from pathlib import Path
 #: The package root — `src/amcd/`. Resolved from this file so it is correct
 #: whether the package is an editable checkout or an installed wheel, and never
 #: from the run directory, which may sit on a data volume in a different repo
-#: (F-56) or in no repo at all.
+#: or in no repo at all.
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 
 
@@ -62,7 +61,7 @@ def _hashable_sources(target: Path) -> list[Path]:
     """The `.py` files under `target` that describe the CODE, in a stable order.
 
     Two classes are excluded, both because they make the hash describe the HOST
-    rather than the source (F-69):
+    rather than the source:
 
     * `._*` — macOS AppleDouble sidecars. This repo lives on an exFAT volume,
       where they are real files that `rglob("*.py")` matches; 42 `._*.py` sat
@@ -80,7 +79,7 @@ def _hashable_sources(target: Path) -> list[Path]:
     Raises if a directory yields nothing, for the reason `code_version`'s own
     ValueError gives: a scope entry that hashes to a constant silently stops
     protecting the stage, and "the directory exists but holds no `.py`" reaches
-    that outcome without ever naming a missing path (F-79).
+    that outcome without ever naming a missing path.
     """
     if not target.is_dir():
         return [target]
@@ -107,7 +106,7 @@ def code_version(scope: tuple[str, ...]) -> str:
     Declaring the scope is the point: it states, per stage, which code the artifact
     is a function of, and that claim is auditable.
 
-    Why a content hash and not `git rev-parse HEAD` (F-55 / RD-66): the sha is
+    Why a content hash and not `git rev-parse HEAD`: the sha is
     blind to the working tree, which is the exact state the guard exists for —
     this project's loop is edit → run → review → commit, so the code under review
     is uncommitted by definition. The sha also fails in two directions off a
@@ -127,7 +126,7 @@ def code_version(scope: tuple[str, ...]) -> str:
     silently. `tests/test_stage_cache.py::TestDeclaredScopeCoversWhatTheStageImports`
     bounds that risk without eliminating it — read that test's docstring for what
     it does and does not catch, since an earlier version of THIS docstring claimed
-    more than the test checked and that overstatement was the finding (F-66).
+    more than the test checked and that overstatement was the finding.
     """
     digest = hashlib.sha256()
     for entry in sorted(set(scope) | set(_CORE_SOURCES)):
@@ -150,8 +149,7 @@ def code_version(scope: tuple[str, ...]) -> str:
 def _semantic_digest(path: Path) -> str:
     """A module's SEMANTICS, so a comment or a docstring edit is not a code change.
 
-    This hashed raw bytes, which made a comment indistinguishable from a rewrite
-    (F-161). That was tolerable while only cheap stages carried a `code_version`;
+    This hashed raw bytes, which made a comment indistinguishable from a rewrite. That was tolerable while only cheap stages carried a `code_version`;
     it is not now that `render` does, because this project's loop is edit → run →
     review → commit and its reviewers' most common output is a comment. Measured
     before the fix: trimming one comment in `config.py` moved every stage's
@@ -207,7 +205,7 @@ def git_sha() -> str:
     data volume is the normal case, and asking git about it stamped
     `"git_sha": "unavailable"` into `versions.json` while the same run's eval
     sentinel recorded a real sha — two provenance channels disagreeing about one
-    run (F-56).
+    run.
 
     Human-readable provenance only. `code_version()` is what the cache compares,
     so an "unavailable" sha here weakens nothing.

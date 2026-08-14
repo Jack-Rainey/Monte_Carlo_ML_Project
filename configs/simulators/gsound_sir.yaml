@@ -3,9 +3,9 @@
 # Python. Validated by `GsoundSirSimulator.Params` (extra="forbid"), so a typo or
 # a missing key fails at config load, not mid-render under emulation.
 #
-# NOT here (named non-goal, RD-40): low_ray_budget / high_ray_budget. They are the
+# NOT here (): low_ray_budget / high_ray_budget. They are the
 # swept research axis and stay TOP-LEVEL config fields — inside this block, the
-# F-11 name-change scoping in `_merge_layer` would drop them the moment a second
+# The name-change scoping in `_merge_layer` would drop them the moment a second
 # raytracer were selected.
 
 # ── Upstream version pin ──────────────────────────────────────────────────────
@@ -16,7 +16,7 @@
 commit_sha: 608ea30f6dc4cda149c18947f9cae48bd379fa27
 
 # ── Ray budgets ───────────────────────────────────────────────────────────────
-# (RD-12) The swept axis — top-level `low_ray_budget` / `high_ray_budget` — maps
+# The swept axis — top-level `low_ray_budget` / `high_ray_budget` — maps
 # to gsound's DIFFUSE ray count (`ps.Context.diffuse_count`). The specular count is
 # declared here and held FIXED across both legs, so "ray budget" in every result
 # means the diffuse budget and never a moving total. Both counts are stamped into
@@ -47,7 +47,7 @@ scattering: 0.5
 # and `gs::FrequencyBands` derives each crossover as the geometric mean of adjacent
 # centres (gsFrequencyBands.cpp:83-88): sqrt(63*125)=88.7412, sqrt(125*250)=176.7767, …
 #
-# NOTE the first value is 88.7412, NOT 88.4 (AC-12). 88.4 is sqrt(62.5*125) — the
+# NOTE the first value is 88.7412, NOT 88.4. 88.4 is sqrt(62.5*125) — the
 # base-two nominal 62.5 Hz centre — but pygsound uses the IEC-rounded 63 Hz, so
 # 88.4 disagreed with the ray generator's own band definition by 0.384%. The two
 # reported ISO bands (iso_eval_freqs 500/1000 Hz, edges 353.553 / 707.107 /
@@ -65,25 +65,25 @@ frequency_points: [88.7412, 176.7767, 353.5534, 707.1068, 1414.2136, 2828.4271, 
 # `gs::FrequencyBands` derives them, so these two lists cannot drift apart.
 #
 # Needed because a retained-path file must NAME the frequency of each `intensities`
-# column (RD-24) — a path file from a second raytracer is otherwise uninterpretable
+# column — a path file from a second raytracer is otherwise uninterpretable
 # once separated from the config that produced it.
 band_centres_hz: [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
 
 # ── Propagation speed (DECLARED, not configured) ──────────────────────────────
-# gsound uses 344 m/s, compiled into C++ with no way to set it (RD-19). Setting a
+# gsound uses 344 m/s, compiled into C++ with no way to set it. Setting a
 # different value here does NOT change the simulation — it makes the render FAIL,
 # because every render cross-checks this against the `speeds_of_sound` the paths
 # themselves report. That is deliberate: it turns a comment that could silently go
 # stale into a declaration upstream can falsify.
 speed_of_sound_m_s: 344.0
 
-# ── Truncation QC threshold (RD-21) ───────────────────────────────────────────
+# ── Truncation QC threshold ───────────────────────────────────────────
 # gsound's natural IR is trimmed to `ir_duration`. The discarded tail energy is
 # measured per (scene, leg) and flagged above this level, relative to the native
 # IR's total energy. -60 dB = one part in a million of total energy; above that the
 # trim is large enough to bias T30/EDT on the most reverberant scenes, which is the
 # failure this disclosure exists to make visible. Nothing ACTS on the flag yet —
-# the per-criterion QC record that does is Step 4's (RD-14).
+# the per-criterion QC record that does is Step 4's.
 max_discarded_tail_db: -60.0
 
 # ── Render interpreter (HOST-SCOPED — not an experiment value) ────────────────
@@ -102,7 +102,7 @@ max_discarded_tail_db: -60.0
 # REDACTED from canonical render provenance (simulators/render.py): which
 # interpreter ran a render is a host fact, not a property of the dataset, and
 # stamping it would make the same render differ between the two hosts this project
-# must support. It migrates to `RunContext.host` when RD-20 lands.
+# must support.
 render_python: null
 
 # ── Normalization ─────────────────────────────────────────────────────────────
@@ -123,7 +123,7 @@ path_retention:
   mode: top_k
   value: 5000
 
-# HOW THIS BACKEND REALIZES A DECLARED ABSORPTION (AC-54, RD-144, ITEM 0).
+# HOW THIS BACKEND REALIZES A DECLARED ABSORPTION.
 #
 # GSound sets reflectivity to sqrt(1-alpha) as an AMPLITUDE coefficient and
 # accumulates it into a quantity it calls energy, which the synthesizer then
@@ -138,13 +138,13 @@ path_retention:
 # RENDERED is the room the scene DECLARES. That is the correct setting for any
 # dataset whose acoustics are computed from nominal alpha -- which is all of
 # them, since scenes/generator.py is backend-agnostic and stays in nominal alpha
-# by RD-144.
+# here.
 #
 # `as_is` renders the uncorrected room. Kept reachable, not as a fallback but
 # because every measurement taken before this fix was taken under it, and those
 # numbers must stay reproducible.
 #
-# THE CONFIRMING RENDER LEAVES A RESIDUAL, AND IT IS NOT EXPLAINED (AC-67). The
+# THE CONFIRMING RENDER LEAVES A RESIDUAL, AND IT IS NOT EXPLAINED. The
 # derivation above stands on the SOURCE, which is why it does not depend on that one
 # render — but the render's own numbers should not be read as clean. On a room with
 # a FREQUENCY-INDEPENDENT alpha, the measured T30 differs between the two evaluation
@@ -153,19 +153,19 @@ path_retention:
 # produces a frequency dependence there.
 #
 # Two candidates are RULED OUT as the cause: air absorption is <= 0.4 % on a room
-# this size (AC-66), and the adaptive energy trim is frequency-independent (it
+# this size, and the adaptive energy trim is frequency-independent (it
 # closes the record on total energy, and the record is shared by both bands).
 # What remains is single-realization variance — the measurement is ONE draw of the
 # 5,000-ray leg, and pygsound's noise carrier is compiled at seed 42 with no way to
-# request another (RD-23), so the spread cannot be separated from it here.
+# request another, so the spread cannot be separated from it here.
 #
 # Recorded rather than resolved, because it is an UNBUDGETED T30 uncertainty: the
 # convergence tolerances in configs/base.yaml are stated against the high leg, and
 # this says the low leg carries a per-band spread of its own that no declared
-# quantity accounts for. RD-55's extrapolated-tail work will need the number.
+# quantity accounts for. extrapolated-tail work will need the number.
 absorption_convention: pre_compensate
 
-# ── THE RECORD THIS BACKEND CAN ACTUALLY FILL (AC-186, AC-175, AC-56) ─────────
+# ── THE RECORD THIS BACKEND CAN ACTUALLY FILL ─────────
 #
 # `ir_duration` is the window the pipeline ALLOCATES. It is not what this backend
 # fills, and the record-length gate has to know the difference: gating a scene
@@ -178,7 +178,7 @@ absorption_convention: pre_compensate
 #      not expose it, so no render can exceed it whatever `ir_duration` says.
 #   2. The trim, predicted by the law declared here.
 #
-# WHAT SETS THE TRIM, MEASURED (AC-186). The predecessor of this law was
+# WHAT SETS THE TRIM, MEASURED. The predecessor of this law was
 # `c * T60**k`, fitted on renders whose rooms were all produced by scaling one
 # shoebox — so room size and decay time moved together and either could appear to
 # drive the record. A crossed probe (`scripts/support_law_probe.py`, 21 renders,
@@ -193,7 +193,7 @@ absorption_convention: pre_compensate
 #     0.9022 / 1.2392 / 2.3403 s -- `depth**0.688`. The old law had no depth term,
 #     so it was silently valid at exactly one value of a knob that moves the answer
 #     2.6x across its plausible range. This is also what makes `diffuse_depth`
-#     physically a TIME bound rather than a ray-budget knob (AC-55).
+#     physically a TIME bound rather than a ray-budget knob.
 #   * SURFACE AREA, NOT VOLUME. Adding volume to a depth+surface fit moves its
 #     exponent to +0.067 and the residual not at all; surface alone carries +0.464.
 #     More surface is more reflecting area at a given reflection order.
@@ -233,13 +233,13 @@ predicted_support_fitted_at_ray_budget: 5000
 # settable through `module.cpp`. With the auralizer's FILTER_TAIL_PADDING the
 # native record is at most 3.043 s, so under base.yaml's `ir_duration: 4.25` the
 # trim branch of `_fit_to_window` is UNREACHABLE and `max_discarded_tail_db` /
-# `truncation_qc_flag` are structurally dead here (AC-56). They are live under
+# `truncation_qc_flag` are structurally dead here. They are live under
 # configs/research_i.yaml, whose `ir_duration` is 3.0 s.
 max_ir_length_s: 3.0
 
-# ── AIR ABSORPTION IS REALIZED AT alpha_ISO / 4 (AC-66) ───────────────────────
+# ── AIR ABSORPTION IS REALIZED AT alpha_ISO / 4 ───────────────────────
 #
-# AC-54's domain confusion has a second call site, and pre-compensating alpha at
+# domain confusion has a second call site, and pre-compensating alpha at
 # `createbox` does not reach it. `SoundMedium::getAbsorption` already halves the ISO
 # pressure dB/m to get intensity dB/m (gsSoundMedium.cpp:227), `getAttenuation` then
 # converts with `dbToLinear` = 10^(dB/20) (omScalarMath.h:1935), and the synthesizer
@@ -250,12 +250,12 @@ max_ir_length_s: 3.0
 # (Context.cpp:17) and is not exposed for pre-compensation the way surface alpha is.
 #
 # INERT at the reported bands: alpha_ISO ~ 0.0024 / 0.0041 dB/m at 500 / 1000 Hz,
-# <= 0.4% on T60 in a 60 m^3 room. It does NOT explain AC-54's -5.6% residual.
+# <= 0.4% on T60 in a 60 m^3 room. It does NOT explain -5.6% residual.
 # LIVE above them: `iso_eval_freqs` is a config list, and at 8 kHz the error reaches
 # ~19% of T60 in a small room. 4mV scales with volume while S*alpha scales with
 # surface, so in the largest declared room correct air absorption would DOMINATE the
 # Eyring term at high frequency.
-# ── SYNTHESIS: EARLY-REFLECTION HANDLING (AC-180) ─────────────────────────────
+# ── SYNTHESIS: EARLY-REFLECTION HANDLING ─────────────────────────────
 #
 # Upstream's `generate_ambisonic_ir` takes both of these and defaults them
 # (binding.cpp:284,286,498,500). The worker did not pass either, so the values
@@ -268,7 +268,7 @@ max_ir_length_s: 3.0
 # `precise_early_reflections` on separates paths into early and late by energy and
 # synthesizes the early ones individually instead of onto the shared noise carrier
 # (binding.cpp:357-368,429). That is plausibly MORE faithful — the carrier is what
-# AC-59 measures as moving C50 by ~1 dB — but it is a different renderer, needs its
+# measures as moving C50 by ~1 dB — but it is a different renderer, needs its
 # own cost measurement, and would invalidate every cached render. A change here is
 # a research decision, which is why it is a config key and not a default.
 precise_early_reflections: false

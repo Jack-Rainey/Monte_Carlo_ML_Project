@@ -119,7 +119,7 @@ def _lane_md(lane: dict, cycle: str, worktree: Path, base_branch: str) -> str:
     )
     note = f"\n> {lane['note'].strip()}\n" if lane.get("note") else ""
     # Rule 6. Without a declared block every lane numbers from the ledger's max at
-    # the moment it starts, and cycle 4 proved where that ends: RD-93..RD-100 named
+    # the moment it starts, and that ends with one id block naming
     # FOUR different findings, and one lane's new AC ids landed on live OPEN rows.
     blocks = lane.get("id_block") or {}
     id_block = "\n".join(
@@ -150,7 +150,7 @@ declaration, so an edit here changes what you believe and not what is allowed.
 Any finding you or a reviewer raises on this branch takes its id from that block,
 in your inbox. Do NOT number from the ledger's current maximum: every lane is
 running at once and would pick the same numbers. In cycle 4 they did —
-`RD-93`…`RD-100` ended up naming four different findings, and one lane's new
+a single id block ends up naming several different findings, and one lane's new
 `AC-` ids collided with rows that were live and unrelated. Untangling it needed a
 per-lane, per-class remap of the source tree, and the remap then missed a lane's
 own citations and had to be caught by a reviewer.
@@ -197,7 +197,7 @@ and which gate conditions your rows can lift or unblock.
 Alone, as its own commit. In cycle 5 a lane wrote "timestamped by its commit —
 this is the first commit on the branch" while ONE commit held the
 pre-registration, eight changed files and the results. Git then evidences
-nothing, which is the only thing a pre-registration is for (RD-192, F-138).
+nothing, which is the only thing a pre-registration is for.
 
 ## THE LANE EXIT GATE — you are not done until all six hold
 
@@ -243,7 +243,7 @@ def _inbox_header(lane: dict, cycle: str) -> str:
     Rules 1 and 3 are enforced by `lane_guard.py`, the partition by
     `test_lane_partition.py`, evidence isolation by
     `tests/test_source_tree_isolation.py`. Rule 5 — a lane-branch review never
-    counts as a clean pass — had nothing (RD-85), and it is the one protecting
+    counts as a clean pass — had nothing, and it is the one protecting
     the definition of done: a lane that runs `falsifier`, gets zero findings and
     writes "clean" here produces exactly what an integrator misreads as a pass.
 
@@ -287,7 +287,7 @@ indistinguishable from a row nobody read.
 
 - **Give every finding a FILE ANCHOR**, as `path` or `path:line`. The integrator's
   fold copies it into the ledger's anchor column, and that column is what assigns
-  the row to a lane next cycle AND what the RD-33a gate counts. Cycle 4 shipped
+  the row to a lane next cycle AND what the dataset-render gate counts. A cycle shipped
   116 rows anchored "see inbox" and made the gate's own lift condition
   uncomputable.
 - **Number new findings from YOUR id block only** (it is in your `LANE.md`). Every

@@ -17,7 +17,6 @@ from .loss import build_criterion
 
 
 def run_train(config: Config, run_dir: Path, ctx: RunContext) -> None:
-    # RD-20: the runtime context, not a bare verbosity — see `amcd.runtime.RunContext`.
     verbosity = ctx.verbosity
     preprocessed_dir = run_dir / "preprocessed"
     checkpoint_dir = run_dir / "checkpoints"
@@ -33,7 +32,7 @@ def run_train(config: Config, run_dir: Path, ctx: RunContext) -> None:
 
     # Split names are role-derived from config (never hardcoded). Cardinality is
     # guaranteed at config load (REQUIRED_ROLE_COUNTS), so this cannot silently take
-    # the first of two `valid` splits or raise a bare StopIteration for zero (F-44).
+    # the first of two `valid` splits or raise a bare StopIteration for zero.
     train_split = config.the_split_with_role("train")
     valid_split = config.the_split_with_role("valid")
 
@@ -50,7 +49,7 @@ def run_train(config: Config, run_dir: Path, ctx: RunContext) -> None:
 
     # One selector, shared with `infer` and with the `versions.json` stamp, so the
     # device a checkpoint was trained on cannot differ from the device recorded
-    # for the run (F-74).
+    # for the run.
     device = select_device()
     emit(verbosity, "metrics", f"  Device: {device}")
 
@@ -122,8 +121,8 @@ def run_train(config: Config, run_dir: Path, ctx: RunContext) -> None:
                 f"train={train_loss:.4f}  valid={valid_loss:.4f}",
             )
 
-    # Per-epoch loss curve: observability only (nothing downstream reads it,
-    # F-23) — checkpoint selection above already consumed the losses live.
+    # Per-epoch loss curve: observability only — nothing downstream reads it, and
+    # checkpoint selection above already consumed the losses live.
     if verbosity.saves("metrics"):
         log_path = checkpoint_dir / "train_log.csv"
         with open(log_path, "w", newline="") as f:

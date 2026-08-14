@@ -4,10 +4,9 @@ Every eval metric is expressed as a `MetricTriple` — the baseline (low-ray)
 value, the model's value, the high-ray reference — plus the metric's declared
 improvement `kind`. The eval stage derives the two report quantities uniformly
 from the triple, so the "improved" flag is ALWAYS per-metric (it compares each
-metric's own legs) and can never be borrowed from another metric — the F-07
-misattribution this replaces.
+metric's own legs) and can never be borrowed from another metric.
 
-`kind` is the explicit contract the eval/stats spine branches on (F-20). The
+`kind` is the explicit contract the eval/stats spine branches on. The
 spine previously ASSUMED every metric was match-reference, which silently
 unscored any metric whose reference leg is unreachable under that framing
 (SNR of the high-ray reference against itself is +∞):
@@ -28,9 +27,9 @@ design, not dead generality.
 `improved` is `None` (not `False`) whenever a leg the kind relies on is NaN,
 i.e. improvement is *undefined* for that scene/metric — e.g. the room-acoustic
 artifacts-absent case. `stats` counts `n_improved` and the pct denominator over
-the SAME non-None population (fixes F-08's >100% pct). Every such NaN leg is
-logged with a reason to `metrics/drops.csv` by the evaluator (F-21 — no silent
-exclusion).
+the SAME non-None population, so the percentage cannot exceed 100. Every such
+NaN leg is logged with a reason to `metrics/drops.csv` by the evaluator — no
+silent exclusion.
 """
 from __future__ import annotations
 
@@ -41,7 +40,7 @@ METRIC_KINDS = ("match_reference", "maximize", "minimize")
 
 # Legs a kind's improvement actually consumes. The evaluator uses this to tell a
 # structurally-absent leg (e.g. `high` under maximize — never a drop) from a
-# dropped one (NaN in a consumed leg — must be logged with a reason, F-21).
+# dropped one (NaN in a consumed leg — must be logged with a reason).
 KIND_LEGS: dict[str, tuple[str, ...]] = {
     "match_reference": ("low", "pred", "high"),
     "maximize": ("low", "pred"),
@@ -57,9 +56,9 @@ class MetricTriple(NamedTuple):
     reference (NaN when the kind does not consume it). kind: one of
     `METRIC_KINDS`, declared HERE at the metric's definition site — required, no
     default, so a producer can never fall back to an implicit match-reference
-    assumption (F-20). `unit` is declared at the same place and for the same
+    assumption. `unit` is declared at the same place and for the same
     reason. NaN in a consumed leg means that leg is unavailable →
-    improvement is undefined for the row and the evaluator logs the drop (F-21).
+    improvement is undefined for the row and the evaluator logs the drop.
     """
 
     low: float
@@ -67,20 +66,19 @@ class MetricTriple(NamedTuple):
     high: float
     kind: str
     #: The metric's physical unit, declared HERE at the producer for the same
-    #: reason `kind` is. The reported table used to hold its own `_METRIC_UNITS`
-    #: map — a second declaration, asserting what another module's numbers mean
-    #: with nothing binding the two, so a metric could change domain and the Unit
-    #: column would keep printing the old one (RD-201/AC-127). `""` is legal and
-    #: means dimensionless; a unit that depends on the representation's operand
-    #: domain (an MSE) is rendered by the reporting layer from the stamped
-    #: `value_domain`, which only that layer knows.
+    #: reason `kind` is: a second declaration in the reporting layer would assert
+    #: what another module's numbers mean with nothing binding the two, so a
+    #: metric could change domain while the Unit column kept printing the old one.
+    #: `""` is legal and means dimensionless; a unit that depends on the
+    #: representation's operand domain (an MSE) is rendered by the reporting layer
+    #: from the stamped `value_domain`, which only that layer knows.
     unit: str
 
 
 class MetricDrop(NamedTuple):
     """One unscored (or partially computed) metric leg: which metric, which leg,
     why. The evaluator adds (scene, split) and writes the full record to
-    `metrics/drops.csv` — nothing leaves a result silently (F-21)."""
+    `metrics/drops.csv` — nothing leaves a result silently."""
 
     metric: str
     leg: str

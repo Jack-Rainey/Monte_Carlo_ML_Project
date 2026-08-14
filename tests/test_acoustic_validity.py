@@ -1,15 +1,14 @@
 """Validity of the scene-characterization estimates, and of the record they assume.
 
-Ledger rows AC-21 (diffuse-field validity) and AC-22 (record length vs T60).
+Two disclosures, neither of which changes a formula. Both are about a number
+being reported without the one fact a reader needs to interpret it:
 
-Neither changes a formula. Both are about a number being reported without the one
-fact a reader needs to interpret it:
-
-  * AC-21 — `placement_report.json` reports Sabine/Eyring T60, critical distance
-    and DRR for `test_material_shift`, a split whose alpha median is 0.894. The
-    diffuse-field premise behind all four has failed for 100 % of it. A +4.9 dB DRR
-    from a model outside its domain is an extrapolation, and nothing said so.
-  * AC-22 — nothing checked that `ir_duration` could support the decay the declared
+  * DIFFUSE-FIELD VALIDITY — `placement_report.json` reports Sabine/Eyring T60,
+    critical distance and DRR for `test_material_shift`, a split whose alpha
+    median is 0.894, where the diffuse-field premise behind all four has failed
+    for 100 % of it. A +4.9 dB DRR from a model outside its domain is an
+    extrapolation and must be labelled as one.
+  * RECORD LENGTH — `ir_duration` must be able to support the decay the declared
     ranges admit. A T30 fitted over a truncated record measures the truncation.
 """
 import json
@@ -32,7 +31,7 @@ _RI = (Path("configs/base.yaml"), Path("configs/research_i.yaml"))
 
 
 class TestDeclaredSupportCorner:
-    """AC-22's disclosure half: computed, recorded, and never used as a gate."""
+    """Disclosure half: computed, recorded, and never used as a gate."""
 
     def test_base_corner_is_the_largest_shoebox_at_lowest_absorption(self) -> None:
         corner = Config.load(_BASE).worst_case_t60()
@@ -63,13 +62,13 @@ class TestDeclaredSupportCorner:
         assert resolved["worst_case_t60"]["t60_sabine_s"] == pytest.approx(4.20, abs=0.01)
 
     def test_an_uncovered_corner_alone_does_not_fail_a_config(self) -> None:
-        """RD-56: the corner is two independent extremes with ~0 draw probability.
+        """The corner is two independent extremes with ~0 draw probability.
         Gating on it would reject configs whose realized scenes are all fine."""
         Config.load(*_RI)  # loads despite covered_by_record False
 
 
 class TestRealizedRecordLengthGate:
-    """AC-22's gate half: the population the metrics are actually computed over."""
+    """Gate half: the population the metrics are actually computed over."""
 
     def test_base_discloses_its_censoring_rather_than_refusing(self, tmp_path: Path) -> None:
         """The user decision of 2026-08-12 (design_spec 11.2), enforced.
@@ -78,9 +77,9 @@ class TestRealizedRecordLengthGate:
         declared population unmeasurable. That is accepted as a limitation OF THE
         RENDERER, so the gate does not abort — it bounds the censoring RATE, and the
         censoring itself is disclosed per split and carried by the estimator's own
-        unscored-with-a-reason path (AC-176).
+        unscored-with-a-reason path.
 
-        Measured 23/600 = 3.83 % under the corrected support law (AC-186), against a
+        Measured 23/600 = 3.83 % under the corrected support law, against a
         declared tolerance of 0.05. The predecessor law gave 17/600 = 2.8 %; it was
         fitted on rooms that were all scalings of one shoebox and had the wrong
         independent variable, so it under-counted the censoring it exists to bound.
@@ -115,7 +114,7 @@ class TestRealizedRecordLengthGate:
         """RI never named `diffuse_depth`, so it ran pygsound's default of 100.
 
         That default is not neutral: it is the reflection-order bound, and it is
-        what actually sets the record length (AC-186 — realized support scales as
+        what actually sets the record length (realized support scales as
         `depth**0.688` and does not depend on T60 at all). At 100 it truncates
         5.56 % of RI's own declared population below ISO 3382-1's 45 dB for a T30
         fit, above RI's declared 0.05 tolerance, so `gen-scenes` refused outright.
@@ -184,7 +183,7 @@ class TestRealizedRecordLengthGate:
 
 
 class TestDiffuseFieldValidityFlags:
-    """AC-21: no formula changes, no scene dropped — the estimates are LABELLED."""
+    """No formula changes, no scene dropped — the estimates are LABELLED."""
 
     @staticmethod
     def _acoustics(alpha: float, dims=(10.0, 8.0, 3.5), distance=3.0, **kw):
@@ -230,7 +229,7 @@ class TestDiffuseFieldValidityFlags:
 
 
 class TestReceiverInsideCriticalDistance:
-    """AC-29: the strictest per-scene condition, already computed but never flagged.
+    """The strictest per-scene condition, already computed but never flagged.
 
     Inside r_c the receiver sits in the DIRECT field, so the diffuse-field DRR
     being reported has no reverberant field to divide by. `d_over_rc` was already
@@ -268,7 +267,7 @@ class TestReceiverInsideCriticalDistance:
 
 
 class TestNonEnclosureGeometryIsNotCharacterized:
-    """RD-64: the closed-box spine assumed a property that only happens to hold
+    """The closed-box spine assumed a property that only happens to hold
     today. The roadmap's outdoor / partially-open scenes (paper §6) would have been
     admitted with meaningless Sabine numbers in the canonical report."""
 
@@ -293,7 +292,7 @@ class TestNonEnclosureGeometryIsNotCharacterized:
         for key in ("t60_sabine_s", "critical_distance_m", "drr_db", "d_over_rc"):
             assert key not in room, (
                 f"{key} was emitted for a non-enclosure — a closed-box number in a "
-                f"canonical artifact is exactly what RD-64 is about"
+                f"canonical artifact is exactly what is about"
             )
         assert "not a closed enclosure" in room["uncharacterized_reason"]
 
@@ -308,17 +307,17 @@ class TestNonEnclosureGeometryIsNotCharacterized:
 
 
 class TestValidityReachesTheReport:
-    """AC-21's numbers, on the config the E1 write-up will actually characterize."""
+    """Numbers, on the config the E1 write-up will actually characterize."""
 
     @pytest.fixture(scope="class")
     @classmethod
     def ri_report(cls, tmp_path_factory) -> dict:
         """RI's scenes, with the RECORD-LENGTH gate relaxed so it does not abort.
 
-        These tests are about the DIFFUSE-FIELD block (AC-21). RI's record-length
+        These tests are about the DIFFUSE-FIELD block. RI's record-length
         gate now refuses that config outright — correctly, see
         `TestRealizedRecordLengthGate` — and letting that abort here would silently
-        stop AC-21 from being tested at all. The relaxation is scoped to this
+        stop the validity block from being tested at all. The relaxation is scoped to this
         fixture and changes no diffuse-field quantity: the flags below are
         functions of alpha and geometry, not of record length.
         """
@@ -355,7 +354,7 @@ class TestValidityReachesTheReport:
 
 
 class TestRealizedRecordSupport:
-    """AC-186: the record gsound produces is set by REFLECTION DEPTH and SURFACE
+    """The record gsound produces is set by REFLECTION DEPTH and SURFACE
     AREA, and not at all by the decay.
 
     Pinned against `experiments/support_law/`, a crossed probe built to separate
@@ -414,7 +413,7 @@ class TestRealizedRecordSupport:
             )
 
     def test_the_record_tracks_reflection_depth(self, probe: list[dict]) -> None:
-        """`diffuse_depth` is a TIME bound (AC-55), which is why it is in the law."""
+        """`diffuse_depth` is a TIME bound, which is why it is in the law."""
         depths = sorted((r for r in probe if r["group"] == "depth"),
                         key=lambda r: r["diffuse_depth"])
         assert len(depths) >= 3, "the depth sweep is missing from the probe"
@@ -453,12 +452,12 @@ class TestRealizedRecordSupport:
 
     def test_the_law_states_the_budget_it_was_fitted_at(self, declared: dict) -> None:
         """Realized support rises with the ray budget, so a coefficient without a
-        declared operating point carries an implicit one (AC-185)."""
+        declared operating point carries an implicit one."""
         assert declared["budget"] > 0
 
 
 class TestEvalBandsAgainstTheBackend:
-    """AC-66: `configs/simulators/gsound_sir.yaml` stated that an eval band above
+    """`configs/simulators/gsound_sir.yaml` stated that an eval band above
     `air_absorption_max_eval_freq_hz` is "REFUSED", and nothing refused it.
 
     The backend attenuates air absorption at a quarter of the ISO value — a
@@ -494,7 +493,7 @@ class TestEvalBandsAgainstTheBackend:
 
 
 class TestOneAbsorptionClip:
-    """AC-41: the room the report DESCRIBES and the room the scaffold RENDERS must
+    """The room the report DESCRIBES and the room the scaffold RENDERS must
     be the same room.
 
     Both clip absorption before their closed forms — the endpoints are singular,
