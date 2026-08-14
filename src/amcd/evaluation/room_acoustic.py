@@ -567,10 +567,30 @@ def _shared_truncation_per_band(
       and seed — so the index still moves with the budget, by a different mechanism
       than the one this machinery was originally written against.
 
-    Sharing the window removes the difference from the PAIRED comparison either way.
-    What it does not remove is that a reported ABSOLUTE is a function of the ray
-    budget — and EXTRAPOLATED-TAIL COMPENSATION DOES NOT FIX THAT (F-89/RD-55,
-    refuting this row's own earlier proposal).
+    HOW MUCH SHARING ACTUALLY BUYS, ON REAL RECORDS (RD-52). This machinery could
+    only ever be exercised synthetically before, because under `dry_run` the
+    scaffold fills its whole window and both legs stop at the same sample — the gap
+    is 0 by construction. On the nine retained real renders
+    (`scripts/shared_window_probe.py`) the per-leg indices differ by **77 ms on
+    average and 215 ms at worst**, which is the defect this exists for. What sharing
+    then removes from the paired difference is small:
+
+        |low - high|      per-leg window          shared window
+        T30               20.22 % mean            20.02 % mean
+        C50                5.52 dB mean            5.53 dB mean
+
+    That is not a reason to stop sharing — integrating two legs over different
+    limits is indefensible whatever it measures, and the guard costs nothing. It is
+    a correction to the claim that USED to stand here, that sharing "removes the
+    difference from the paired comparison". It removes the part of the difference
+    the window causes, and on this backend that part is ~1 % of it: T30 is fitted
+    over the -5 to -35 dB span of the EDR, and an index landing beyond that span
+    barely moves the fit. The rest of the difference is not a windowing artifact at
+    all — see below.
+
+    A reported ABSOLUTE is likewise a function of the ray budget, and
+    EXTRAPOLATED-TAIL COMPENSATION DOES NOT FIX THAT (F-89/RD-55, refuting this
+    row's own earlier proposal).
 
     The proposal assumed the defect is "the integral stopped where the record
     stopped", which ISO 3382-1's modelled-tail treatment is exactly the remedy for.
