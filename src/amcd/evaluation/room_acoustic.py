@@ -568,9 +568,38 @@ def _shared_truncation_per_band(
       than the one this machinery was originally written against.
 
     Sharing the window removes the difference from the PAIRED comparison either way.
-    What it does not remove is that a reported ABSOLUTE is a function of the low
-    leg's budget; that is the open residual, and it needs extrapolated-tail
-    compensation rather than a shared window.
+    What it does not remove is that a reported ABSOLUTE is a function of the ray
+    budget — and EXTRAPOLATED-TAIL COMPENSATION DOES NOT FIX THAT (F-89/RD-55,
+    refuting this row's own earlier proposal).
+
+    The proposal assumed the defect is "the integral stopped where the record
+    stopped", which ISO 3382-1's modelled-tail treatment is exactly the remedy for.
+    Implemented and measured on the nine retained real renders
+    (`experiments/support_law/irs/`, each present at 5,000 and 200,000 rays):
+
+        |T30 low - T30 high| / T30 high     mean      worst    over the 5 % JND
+        own window, no compensation        20.22 %   62.27 %      14/18
+        own window, compensated            23.01 %   62.27 %      15/18
+
+    It makes it WORSE. The implementation is not what is wrong: on a synthetic
+    exponential decay truncated to 45 dB of range it cuts the truncation bias from
+    -0.83 % to -0.01 %, which is precisely what it is for.
+
+    THE MECHANISM IS NOT THE INTEGRATION LIMIT. Fitting BOTH legs over an IDENTICAL
+    span — the shorter record's own length, so record length cannot enter — the
+    fitted late slopes still differ by **29.59 % on average and 88.62 % at worst**
+    over the same 18 cells. The low-ray leg does not hold a SHORTER version of the
+    same decay; it holds a DIFFERENT decay, because 5,000 rays do not sample the
+    late field densely enough to reproduce it. No treatment of where the integral
+    ends can reconcile two different decays, and that is why compensation is not
+    shipped: it would change every reported number for a benefit this project's own
+    data says it does not deliver.
+
+    What follows is a statement about the numbers, not a fix to make: a LOW-leg (and
+    therefore a `pred`) ABSOLUTE is not a budget-independent room-acoustic quantity
+    at any window. The HIGH leg is the one an absolute may be quoted from, and its
+    own adequacy is AC-187's question — measured converged for T30, not for C50.
+    `reporting/tables.py` carries both caveats.
 
     The index is the MINIMUM over the reference legs, so no leg is ever integrated
     into its own noise floor. Where the shared window is too short to support a
