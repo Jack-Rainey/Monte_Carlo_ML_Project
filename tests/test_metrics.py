@@ -2358,3 +2358,58 @@ class TestTheDecayRangeEstimatorIsKneeIndependent:
         assert "fit." in src, "the estimator must read its window from config"
         assert _FIT.window == tuple(_FIT.window)
         assert 0.0 <= _FIT.window[0] < _FIT.window[1] <= 1.0
+
+
+class TestTheSharedWindowCannotBreakSilently:
+    """A paired comparison's legs must integrate over the same span, and the
+    reason string must not claim they did when they did not.
+
+    The shared index is derived from the PHYSICAL legs, counted from each leg's
+    own onset. `pred`'s onset can land later, leaving it a shorter post-onset
+    record, and the clamp then quietly integrates it over less while the note
+    still reports one shared window. Unreachable at today's window lengths, which
+    is exactly why it needs a test rather than a comment.
+    """
+
+    def test_a_clamped_leg_says_its_window_was_not_shared(self) -> None:
+        from amcd.evaluation.room_acoustic import _iso3382_band_metrics
+
+        rng = np.random.default_rng(0)
+        n = int(0.30 * _SR)
+        t = np.arange(n) / _SR
+        ir = (rng.standard_normal(n) * 10.0 ** (-3.0 * t / 0.4)).astype(np.float32)
+
+        # A shared index LONGER than this leg's record: the paired case where the
+        # reference leg's post-onset span exceeds this one's.
+        _, reasons, _ = _iso3382_band_metrics(
+            ir, 1000.0, _SR,
+            band_resolvability_margin=_NO_FLOOR,
+            min_decay_range_db=_NO_SNR_BOUND, decay_range_fit=_FIT,
+            octave_filter_order=_ORDER,
+            trunc_idx=n * 2, trunc_source="high",
+        )
+        notes = " ".join(r for r in reasons.values() if r)
+        assert "window not shared" in notes, (
+            f"the leg was integrated over a shorter span than the high leg and "
+            f"said nothing: {notes!r}"
+        )
+
+    def test_an_unclamped_leg_still_reports_the_shared_window(self) -> None:
+        """The disclosure must not fire on the ordinary case, or it stops meaning
+        anything."""
+        from amcd.evaluation.room_acoustic import _iso3382_band_metrics
+
+        rng = np.random.default_rng(0)
+        n = int(0.30 * _SR)
+        t = np.arange(n) / _SR
+        ir = (rng.standard_normal(n) * 10.0 ** (-3.0 * t / 0.4)).astype(np.float32)
+
+        _, reasons, _ = _iso3382_band_metrics(
+            ir, 1000.0, _SR,
+            band_resolvability_margin=_NO_FLOOR,
+            min_decay_range_db={"T30": 999.0, "EDT": 999.0},  # force a reason
+            decay_range_fit=_FIT, octave_filter_order=_ORDER,
+            trunc_idx=n // 2, trunc_source="high",
+        )
+        notes = " ".join(r for r in reasons.values() if r)
+        assert "window not shared" not in notes

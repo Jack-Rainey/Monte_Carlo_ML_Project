@@ -684,11 +684,39 @@ def _iso3382_band_metrics(
     if trunc_idx is None:
         trunc_idx = _lundeby_truncate(energy, sample_rate)
         trunc_source = "self"
+    # THE CLAMP CAN BREAK THE GUARANTEE THE NOTE CLAIMS. The shared index comes
+    # from the PHYSICAL legs, counted from each leg's own onset; `pred`'s onset can
+    # land up to `onset_tolerance_samples` later, leaving it a shorter post-onset
+    # record. Clamping then integrates this leg over a SHORTER window than the
+    # others while the note below still reports one shared window — a paired
+    # comparison whose legs saw different spans, described as if they had not.
+    #
+    # Unreachable at today's windows (dry run 0.210 s into a 0.250 s record; real
+    # renders 2.02 s into 4.25 s), which is why it is a disclosure rather than a
+    # refusal: it must not go silent on a longer-decay population.
+    clamped_from = trunc_idx if trunc_idx > len(energy) else None
     trunc_idx = min(trunc_idx, len(energy))
     window_note = (
         "" if trunc_source in (None, "self")
         else f" [shared integration window, set by the {trunc_source} leg]"
     )
+    if clamped_from is not None:
+        # UNSCORED, not silently shortened. Every metric here is a paired quantity
+        # whose meaning depends on both legs seeing the same span; integrating this
+        # one over less and reporting it beside the others would compare two
+        # different measurements. `(unit, reason)` rather than a raise: it is a
+        # property of one band of one scene, and the drop log is where this project
+        # puts those.
+        reason = (
+            f"window not shared: the {trunc_source} leg set {clamped_from} samples "
+            f"but this leg holds only {len(energy)} after its own onset, so a "
+            f"paired comparison here would span different records"
+        )
+        return (
+            {m: float("nan") for m in all_metrics},
+            {m: reason for m in all_metrics},
+            {},
+        )
     energy_trunc = energy[:trunc_idx]
 
     if len(energy_trunc) < 2:
